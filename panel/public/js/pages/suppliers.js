@@ -85,20 +85,50 @@ export function SuppliersPage() {
 }
 const KIND = { delivery: 'WZ / поставка', invoice: 'Фактура', email: 'Из почты', clip: 'С сайта хуртовни', paste: 'Вставлено', file: 'Файл', manual: 'Вручную' };
 
+/** Связь с расширением Chrome: connect.js на странице CRM отвечает на ping и принимает ключ */
+function useExtension() {
+  const [ext, setExt] = useState(() => (document.documentElement.dataset.pulsecarExt ? { version: document.documentElement.dataset.pulsecarExt } : null));
+  useEffect(() => {
+    const on = (e) => {
+      if (e.source !== window || e.data?.source !== 'pulsecar-ext') return;
+      if (e.data.type === 'hello') setExt((x) => ({ ...x, ...e.data }));
+      if (e.data.type === 'connected') {
+        setExt((x) => ({ ...x, connected: e.data.ok, user: e.data.user }));
+        e.data.ok ? toast(`Расширение подключено: ${e.data.user}`) : toast(e.data.error || 'Не удалось подключить расширение', 'error');
+      }
+    };
+    window.addEventListener('message', on);
+    window.postMessage({ source: 'pulsecar-crm', type: 'ping' }, location.origin);
+    return () => window.removeEventListener('message', on);
+  }, []);
+  return ext;
+}
+
 function Extension() {
   const [tok, setTok] = useState(null);
+  const [latest, setLatest] = useState(null);
+  const ext = useExtension();
+  useEffect(() => { api('ext/version').then((r) => setLatest(r.version)).catch(() => {}); }, []);
+  const outdated = ext?.version && latest && ext.version.localeCompare(latest, undefined, { numeric: true }) < 0;
+  const connect = async () => {
+    const r = await act(() => api('me/ext-token', { body: {} }));
+    window.postMessage({ source: 'pulsecar-crm', type: 'connect', token: r.token }, location.origin);
+  };
   return html`<div class="card stack" style="border-color:rgba(27,243,114,.45)">
-    <h2>Расширение Chrome «Pulsecar» — кнопка прямо в хуртовне</h2>
+    <div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0">Расширение Chrome «Pulsecar» — кнопка прямо в хуртовне</h2>
+      <span class="badge" style=${'border-color:' + (ext?.connected ? 'var(--accent)' : ext ? 'var(--warn)' : 'var(--border)') + ';color:' + (ext?.connected ? 'var(--accent)' : ext ? 'var(--warn)' : 'var(--muted)')}>${!ext ? 'не установлено в этом браузере' : ext.connected ? `подключено · ${ext.user} · v${ext.version}` : `установлено v${ext.version} · не подключено`}</span></div>
     <div class="grid g2">
       <div class="stack" style="gap:6px">
-        <div class="small">У каждой детали в каталоге Inter Cars появляется кнопка <b>Pulsecar</b> рядом с «Pobierz». Нажали — открывается окно: <b>создать товар в картотеке, оприходовать на склад, добавить в заказ или в смету</b>. Цена закупки — ваша цена в Inter Cars, цена продажи — рекомендованная розничная. На сайтах других хуртовен — кнопка в углу: забирает корзину, WZ или выделенные строки.</div>
-        <ol class="small muted" style="margin:0;padding-left:18px"><li>Скачайте архив и распакуйте.</li><li>Chrome → <code>chrome://extensions</code> → включите «Режим разработчика» → «Загрузить распакованное» → выберите папку <code>pulsecar-extension</code>.</li><li>В открывшихся настройках вставьте ключ (кнопка справа).</li></ol>
-        <div class="row"><a class="btn primary" href="/pulsecar-extension.zip" download>Скачать расширение</a></div></div>
-      <div class="stack" style="gap:6px"><b class="small">Ключ для расширения (свой у каждого сотрудника)</b>
+        <div class="small">У каждой детали в каталоге Inter Cars — кнопка <b>Pulsecar</b> рядом с «Do koszyka»: <b>товар в картотеку, приход на склад, в заказ или в смету</b>. Цена закупки — ваша цена, цена продажи — рекомендованная розничная хуртовни. Кнопка в углу на сайтах хуртовен забирает <b>корзину, фактуру или WZ</b> целиком: документ сохраняется в CRM (без дублей по номеру) и сразу приходуется на склад или уходит в заказ. Хуртовни нет в списке — включите кнопку на её сайте из окна расширения.</div>
+        ${!ext ? html`<ol class="small muted" style="margin:0;padding-left:18px"><li>Скачайте архив и распакуйте.</li><li>Chrome → <code>chrome://extensions</code> → «Режим разработчика» → «Загрузить распакованное» → папка <code>pulsecar-extension</code>.</li><li>Обновите эту страницу и нажмите «Подключить расширение».</li></ol>` : ''}
+        ${outdated ? html`<div class="small" style="color:var(--warn)">Есть новая версия ${latest}: скачайте архив, распакуйте поверх старой папки и нажмите ⟳ у расширения в <code>chrome://extensions</code>.</div>` : ''}
+        <div class="row"><a class=${'btn ' + (ext && !outdated ? '' : 'primary')} href="/pulsecar-extension.zip" download>Скачать расширение${latest ? ' v' + latest : ''}</a>
+          ${ext ? html`<button class="btn primary" onClick=${connect}>${ext.connected ? 'Переподключить' : 'Подключить расширение'}</button>` : ''}</div></div>
+      <div class="stack" style="gap:6px"><b class="small">Ключ вручную (если расширение в другом браузере)</b>
         ${tok ? html`<pre class="code">${tok}</pre><div class="row"><button class="btn sm" onClick=${() => navigator.clipboard?.writeText(tok).then(() => toast('Ключ скопирован'))}>Копировать</button><span class="muted small">Показывается один раз. Права — как у вашей учётной записи.</span></div>`
           : html`<div class="row"><button class="btn" onClick=${async () => { const r = await act(() => api('me/ext-token', { body: {} })); setTok(r.token); }}>Получить ключ</button>
-            <${ConfirmButton} cls="btn ghost sm" label="Отключить старый ключ?" onConfirm=${async () => { await act(() => api('me/ext-token', { method: 'DELETE' }), 'Ключ отключён'); }}>Отключить ключ</${ConfirmButton}></div>
-            <div class="muted small">Новый ключ заменяет старый — старое расширение перестанет работать, пока не вставите новый.</div>`}</div>
+            <${ConfirmButton} cls="btn ghost sm" label="Отключить ключ расширения?" onConfirm=${async () => { await act(() => api('me/ext-token', { method: 'DELETE' }), 'Ключ отключён'); }}>Отключить ключ</${ConfirmButton}></div>
+            <div class="muted small">У каждого сотрудника свой ключ. Новый ключ заменяет старый — расширение с прежним ключом перестанет работать.</div>`}</div>
     </div></div>`;
 }
 

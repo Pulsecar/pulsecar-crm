@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Pulsecar</title>
+<style>
+  :root{--bg:#fff;--ink:#1b1c1f;--muted:#6b6e75;--line:#e6e6e9;--soft:#f6f7f8;--acc:#0a8f45;--dot:#1bf372;--warn:#8a5a00;--warnbg:#fff6df;--bad:#c62f2f;--badbg:#fdecec}
+  @media (prefers-color-scheme:dark){:root{--bg:#17181b;--ink:#e8e9ec;--muted:#9a9ca3;--line:#2a2c31;--soft:#1f2125;--acc:#1bf372;--warn:#f0c15a;--warnbg:#2c2615;--bad:#ff7b7b;--badbg:#2e1a1a}}
+  *{box-sizing:border-box}
+  body{margin:0;width:340px;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  header img{width:28px;height:28px}header b{font-size:17px}
+  #chip{margin-left:auto;font-size:12px;font-weight:600;border-radius:999px;padding:3px 9px;background:var(--soft);color:var(--muted);white-space:nowrap}
+  #chip.ok{color:var(--acc)}#chip.warn{background:var(--warnbg);color:var(--warn)}#chip.bad{background:var(--badbg);color:var(--bad)}
+  section{padding:12px 16px;border-bottom:1px solid var(--line)}
+  h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+  dl{margin:0;display:grid;gap:7px}dt{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}dd{margin:0;font-variant-numeric:tabular-nums;word-break:break-all}
+  .msg{border-radius:8px;padding:8px 10px;font-size:13px;margin-bottom:8px}.msg.warn{background:var(--warnbg);color:var(--warn)}.msg.bad{background:var(--badbg);color:var(--bad)}
+  .tab{display:flex;align-items:center;gap:8px;margin-bottom:10px}.tab i{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}.tab i.on{background:var(--dot)}
+  .btns{display:grid;gap:8px}
+  button,a.btn{font:600 13px system-ui,sans-serif;border-radius:8px;padding:9px 12px;cursor:pointer;border:1px solid var(--line);background:var(--soft);color:var(--ink);text-align:center;text-decoration:none}
+  button.p{background:#111;color:#fff;border-color:#111;display:flex;align-items:center;justify-content:center;gap:8px}button.p::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--dot)}
+  button:focus-visible,a.btn:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+  button:disabled{opacity:.5;cursor:default}
+  footer{display:flex;gap:8px;padding:12px 16px}footer>*{flex:1}
+</style></head><body>
+<header><img src="icons/icon48.png" alt=""><b>Pulsecar</b><span id="chip">…</span></header>
+<section id="tabbox">
+  <div class="tab"><i id="tabdot"></i><span id="tabname">Проверяю вкладку…</span></div>
+  <div class="btns">
+    <button class="p" id="capture">Забрать позиции с этой страницы</button>
+    <button id="site" hidden></button>
+  </div>
+</section>
+<section>
+  <h2>О расширении</h2>
+  <div id="note"></div>
+  <dl>
+    <div><dt>Версия расширения</dt><dd id="v">—</dd></div>
+    <div><dt>Последняя версия</dt><dd id="latest">—</dd></div>
+    <div><dt>Дата последней проверки</dt><dd id="checked">—</dd></div>
+    <div><dt>Адрес CRM</dt><dd id="panel">—</dd></div>
+    <div><dt>Сотрудник</dt><dd id="user">—</dd></div>
+    <div><dt>Сервис</dt><dd id="company">—</dd></div>
+  </dl>
+</section>
+<footer><button id="open">Открыть CRM</button><button id="recheck">Проверить</button><button id="opts">Настройки</button></footer>
+<script src="popup.js"></script>
+</body></html>

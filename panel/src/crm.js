@@ -1,6 +1,7 @@
 // API панели panel.pulsecar.tech (CRM для сотрудников)
 import express from 'express';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import multer from 'multer';
 import { all, one, run, tx, insert, update, log, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
@@ -803,10 +804,26 @@ crm.post('/me/ext-token', (req, res) => {
   res.json({ token, panel: config.publicUrl });
 });
 crm.delete('/me/ext-token', (req, res) => { const s = who(req); run('UPDATE staff SET ext_token = NULL WHERE id = ?', s.id); res.json({ ok: true }); });
+// версия расширения, которую раздаёт CRM (файл пишет tools/pack-extension.py вместе с архивом)
+let extInfo = { at: 0 };
+function extLatest() {
+  if (Date.now() - extInfo.at > 60_000) {
+    try { extInfo = { ...JSON.parse(fs.readFileSync(new URL('../public/pulsecar-extension.json', import.meta.url), 'utf8')), at: Date.now() }; }
+    catch { extInfo = { version: null, at: Date.now() }; }
+  }
+  return extInfo.version;
+}
+/** Без входа: какая версия расширения последняя (окно расширения проверяет обновления) */
+crm.get('/ext/version', (_req, res) => res.json({ version: extLatest(), download: '/pulsecar-extension.zip' }));
 crm.get('/ext/hello', (req, res) => {
   const s = who(req);
   const P = permsOf(s);
-  res.json({ name: s.name, brand: getSetting('company_brand', 'Pulsecar'), can: { stock: P['stock.docs'] || P['suppliers.receive'], product: P['products.create'], order: P['orders.jobs'], quote: P['quotes.manage'] }, markup: Number(getSetting('default_markup', '40')) || 0 });
+  res.json({
+    name: s.name, role: s.role, brand: getSetting('company_brand', 'Pulsecar'), company: getSetting('company_name', ''), nip: getSetting('company_nip', ''),
+    latest: extLatest(), panel: config.publicUrl,
+    can: { stock: P['stock.docs'] || P['suppliers.receive'], product: P['products.create'], order: P['orders.jobs'], quote: P['quotes.manage'], docs: P['suppliers.receive'] || P['stock.docs'] },
+    markup: Number(getSetting('default_markup', '40')) || 0,
+  });
 });
 /** Открытые заказы и сметы для выпадающих списков расширения */
 crm.get('/ext/orders', (req, res) => {
@@ -882,6 +899,52 @@ crm.post('/ext/pick', (req, res) => {
     }
   });
   res.json({ ok: true, ...done });
+});
+
+/** Документ со страницы хуртовни (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/смету */
+crm.post('/ext/doc', (req, res) => {
+  const s = who(req, 'products.view');
+  const P = permsOf(s);
+  const b = req.body || {};
+  const KINDS = { invoice: 'Фактура', wz: 'WZ', cart: 'Корзина', order: 'Заказ у поставщика' };
+  const kind = KINDS[b.kind] ? b.kind : 'invoice';
+  if (!(P['suppliers.receive'] || P['stock.docs'])) throw new HttpError(403, 'Нет права принимать документы поставщиков');
+  if (b.receive && !P['suppliers.receive']) throw new HttpError(403, 'Нет права на приход на склад');
+  if (b.order_id && !P['orders.jobs']) throw new HttpError(403, 'Нет права добавлять запчасти в заказ');
+  if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять сметы');
+  const lines = (b.lines || b.items || []).map((l) => ({
+    code: l.code ? String(l.code).trim().slice(0, 60) : null, name: String(l.name || l.code || '').trim().slice(0, 250), brand: l.brand ? String(l.brand).slice(0, 80) : null,
+    sku: l.sku || null, ean: l.ean || null, qty: Number(l.qty) || 0, price_net: round2(Number(l.price_net) || 0), vat: Number(l.vat ?? 23),
+    retail_gross: round2(Number(l.sell_gross) || 0) || undefined,
+  })).filter((l) => l.name && l.qty > 0);
+  if (!lines.length) throw new HttpError(400, 'В документе нет позиций');
+  if (b.receive) {
+    const bad = lines.filter((l) => l.price_net <= 0);
+    if (bad.length) throw new HttpError(400, `Цена закупки должна быть больше 0: ${bad.map((l) => l.code || l.name).join(', ')}`);
+  }
+  const number = String(b.number || '').trim().slice(0, 80);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : undefined;
+  const sup = SUP.wholesaler(b.supplier || 'other');
+  const out = { id: null, duplicate: false, stock: null, order: null, quote: null, kind: KINDS[kind], number: number || null };
+  tx(() => {
+    const r = SUP.saveDoc({ supplier: sup.key || 'other', kind, ext_id: number || `${KINDS[kind]} ${s.name} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, doc_date: date, lines, meta: { url: b.url || null, by: s.name } });
+    out.id = r.id; out.duplicate = r.duplicate;
+    if (r.duplicate && !b.force) throw new HttpError(409, `Документ ${number} уже загружен в CRM (Склад → Хуртовни). Повторно не добавляю.`);
+    const d = one('SELECT stock_doc_id FROM supplier_docs WHERE id = ?', r.id);
+    if (b.receive && !d.stock_doc_id) {
+      const rr = SUP.receiveGeneric(r.id, s.name);
+      out.stock = one('SELECT number FROM stock_docs WHERE id = ?', rr.stockDocId)?.number || null;
+    }
+    for (const [key, id] of [['order', b.order_id], ['quote', b.quote_id]]) {
+      if (!id) continue;
+      const o = getOrder(Number(id));
+      if ((key === 'order') !== (o.kind === 'order')) throw new HttpError(400, 'Выбран не тот документ');
+      assertEditable(o, s);
+      out[key] = SUP.addDocToOrder(r.id, o.id, { toStock: !!b.receive, staffName: s.name }).order;
+      log('order', o.id, 'update', `${KINDS[kind]} ${number || ''} от ${sup.name}: ${lines.length} поз.`, s.name);
+    }
+  });
+  res.json({ ok: true, ...out });
 });
 
 // ── Финансы: обзор, конструктор, прибыль и убытки, деньги ───────────────────

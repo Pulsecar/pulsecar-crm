@@ -1,8 +1,8 @@
 /* Pulsecar Panel — стиль как на pulsecar.pl: графит + салатовый акцент */
-@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
-@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-Medium.ttf') format('truetype'); font-weight: 500; font-display: swap; }
-@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-SemiBold.ttf') format('truetype'); font-weight: 600; font-display: swap; }
-@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-Bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-SemiBold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Pulsecar Sans'; src: url('/fonts/PulsecarSans-Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
 :root {
   --bg: #0e0f11; --panel: #141518; --surface: #17181b; --surface2: #1e2024; --surface3: #25282d;
   --border: #2a2c31; --border2: #34373d;

@@ -101,6 +101,20 @@
     }
   }
 
+  // ── Документ на странице (фактура, WZ, корзина, заказ): тип, номер, дата ─────
+  function detectDoc() {
+    const head = (location.href + ' ' + document.title).toLowerCase();
+    const txt = T(document.body).slice(0, 40000);
+    let kind = /faktur|invoice|фактур/.test(head) ? 'invoice' : /\bwz\b|wydani|delivery|dostaw/.test(head) ? 'wz'
+      : /koszyk|cart|basket|корзин/.test(head) ? 'cart' : /zam[oó]wieni|order|заказ/.test(head) ? 'order' : null;
+    const num = (txt.match(/(?:Faktura(?:\s+VAT)?|Nr\s+faktury|Numer\s+faktury|Nr\s+dokumentu|Numer\s+dokumentu|Nr\s+WZ|Nr\s+zam[oó]wienia|Dokument)\s*(?:nr\.?|numer)?\s*:?\s*([A-Z]{0,6}[ \/-]?\d[\w\/.-]{2,30})/i) || [])[1]
+      || (txt.match(/\b((?:FV|FA|FS|WZ)[ \/-]?\d[\w\/.-]{2,30})/) || [])[1] || '';
+    const d = txt.match(/\b(\d{4})-(\d{2})-(\d{2})\b|\b(\d{2})[.\-/](\d{2})[.\-/](\d{4})\b/) || [];
+    const date = d[1] ? `${d[1]}-${d[2]}-${d[3]}` : d[6] ? `${d[6]}-${d[5]}-${d[4]}` : new Date().toISOString().slice(0, 10);
+    if (!kind && num) kind = /^WZ/i.test(num) ? 'wz' : 'invoice';
+    return { kind, number: num.trim(), date };
+  }
+
   // ── Любая страница: таблица или выделение → разбор на сервере CRM ─────────
   function capture(mode) {
     const sel = String(window.getSelection() || '');
@@ -122,13 +136,14 @@
   async function captureAndOpen(mode) {
     if (SUPPLIER === 'intercars' && mode !== 'selection') {
       const cards = icCards();
-      if (cards.length) return openModal(cards.map(parseIcCard));
+      if (cards.length) return openModal(cards.map(parseIcCard), { doc: detectDoc() });
     }
     const text = capture(mode);
     if (!text) return toast('Pulsecar: не нашёл таблицу. Выделите строки мышкой и нажмите ещё раз.');
     const r = await api('suppliers/parse', { method: 'POST', body: { text } });
     if (r.error) return r.needSetup ? setupNeeded(r.error) : toast(r.error);
-    openModal(r.data.lines.map((l) => ({ supplier: SUPPLIER, code: l.code, name: l.name, brand: l.brand, qty: l.qty, vat: l.vat, price_net: l.price_net, sell_gross: 0, ean: l.ean })));
+    openModal(r.data.lines.map((l) => ({ supplier: SUPPLIER, code: l.code, name: l.name, brand: l.brand, qty: l.qty, vat: l.vat, price_net: l.price_net, sell_gross: 0, ean: l.ean })),
+      { doc: mode === 'selection' ? { kind: null, number: '', date: new Date().toISOString().slice(0, 10) } : detectDoc() });
   }
   chrome.runtime.onMessage.addListener((m) => { if (m?.type === 'pulsecar-capture') captureAndOpen(m.mode); });
 
@@ -146,7 +161,7 @@
   }
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  async function openModal(rawItems) {
+  async function openModal(rawItems, ctx = {}) {
     const hello = await api('ext/hello');
     if (hello.error) return hello.needSetup ? setupNeeded(hello.error) : toast(hello.error);
     const [prep, docs] = await Promise.all([api('ext/prepare', { method: 'POST', body: { items: rawItems } }), api('ext/orders')]);
@@ -155,6 +170,9 @@
     const orders = docs.data?.orders || [], quotes = docs.data?.quotes || [];
     const last = await chrome.storage.local.get(['lastOrder', 'lastQuote']);
     const markup = hello.data.markup || 0;
+    const doc = ctx.doc || { kind: null, number: '', date: new Date().toISOString().slice(0, 10) };
+    const docOn = !!doc.kind && items.length > 0 && can.docs;
+    const KIND = [['invoice', 'Фактура'], ['wz', 'WZ'], ['cart', 'Корзина'], ['order', 'Заказ у поставщика']];
     for (const it of items) if (!it.sell_gross && it.price_net) it.sell_gross = round2(it.price_net * 1.23 * (1 + markup / 100));
 
     const host = document.createElement('div');
@@ -172,6 +190,7 @@
       .opt{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #eee;background:#f7f7f8}.opt:last-child{border-bottom:0}
       .opt label{display:flex;align-items:center;gap:10px;font-size:15px;min-width:280px;cursor:pointer}
       .opt input[type=checkbox]{width:18px;height:18px;accent-color:#0a8f45}
+      .opt .docf{display:flex;gap:8px;flex:1;flex-wrap:wrap}.opt .docf input{flex:1;min-width:120px}.opt .docf select{flex:0 0 auto}
       select,input.i{font:inherit;font-size:14px;border:1px solid #d5d6da;border-radius:8px;padding:7px 9px;background:#fff;color:#1b1c1f}
       select{flex:1;min-width:0}
       .warn{margin:14px 0;border:1px solid #f0b429;background:#fff8e6;color:#8a5a00;border-radius:10px;padding:10px 14px;font-size:14px}
@@ -190,6 +209,9 @@
       <div class="h"><b>Pobierz do Pulsecar</b><span>(${esc(hello.data.brand)} · ${esc(hello.data.name)})</span></div>
       <div class="b">
         <div class="opts">
+          <div class="opt"><label><input type="checkbox" id="asDoc" ${docOn ? 'checked' : ''} ${can.docs ? '' : 'disabled'}>Документ поставщика</label>
+            <div class="docf"><select id="dkind">${KIND.map(([k, l]) => `<option value="${k}" ${k === (doc.kind || 'invoice') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <input class="i" id="dnum" placeholder="номер документа" value="${esc(doc.number)}"><input class="i" id="ddate" type="date" value="${esc(doc.date)}"></div></div>
           <div class="opt"><label><input type="checkbox" id="product" checked ${can.product || can.stock ? '' : 'disabled'}>Создать товар в картотеке</label><span class="sub">цена продажи = рекомендованная хуртовни</span></div>
           <div class="opt"><label><input type="checkbox" id="stock" ${can.stock ? '' : 'disabled'}>Оприходовать на склад (PZ)</label><span class="sub">когда деталь уже приехала</span></div>
           <div class="opt"><label><input type="checkbox" id="toOrder" ${can.order && orders.length ? '' : 'disabled'}>Добавить в заказ</label><select id="order">${optList(orders, last.lastOrder) || '<option value="">нет открытых заказов</option>'}</select></div>
@@ -218,6 +240,7 @@
       validate();
     }));
     $('stock').addEventListener('change', () => { if ($('stock').checked) $('product').checked = true; validate(); });
+    ['dkind', 'dnum', 'ddate'].forEach((id) => $(id).addEventListener('input', () => { $('asDoc').checked = true; }));
     $('order').addEventListener('change', () => { $('toOrder').checked = true; });
     $('quote').addEventListener('change', () => { $('toQuote').checked = true; });
     function validate() {
@@ -228,8 +251,35 @@
       return !($('stock').checked && bad.length);
     }
     validate();
+    const done = (r, body) => {
+      chrome.storage.local.set({ lastOrder: body.order_id || last.lastOrder || '', lastQuote: body.quote_id || last.lastQuote || '' });
+      const d = r.data;
+      const link = (hash, label) => `<a href="${r.panel}/#${hash}" target="_blank">${esc(label)}</a>`;
+      $('msg').innerHTML = `<div class="ok">Готово: ${[d.kind ? `${esc(d.kind)} ${esc(d.number || '')} сохранён(а) — ${link('/stock/suppliers', 'Склад → Хуртовни')}` : '', d.products ? `товаров в картотеке: ${d.products}` : '', d.stock ? `приход ${esc(d.stock)}` : '',
+        d.order ? `в заказе ${link('/orders/' + body.order_id, d.order)}` : '', d.quote ? `в смете ${link('/quotes/' + body.quote_id, d.quote)}` : ''].filter(Boolean).join(' · ')}</div>`;
+      $('go').textContent = 'Добавлено ✓';
+      $('go').disabled = true;
+      setTimeout(close, 6000);
+    };
+    async function sendDoc(force) {
+      const body = {
+        supplier: SUPPLIER, kind: $('dkind').value, number: $('dnum').value.trim(), date: $('ddate').value, url: location.href, lines: items, force: !!force,
+        receive: $('stock').checked, order_id: $('toOrder').checked ? $('order').value || null : null, quote_id: $('toQuote').checked ? $('quote').value || null : null,
+      };
+      $('go').disabled = true;
+      const r = await api('ext/doc', { method: 'POST', body });
+      $('go').disabled = false;
+      if (r.status === 409) {
+        $('msg').innerHTML = `<div class="warn">${esc(r.error)} <button class="c" id="force" style="margin-left:8px;padding:6px 12px">Всё равно добавить позиции</button></div>`;
+        root.getElementById('force').onclick = () => sendDoc(true);
+        return;
+      }
+      if (r.error) { $('msg').innerHTML = `<div class="warn">${esc(r.error)}</div>`; return; }
+      done(r, body);
+    }
     $('go').onclick = async () => {
       if (!validate()) return;
+      if ($('asDoc').checked) return sendDoc(false);
       const body = {
         supplier: SUPPLIER, items, product: $('product').checked, stock: $('stock').checked,
         order_id: $('toOrder').checked ? $('order').value || null : null, quote_id: $('toQuote').checked ? $('quote').value || null : null,
@@ -239,29 +289,20 @@
       const r = await api('ext/pick', { method: 'POST', body });
       $('go').disabled = false;
       if (r.error) { $('msg').innerHTML = `<div class="warn">${esc(r.error)}</div>`; return; }
-      chrome.storage.local.set({ lastOrder: body.order_id || last.lastOrder || '', lastQuote: body.quote_id || last.lastQuote || '' });
-      const d = r.data;
-      const link = (hash, label) => `<a href="${r.panel}/#${hash}" target="_blank">${esc(label)}</a>`;
-      $('msg').innerHTML = `<div class="ok">Готово: ${[d.products ? `товаров в картотеке: ${d.products}` : '', d.stock ? `приход ${esc(d.stock)}` : '',
-        d.order ? `в заказе ${link('/orders/' + body.order_id, d.order)}` : '', d.quote ? `в смете ${link('/quotes/' + body.quote_id, d.quote)}` : ''].filter(Boolean).join(' · ')}</div>`;
-      $('go').textContent = 'Добавлено ✓';
-      $('go').disabled = true;
-      setTimeout(close, 5000);
+      done(r, body);
     };
   }
 
   // ── запуск: кнопки у деталей Inter Cars (страницы меняются без перезагрузки) ──
+  const fab = makeBtn(() => captureAndOpen('page'));
+  fab.style.cssText += ';position:fixed;right:18px;bottom:18px;z-index:2147483646;box-shadow:0 6px 20px rgba(0,0,0,.35)';
+  fab.title = 'Забрать позиции с этой страницы в Pulsecar: корзину, фактуру, WZ, список деталей (или выделите строки мышкой)';
+  if (!/pulsecar\.tech$/.test(host)) document.body.appendChild(fab);
   if (SUPPLIER === 'intercars') {
     let t = null;
     const run = () => { clearTimeout(t); t = setTimeout(decorateIc, 400); };
     run();
     new MutationObserver((muts) => { if (muts.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && !n.classList?.contains('pulsecar-btn') && !n.classList?.contains('pulsecar-host')))) run(); })
       .observe(document.body, { childList: true, subtree: true });
-  } else {
-    // на других хуртовнях — плавающая кнопка: забрать таблицу (корзина, WZ, фактура) или выделенные строки
-    const fab = makeBtn(() => captureAndOpen('page'));
-    fab.style.cssText += ';position:fixed;right:18px;bottom:18px;z-index:2147483646;box-shadow:0 6px 20px rgba(0,0,0,.35)';
-    fab.title = 'Забрать позиции с этой страницы в Pulsecar (или выделите строки мышкой)';
-    document.body.appendChild(fab);
   }
 })();

@@ -218,8 +218,26 @@ try {
   assert.equal(prod.sell_price, 75.62); assert.equal(prod.purchase_price, 31.29); assert.equal(prod.stock, 1); assert.equal(prod.supplier_sku, 'G0XEXU');
   const pre = ok(await ext('ext/prepare', { items: [item] }), 'prepare');
   assert.equal(pre.items[0].product.id, prod.id);
+  // фактура со страницы хуртовни: документ поставщика, сразу приход и в заказ; повтор по номеру не создаёт дубль
+  const vr = await (await fetch(BASE + '/crm-api/ext/version')).json();
+  assert.match(vr.version, /^\d+\.\d+\.\d+$/, 'версия расширения доступна без входа');
+  assert.equal(ok(await ext('ext/hello'), 'hello2').latest, vr.version);
+  const inv = { supplier: 'autopartner', kind: 'invoice', number: 'FV/2026/09/777', date: '2026-09-27', url: 'https://b2b.autopartner.com/faktury/777',
+    lines: [{ code: 'MAP-OF-11', name: 'Filtr oleju', brand: 'MAPCO', qty: 2, price_net: 12.5, vat: 23 }, { code: 'BOS-0986', name: 'Świeca zapłonowa', brand: 'BOSCH', qty: 4, price_net: 18, vat: 23, sell_gross: 39.9 }] };
+  r = ok(await ext('ext/doc', { ...inv, receive: true, order_id: o2.id }), 'ext doc');
+  assert.ok(r.id && r.stock.startsWith('PZ') && r.order, 'фактура → приход и в заказ');
+  const dup = await ext('ext/doc', { ...inv, receive: true });
+  assert.equal(dup.status, 409, 'та же фактура второй раз — отказ');
+  const sd = ok(await req('/crm-api/suppliers/docs/' + r.id), 'supplier doc');
+  assert.equal(sd.doc?.ext_id ?? sd.ext_id, 'FV/2026/09/777');
+  const spark = ok(await req('/crm-api/products?q=BOS-0986'), 'spark').rows[0];
+  assert.equal(spark.stock, 4 - (ok(await req('/crm-api/orders/' + o2.id), 'o2d').items.filter((i) => i.code === 'BOS-0986').reduce((a, i) => a + (i.stock_taken ? i.qty : 0), 0)));
+  assert.equal(spark.sell_price, 39.9, 'цена продажи = розничная хуртовни');
+  r = ok(await ext('ext/doc', { ...inv, kind: 'cart', number: '', quote_id: q.id }), 'cart → quote');
+  assert.ok(r.quote && !r.stock);
   ok(await req('/crm-api/me/ext-token', { method: 'DELETE' }), 'revoke token');
   assert.equal((await ext('ext/hello')).status, 401);
+  console.log('✓ расширение: фактура / WZ / корзина со страницы хуртовни → документ поставщика без дублей, приход PZ, в заказ и смету');
   console.log('✓ расширение Chrome: кнопка в Inter Cars → товар в картотеке, приход на склад, в заказ и смету; цена продажи = рекомендованная');
 
   // ── 10. финансы ──
