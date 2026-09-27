@@ -10,6 +10,9 @@
     const m = e.data;
     if (!m || m.source !== 'pulsecar-crm') return;
     if (m.type === 'ping') hello();
+    if ((m.type === 'fiscal' || m.type === 'fiscal-allow') && m.reqId) {
+      chrome.runtime.sendMessage({ type: m.type, job: m.job, url: m.url }, (r) => say({ type: m.type + '-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));
+    }
     if (m.type === 'connect' && typeof m.token === 'string') {
       chrome.runtime.sendMessage({ type: 'connect', token: m.token }, (st) => say({ type: 'connected', ok: !!st?.connected, user: st?.user || null, error: st?.error || null, version: V }));
     }

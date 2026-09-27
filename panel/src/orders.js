@@ -203,6 +203,7 @@ export function orderFull(id) {
     items: all(`SELECT i.*, s.name mechanic_name, p.stock product_stock FROM order_items i
       LEFT JOIN staff s ON s.id = i.mechanic_id LEFT JOIN products p ON p.id = i.product_id WHERE order_id = ? ORDER BY pos, id`, id),
     payments: all('SELECT * FROM payments WHERE order_id = ? ORDER BY id', id),
+    receipts: all('SELECT id, number, nip, total, status, printer, error, created_at, printed_at FROM receipts WHERE order_id = ? ORDER BY id DESC', id),
     appointments: all(`SELECT a.*, st.name station_name FROM appointments a LEFT JOIN stations st ON st.id = a.station_id WHERE order_id = ? ORDER BY start_at`, id),
     activity: all(`SELECT * FROM activity WHERE entity = 'order' AND entity_id = ? ORDER BY id DESC LIMIT 50`, id),
     loyalty: o.customer_id ? all(`SELECT * FROM transactions WHERE order_no = ?`, o.number) : [],

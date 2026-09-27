@@ -26,6 +26,7 @@ import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
 import * as FIN from './finance.js';
 import * as DOC from './documents.js';
 import * as RPT from './reports.js';
+import * as FISCAL from './fiscal.js';
 import * as KSEF from './integrations/ksef.js';
 import { lookupNip } from './integrations/nip.js';
 import path from 'node:path';
@@ -107,7 +108,7 @@ crm.get('/me', (req, res) => {
     settings: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])),
     loyalty: loyaltySummary(0).rules,
     features: {
-      invoices: invoicesEnabled(), ksef: KSEF.ksefEnabled(), marketingUrl: cfg('marketing')?.url || config.marketingUrl, autoEarnFromCrm: config.loyalty.autoEarnFromCrm,
+      invoices: invoicesEnabled(), ksef: KSEF.ksefEnabled(), fiscal: (() => { const c = FISCAL.fiscalCfg(); return c ? { driver: c.driver, url: c.url, autoOnPay: c.autoOnPay } : null; })(), marketingUrl: cfg('marketing')?.url || config.marketingUrl, autoEarnFromCrm: config.loyalty.autoEarnFromCrm,
       intercars: !!cfg('intercars'), tpay: !!cfg('tpay'), email: !!cfg('email'), sms: !!activeProvider(), smsProvider: activeProvider(), plate: !!cfg('plate'),
     },
   });
@@ -821,6 +822,43 @@ crm.post('/cash/registers', (req, res) => {
   if (id) update('cash_registers', id, row); else id = insert('cash_registers', row);
   if (b.is_default) { run('UPDATE cash_registers SET is_default = 0 WHERE kind = ?', kind); run('UPDATE cash_registers SET is_default = 1 WHERE id = ?', id); }
   res.json({ ok: true, id });
+});
+
+// ── Фискальная касса: чек из заказа → задание для расширения → результат ─────
+crm.post('/orders/:id/receipt', (req, res) => {
+  const s = who(req, 'orders.payments');
+  const o = getOrder(Number(req.params.id));
+  const method = ['cash', 'card', 'transfer'].includes(req.body?.method) ? req.body.method : null;
+  const nip = String(req.body?.nip || '').replace(/\D/g, '');
+  if (nip && nip.length !== 10) throw new HttpError(400, 'NIP — 10 цифр');
+  const r = FISCAL.createReceipt(o, { nip: nip || null, method }, s.name);
+  log('order', o.id, 'receipt', { id: r.receipt.id, total: r.receipt.total }, s.name);
+  res.json(r);
+});
+crm.get('/receipts/:id/job', (req, res) => {
+  who(req, 'orders.payments');
+  const r = one('SELECT * FROM receipts WHERE id = ?', Number(req.params.id));
+  if (!r) throw new HttpError(404, 'Чек не найден');
+  res.json({ receipt: FISCAL.publicReceipt(r), job: r.status === 'printed' ? null : FISCAL.jobFor(r) });
+});
+crm.post('/receipts/:id/result', (req, res) => {
+  const s = who(req, 'orders.payments');
+  const r = FISCAL.saveResult(Number(req.params.id), req.body || {});
+  if (r.order_id) log('order', r.order_id, r.status === 'printed' ? 'receipt_printed' : 'receipt_error', { number: r.number, error: r.error }, s.name);
+  res.json({ receipt: r });
+});
+crm.post('/receipts/:id/manual', (req, res) => {
+  const s = who(req, 'orders.payments');
+  const r = FISCAL.setManual(Number(req.params.id), req.body?.number);
+  if (r.order_id) log('order', r.order_id, 'receipt_printed', { number: r.number, manual: true }, s.name);
+  res.json({ receipt: r });
+});
+crm.get('/fiscal/daily-job', (req, res) => { who(req, 'cash.edit'); res.json({ job: FISCAL.dailyJob(String(req.query.date || '')) }); });
+crm.get('/fiscal/ping-job', (req, res) => {
+  who(req, 'orders.payments');
+  const c = FISCAL.fiscalCfg();
+  if (!c || c.driver !== 'novitus') throw new HttpError(400, 'Касса Novitus не настроена');
+  res.json({ job: { driver: 'novitus', url: c.url, resource: 'ping' } });
 });
 
 // ── Рапорты (как Raporty в Motowarsztat) ─────────────────────────────────────

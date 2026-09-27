@@ -63,6 +63,20 @@ export const DEFS = [
     ],
   },
   {
+    key: 'fiscal', group: 'Бухгалтерия', title: 'Фискальная касса (drukarka fiskalna online)',
+    about: 'Чек (paragon) из заказа одной кнопкой: позиции, ставки VAT, способ оплаты, NIP покупателя. Касса в сети сервиса, печатает через расширение Pulsecar в Chrome на компьютере у кассы. Номер чека (JPKID) сохраняется в заказе и в «Продажах».',
+    howto: 'Novitus POINT / HD II Online / Deon Online / Bono Online / INFIS: включить на кассе протокол NoviAPI (в настройках связи кассы или через сервисанта кассы; порт обычно 8888), подключить кассу к сети (LAN/Wi-Fi) и узнать её IP. Сюда вписать адрес вида http://192.168.1.50:8888. На компьютере у кассы — расширение Pulsecar: в его настройках нажать «Разрешить доступ к кассе». Буквы PTU должны совпадать с программированием кассы (обычно A 23%, B 8%, C 5%, D 0%). Posnet / Elzab — режим «вручную».',
+    fields: [
+      { k: 'driver', label: 'Касса', type: 'select', options: [['novitus', 'Novitus (NoviAPI) — печать из CRM'], ['manual', 'Другая касса — номер чека вписывать вручную']], def: 'novitus' },
+      { k: 'url', label: 'Адрес кассы в сети (для Novitus)', placeholder: 'http://192.168.1.50:8888' },
+      { k: 'cashier', label: 'Кассир на чеке (пусто — не печатать)' },
+      { k: 'cashNumber', label: 'Номер кассы', def: '1', advanced: true },
+      { k: 'ptu', label: 'Буквы PTU (ставка:буква)', def: '23:A, 8:B, 5:C, 0:D', advanced: true },
+      { k: 'drawer', label: 'Открывать денежный ящик при оплате наличными', type: 'bool', def: true, advanced: true },
+      { k: 'autoOnPay', label: 'Предлагать чек сразу после приёма оплаты', type: 'bool', def: true },
+    ],
+  },
+  {
     key: 'fakturownia', group: 'Бухгалтерия', title: 'Fakturownia.pl',
     about: 'Фактуры VAT из заказа одной кнопкой. Fakturownia сама отправляет их в KSeF и формирует JPK.',
     howto: 'В Fakturownia: Ustawienia → Ustawienia konta → Integracja → Kod autoryzacyjny API. Домен — первая часть адреса: pulsecar.fakturownia.pl → pulsecar.',

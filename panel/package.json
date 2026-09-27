@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js",
-    "test": "node --disable-warning=ExperimentalWarning test/e2e.mjs && node --disable-warning=ExperimentalWarning test/integrations.mjs && node --disable-warning=ExperimentalWarning test/messaging.mjs && node --disable-warning=ExperimentalWarning test/suppliers.mjs && node --disable-warning=ExperimentalWarning test/ksef.mjs",
+    "test": "node --disable-warning=ExperimentalWarning test/e2e.mjs && node --disable-warning=ExperimentalWarning test/integrations.mjs && node --disable-warning=ExperimentalWarning test/messaging.mjs && node --disable-warning=ExperimentalWarning test/suppliers.mjs && node --disable-warning=ExperimentalWarning test/ksef.mjs && node test/fiscal-ext.mjs",
     "test:integrations": "node --disable-warning=ExperimentalWarning test/integrations.mjs"
   },
   "dependencies": {

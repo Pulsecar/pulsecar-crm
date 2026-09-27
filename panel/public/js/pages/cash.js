@@ -1,4 +1,5 @@
 // Касса: несколько касс (наличные, терминал, счёт), KP/KW, перенос денег между кассами
+import { FiscalCard } from '../fiscal.js';
 import { html, useState, useData, api, act, qs, useApp, ErrorBox, Icon, Modal, zl, fdt, todayStr, METHOD } from '../lib.js';
 
 const KIND = { cash: 'Наличные', card: 'Терминал (карты)', bank: 'Банковский счёт' };
@@ -21,6 +22,7 @@ export default function Cash() {
         <button class="btn" onClick=${() => setTr({ from: regs.find((r) => r.kind === 'cash')?.id || '', to: regs.find((r) => r.kind === 'bank')?.id || '', amount: '', note: '' })}><${Icon} n="arrows" />Перенос между кассами</button>
         <button class="btn" onClick=${() => setDoc({ direction: 'out', amount: '', note: '', register_id: reg || regs.find((r) => r.kind === 'cash')?.id })}>Расход KW</button>
         <button class="btn primary" onClick=${() => setDoc({ direction: 'in', amount: '', note: '', register_id: reg || regs.find((r) => r.kind === 'cash')?.id })}>Приход KP</button></div>`}</div>
+    <${FiscalCard} />
     <div class="reg-grid">
       ${regs.map((r) => html`<button class=${'reg' + (String(reg) === String(r.id) ? ' on' : '')} onClick=${() => setReg(String(reg) === String(r.id) ? '' : r.id)}>
         <span class="sub">${KIND[r.kind]}${r.is_default ? ' · основная' : ''}</span><b>${r.name}</b><span class="bal">${zl(r.balance)}</span></button>`)}

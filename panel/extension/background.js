@@ -69,6 +69,76 @@ async function inject(tabId, mode) {
   } catch (e) { return { error: 'На этой странице кнопку не запустить: ' + e.message }; }
 }
 
+
+// ── Фискальная касса Novitus (NoviAPI) в сети сервиса: CRM готовит чек, расширение печатает ──
+const PRIVATE = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.)|^localhost$|\.local$|\.lan$/i;
+function printerOrigin(url) {
+  let u; try { u = new URL(url); } catch { return null; }
+  if (!/^https?:$/.test(u.protocol) || !PRIVATE.test(u.hostname)) return null;
+  return u.origin;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function novi(origin, method, path, { body, auth = true, timeout = 15000 } = {}) {
+  const tok = auth ? await noviToken(origin) : null;
+  const go = (t) => fetch(`${origin}/api/v1${path}`, {
+    method, signal: AbortSignal.timeout(timeout),
+    headers: { ...(t ? { Authorization: 'Bearer ' + t } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let r = await go(tok);
+  if (r.status === 401 && auth) r = await go(await noviToken(origin, true));
+  const j = await r.json().catch(() => ({}));
+  return { status: r.status, j };
+}
+async function noviToken(origin, renew = false) {
+  const key = 'novi:' + origin;
+  const { [key]: c } = await chrome.storage.local.get(key);
+  if (!renew && c?.token && Date.parse(c.expiration_date) - Date.now() > 60_000) return c.token;
+  const save = async (j) => { await chrome.storage.local.set({ [key]: { token: j.token, expiration_date: j.expiration_date } }); return j.token; };
+  if (c?.token) {
+    const r = await fetch(`${origin}/api/v1/token`, { method: 'PATCH', headers: { Authorization: 'Bearer ' + c.token, 'Content-Type': 'text/plain' }, body: '', signal: AbortSignal.timeout(10000) }).catch(() => null);
+    if (r?.ok) return save(await r.json());
+  }
+  const r = await fetch(`${origin}/api/v1/token`, { signal: AbortSignal.timeout(10000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(r.status === 429 ? `Касса ограничила выдачу токенов, повторите после ${j.exception?.allowed_refresh_date || 'часа'}` : `Касса не выдала токен (${j.exception?.description || r.status})`);
+  return save(j);
+}
+const errText = (x) => (x ? `${x.description || 'ошибка'}${x.code !== undefined ? ` (код ${x.code})` : ''}` : '');
+async function fiscal(job) {
+  const origin = printerOrigin(job?.url);
+  if (!origin) return { ok: false, error: 'Адрес кассы должен быть в локальной сети, например http://192.168.1.50:8888 (Настройки → Интеграции → Фискальная касса)' };
+  if (!(await chrome.permissions.contains({ origins: [origin + '/*'] }))) return { ok: false, needPermission: origin, error: 'Расширению нужно разрешение на доступ к кассе' };
+  try {
+    if (job.resource === 'ping') {
+      const r = await fetch(`${origin}/api/v1`, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return { ok: false, error: `Касса ответила ${r.status}` };
+      const q = await novi(origin, 'GET', '/queue');
+      return { ok: q.status === 200, queue: q.j.requests_in_queue, error: q.status === 200 ? null : errText(q.j.exception) || `Ошибка ${q.status}` };
+    }
+    if (!['receipt', 'daily_report', 'nf_printout'].includes(job.resource)) return { ok: false, error: 'Неизвестная команда' };
+    const sent = await novi(origin, 'POST', '/' + job.resource, { body: job.body });
+    if (sent.status !== 201) return { ok: false, error: `Касса не приняла документ: ${errText(sent.j.exception) || sent.status}${sent.j.exception?.errors ? ' — ' + sent.j.exception.errors.join('; ') : ''}` };
+    const id = sent.j.request?.id;
+    const conf = await novi(origin, 'PUT', `/${job.resource}/${id}`);
+    if (conf.status === 409) return { ok: false, error: 'Касса ждёт дневной отчёт (raport dobowy) — сделайте его и повторите' };
+    if (conf.status !== 200) return { ok: false, error: `Касса не подтвердила печать: ${errText(conf.j.exception) || conf.status}` };
+    let last = null;
+    const until = Date.now() + 90_000;
+    while (Date.now() < until) {
+      const c = await novi(origin, 'GET', `/${job.resource}/${id}?timeout=5000`, { timeout: 15000 });
+      last = c.j;
+      const st = c.j.request?.status;
+      if (st === 'DONE') return { ok: true, id, jpkid: c.j.request.jpkid ?? null, eDocument: c.j.request.e_document?.status || null };
+      if (st === 'ERROR' || st === 'UNKNOWN') return { ok: false, id, error: 'Касса: ' + (errText(c.j.request.error) || errText(c.j.device?.error) || st) };
+      await sleep(300);
+    }
+    return { ok: false, pending: true, id, error: 'Касса ещё не напечатала' + (last?.device?.error ? ': ' + errText(last.device.error) : ' (проверьте бумагу)') + '. Чек напечатается сам, когда касса будет готова.' };
+  } catch (e) {
+    return { ok: false, error: 'Касса не отвечает: ' + (e.name === 'TimeoutError' ? 'нет ответа' : e.message) + '. Проверьте, что касса включена и компьютер в той же сети.' };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'api') { api(msg.path, msg).then(reply); return true; }
   if (msg?.type === 'check') { check().then(reply); return true; }
@@ -83,6 +153,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       reply(await check());
     })();
     return true;
+  }
+  // печать на кассе — только по просьбе страницы самой CRM (connect.js)
+  if (msg?.type === 'fiscal') {
+    conf().then(async (c) => {
+      if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel) return reply({ ok: false, error: 'Касса доступна только из CRM ' + c.panel });
+      reply(await fiscal(msg.job));
+    });
+    return true;
+  }
+  if (msg?.type === 'fiscal-allow') {
+    const origin = printerOrigin(msg.url);
+    if (origin) chrome.tabs.create({ url: chrome.runtime.getURL('options.html') + '#fiscal=' + encodeURIComponent(origin) });
+    reply({ ok: !!origin, error: origin ? null : 'Адрес кассы должен быть в локальной сети' });
+    return false;
   }
   if (msg?.type === 'whoami') { chrome.storage.local.get('status').then(({ status }) => reply({ version: VERSION, connected: !!status?.connected, user: status?.user || null, panel: status?.panel || null })); return true; }
   return false;

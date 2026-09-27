@@ -11,10 +11,17 @@
   ol{color:#9a9ca3;padding-left:20px}code{background:#0e0f11;padding:1px 6px;border-radius:4px}
 </style></head><body><div class="c">
   <h1>Pulsecar для поставщиков</h1>
-  <p>Кнопка «Pulsecar» у каждой детали в Inter Cars и кнопка в углу на сайтах поставщиков: запчасть сразу в заказ, смету или на склад, фактура или WZ — в приход.</p>
+  <p>Кнопка «Pulsecar» у каждой детали в Inter Cars и кнопка в углу на сайтах поставщиков: запчасть сразу в заказ, выцену или на склад, фактура или WZ — в приход.</p>
   <ol><li>Проще всего: откройте CRM → Склад → Поставщики и нажмите «Подключить расширение» — ключ передастся сам.</li><li>Или вручную: там же «Получить ключ», вставьте его ниже и нажмите «Сохранить и проверить».</li><li>Поставщики нет в списке? Откройте её сайт, нажмите значок Pulsecar на панели Chrome → «Показывать кнопку на этом сайте».</li></ol>
   <label for="panel">Адрес CRM</label><input id="panel" placeholder="https://panel.pulsecar.tech">
   <label for="token">Ключ сотрудника</label><input id="token" placeholder="pcx_…" autocomplete="off">
   <button id="save">Сохранить и проверить</button>
   <div id="st"></div>
+</div>
+<div class="c" id="fiscal" style="margin-top:18px">
+  <h1>Фискальная касса</h1>
+  <p>Касса Novitus (NoviAPI) в сети сервиса: CRM печатает чеки через это расширение. Разрешите доступ к адресу кассы один раз на этом компьютере.</p>
+  <label for="furl">Адрес кассы</label><input id="furl" placeholder="http://192.168.1.50:8888">
+  <button id="fallow">Разрешить доступ к кассе</button> <button id="ftest" style="background:#2a2c31;color:#e8e9ec">Проверить кассу</button>
+  <div id="fst"></div>
 </div><script src="options.js"></script></body></html>

@@ -1,4 +1,5 @@
 import { html, useState, useData, api, act, useApp, Icon, fdt, toast } from '../lib.js';
+import { runJob } from '../fiscal.js';
 
 export default function Integrations() {
   const { data, reload } = useData('integrations');
@@ -24,7 +25,8 @@ function Card({ it, open, onToggle, reload, feed, stations }) {
   const save = async (en = enabled) => { await act(() => api('integrations/' + it.key, { method: 'PUT', body: { enabled: en, values: vals } }), 'Сохранено'); reload(); app.reload(); };
   const test = async () => {
     setBusy(true);
-    try { await api('integrations/' + it.key, { method: 'PUT', body: { enabled, values: vals } }); const r = await api(`integrations/${it.key}/test`, { body: {} }); toast('✓ ' + r.info); reload(); }
+    try { await api('integrations/' + it.key, { method: 'PUT', body: { enabled, values: vals } }); if (it.key === 'fiscal') { app.reload(); const x = await runJob({ driver: 'novitus', url: vals.url, resource: 'ping' }); if (!x.ok) throw new Error(x.error); toast(`✓ Касса на связи · в очереди ${x.queue ?? 0}`); return; }
+      const r = await api(`integrations/${it.key}/test`, { body: {} }); toast('✓ ' + r.info); reload(); }
     catch (e) { toast(e.message, 'error'); reload(); } finally { setBusy(false); }
   };
   const field = (f) => {
@@ -36,7 +38,7 @@ function Card({ it, open, onToggle, reload, feed, stations }) {
       onChange=${(e) => set(e.target.checked ? [...(v || []), k] : (v || []).filter((x) => x !== k))} />${l}</label>`)}</div></div>`;
     if (f.auto) return '';
     return html`<label class="f">${f.label}${f.required ? ' *' : ''}<input type=${f.secret ? 'password' : f.type === 'number' ? 'number' : 'text'} value=${v ?? ''} autocomplete="off"
-      placeholder=${f.secret && v ? 'сохранено — введите новый, чтобы заменить' : ''} onFocus=${(e) => f.secret && String(v || '').startsWith('••••') && (e.target.value = '', set(''))}
+      placeholder=${f.secret && v ? 'сохранено — введите новый, чтобы заменить' : f.placeholder || ''} onFocus=${(e) => f.secret && String(v || '').startsWith('••••') && (e.target.value = '', set(''))}
       onInput=${(e) => set(e.target.value)} /></label>`;
   };
   return html`<div class="card" style=${open ? 'grid-column:1/-1;border-color:var(--accent)' : ''}>

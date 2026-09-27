@@ -7,6 +7,7 @@ import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
 import { OrderMain, ItemsMW } from './order-form.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ScanBox } from '../scan.js';
+import { ReceiptBox } from '../fiscal.js';
 
 
 // ── Список ────────────────────────────────────────────────────────────────
@@ -179,7 +180,12 @@ function Payments({ o, reload }) {
   const [scan, setScan] = useState(null); // {ticket, limits, client}
   const [scanOpen, setScanOpen] = useState(false);
   const [pts, setPts] = useState('');
-  const addPay = async () => { await act(() => api(`orders/${o.id}/payments`, { body: p }), 'Оплата добавлена'); setP({ ...p, amount: '' }); reload(); };
+  const [askReceipt, setAskReceipt] = useState(0);
+  const addPay = async () => {
+    const r = await act(() => api(`orders/${o.id}/payments`, { body: p }), 'Оплата добавлена');
+    setP({ ...p, amount: '' }); reload();
+    if (r && app.features.fiscal?.autoOnPay && !(o.receipts || []).some((x) => x.status === 'printed')) setAskReceipt(Date.now());
+  };
   const onScan = async (data) => {
     try {
       const r = await api(`orders/${o.id}/scan`, { body: data });
@@ -200,7 +206,8 @@ function Payments({ o, reload }) {
         <label class="f" style="width:140px">Сумма<input type="number" step="0.01" value=${p.amount} onInput=${(e) => setP({ ...p, amount: e.target.value })} /></label>
         <button class="btn primary" onClick=${addPay} disabled=${!(Number(p.amount) > 0)}>Принять оплату</button>
       </div>
-      <label class="f" style="margin-top:14px;max-width:260px">Номер чека с кассового аппарата<input value=${o.receipt_no || ''} onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { receipt_no: e.target.value } }), 'Сохранено'); }} placeholder="например 000123" /></label>
+      <${ReceiptBox} o=${o} reload=${reload} ask=${askReceipt} />
+      ${!app.features.fiscal && html`<label class="f" style="margin-top:14px;max-width:260px">Номер чека с кассового аппарата<input value=${o.receipt_no || ''} onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { receipt_no: e.target.value } }), 'Сохранено'); }} placeholder="например 000123" /></label>`}
     </div>
 
     <div class="stack">

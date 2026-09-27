@@ -203,6 +203,23 @@ try {
   }
   console.log('✓ рапорты: все считаются, зарплата 40%, CSV/XLSX/печать');
 
+  // 9c. фискальная касса (Novitus NoviAPI через расширение)
+  assert.equal((await req(`/crm-api/orders/${co.id}/receipt`, { body: {} })).status, 400);
+  ok(await req('/crm-api/integrations/fiscal', { method: 'PUT', body: { enabled: true, values: { driver: 'novitus', url: 'http://192.168.1.50:8888', cashier: 'Kasjer 1', ptu: '23:A, 8:B, 5:C, 0:D' } } }), 'fiscal on');
+  const rc = ok(await req(`/crm-api/orders/${co.id}/receipt`, { body: { nip: '5214141930' } }), 'receipt');
+  const rb = rc.job.body.receipt;
+  assert.equal(rc.job.url, 'http://192.168.1.50:8888'); assert.equal(rb.buyer.nip, '5214141930');
+  assert.ok(rb.items.every((i) => i.article.ptu === 'A' && Math.abs(Number(i.article.price) * Number(i.article.quantity) - Number(i.article.value)) < 0.005));
+  assert.equal(Number(rb.summary.total).toFixed(2), rb.items.reduce((a, i) => a + Number(i.article.value), 0).toFixed(2));
+  assert.equal(rb.payments.reduce((a, p) => a + Number(Object.values(p)[0].value), 0).toFixed(2), rb.summary.total);
+  ok(await req(`/crm-api/receipts/${rc.receipt.id}/result`, { body: { ok: false, error: 'Brak papieru' } }), 'res err');
+  const rr = ok(await req(`/crm-api/receipts/${rc.receipt.id}/result`, { body: { ok: true, jpkid: 1279 } }), 'res ok');
+  assert.equal(rr.receipt.status, 'printed'); assert.equal(rr.receipt.number, '1279');
+  assert.equal((await req(`/crm-api/orders/${co.id}/receipt`, { body: {} })).status, 409);
+  const sl = ok(await req('/crm-api/sales?from=2020-01-01&to=2030-12-31&type=receipt'), 'sales');
+  assert.ok(sl.rows.some((r) => r.number === '1279'));
+  console.log('✓ фискальная касса: чек из заказа (PTU, NIP, оплаты), номер JPKID в заказе и в «Продажах»');
+
   // 10. удаление аккаунта в приложении
   ok(await req('/api/me/delete', { body: {}, token: sess.token }), 'delete');
   assert.equal((await req('/api/me', { token: sess.token })).status, 401);
