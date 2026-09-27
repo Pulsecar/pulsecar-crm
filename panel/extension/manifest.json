@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Pulsecar — запчасти из хуртовни",
+  "short_name": "Pulsecar",
+  "version": "1.0.0",
+  "description": "Кнопка «Pulsecar» в хуртовнях: запчасть сразу в заказ, смету или на склад CRM Pulsecar.",
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": { "default_title": "Pulsecar: забрать позиции с этой страницы", "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" } },
+  "options_page": "options.html",
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
+  "host_permissions": [
+    "https://panel.pulsecar.tech/*", "http://localhost/*",
+    "https://*.intercars.eu/*", "https://*.intercars.com.pl/*", "https://*.intercars.pl/*",
+    "https://*.hartphp.com.pl/*", "https://*.autopartner.com/*", "https://*.autopartner.pl/*", "https://*.apcat.eu/*",
+    "https://*.inter-team.com.pl/*", "https://*.motoprofil.pl/*", "https://*.profiauto.pl/*", "https://*.gordon.com.pl/*",
+    "https://*.motorol.pl/*", "https://*.rodon.pl/*", "https://*.arge.pl/*", "https://*.elit.pl/*", "https://*.autoland.pl/*"
+  ],
+  "content_scripts": [{
+    "matches": [
+      "https://*.intercars.eu/*", "https://*.intercars.com.pl/*", "https://*.intercars.pl/*",
+      "https://*.hartphp.com.pl/*", "https://*.autopartner.com/*", "https://*.autopartner.pl/*", "https://*.apcat.eu/*",
+      "https://*.inter-team.com.pl/*", "https://*.motoprofil.pl/*", "https://*.profiauto.pl/*", "https://*.gordon.com.pl/*",
+      "https://*.motorol.pl/*", "https://*.rodon.pl/*", "https://*.arge.pl/*", "https://*.elit.pl/*", "https://*.autoland.pl/*"
+    ],
+    "js": ["content.js"], "run_at": "document_idle"
+  }]
+}

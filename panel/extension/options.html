@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Pulsecar — настройки расширения</title>
+<style>
+  body{font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#0e0f11;color:#e8e9ec;margin:0;padding:40px 20px}
+  .c{max-width:620px;margin:0 auto;background:#17181b;border:1px solid #2a2c31;border-radius:14px;padding:28px}
+  h1{font-size:22px;margin:0 0 6px}p{color:#9a9ca3;margin:0 0 18px}
+  label{display:block;font-size:13px;color:#9a9ca3;margin:14px 0 6px}
+  input{width:100%;box-sizing:border-box;font:inherit;background:#0e0f11;color:#e8e9ec;border:1px solid #34373d;border-radius:8px;padding:10px 12px}
+  button{margin-top:18px;font:600 15px system-ui,sans-serif;background:#1bf372;color:#000;border:0;border-radius:8px;padding:11px 20px;cursor:pointer}
+  #st{margin-top:14px;font-size:14px}.ok{color:#1bf372}.err{color:#ff6b6b}
+  ol{color:#9a9ca3;padding-left:20px}code{background:#0e0f11;padding:1px 6px;border-radius:4px}
+</style></head><body><div class="c">
+  <h1>Pulsecar для хуртовен</h1>
+  <p>Кнопка «Pulsecar» у каждой детали в Inter Cars и кнопка в углу на сайтах других хуртовен: запчасть сразу в заказ, смету или на склад.</p>
+  <ol><li>Откройте CRM → Склад → Хуртовни → «Расширение Chrome» и нажмите «Получить ключ».</li><li>Вставьте ключ ниже и нажмите «Сохранить и проверить».</li></ol>
+  <label for="panel">Адрес CRM</label><input id="panel" placeholder="https://panel.pulsecar.tech">
+  <label for="token">Ключ сотрудника</label><input id="token" placeholder="pcx_…" autocomplete="off">
+  <button id="save">Сохранить и проверить</button>
+  <div id="st"></div>
+</div><script src="options.js"></script></body></html>

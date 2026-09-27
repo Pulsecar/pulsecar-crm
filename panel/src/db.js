@@ -411,6 +411,7 @@ addColumn('staff', 'stations', 'TEXT');             // JSON: посты, кот�
 addColumn('staff', 'phone', 'TEXT');
 addColumn('staff', 'email', 'TEXT');
 addColumn('staff', 'last_login', 'TEXT');
+addColumn('staff', 'ext_token', 'TEXT');          // sha256 ключа для расширения Chrome
 addColumn('orders', 'external_no', 'TEXT');
 addColumn('orders', 'faults', 'TEXT');              // wykryte usterki
 addColumn('orders', 'after_notes', 'TEXT');         // uwagi po wykonaniu zlecenia

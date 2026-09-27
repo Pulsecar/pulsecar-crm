@@ -77,12 +77,30 @@ export function SuppliersPage() {
         <td>${d.ext_id}</td><td class="r">${d.lines_count}</td><td class="r nowrap">${zl(d.total_net)}</td><td class="r nowrap">${zl(d.total_gross)}</td>
         <td class="small">${d.stock_number ? html`<span class="pos">✓ на складе ${d.stock_number}</span>` : html`<span class="muted">новый</span>`}${d.used_in ? html`<div class="sub">в заказе ${d.used_in}</div>` : ''}</td></tr>`)}</tbody></table></div>`
       : html`<div class="empty">${state === 'new' ? 'Нет новых документов от хуртовен' : 'Документов пока нет'}</div>`}</div>
+    <${Extension} />
     <${HowTo} data=${data} />
     ${open && html`<${DocModal} id=${open} markup=${data.markup} onClose=${() => { setOpen(null); reload(); }} />`}
     ${adding && html`<${AddDoc} wholesalers=${data.wholesalers} markup=${data.markup} onClose=${() => setAdding(false)} onSaved=${(id) => { setAdding(false); reload(); setOpen(id); }} />`}
   </div>`;
 }
 const KIND = { delivery: 'WZ / поставка', invoice: 'Фактура', email: 'Из почты', clip: 'С сайта хуртовни', paste: 'Вставлено', file: 'Файл', manual: 'Вручную' };
+
+function Extension() {
+  const [tok, setTok] = useState(null);
+  return html`<div class="card stack" style="border-color:rgba(27,243,114,.45)">
+    <h2>Расширение Chrome «Pulsecar» — кнопка прямо в хуртовне</h2>
+    <div class="grid g2">
+      <div class="stack" style="gap:6px">
+        <div class="small">У каждой детали в каталоге Inter Cars появляется кнопка <b>Pulsecar</b> рядом с «Pobierz». Нажали — открывается окно: <b>создать товар в картотеке, оприходовать на склад, добавить в заказ или в смету</b>. Цена закупки — ваша цена в Inter Cars, цена продажи — рекомендованная розничная. На сайтах других хуртовен — кнопка в углу: забирает корзину, WZ или выделенные строки.</div>
+        <ol class="small muted" style="margin:0;padding-left:18px"><li>Скачайте архив и распакуйте.</li><li>Chrome → <code>chrome://extensions</code> → включите «Режим разработчика» → «Загрузить распакованное» → выберите папку <code>pulsecar-extension</code>.</li><li>В открывшихся настройках вставьте ключ (кнопка справа).</li></ol>
+        <div class="row"><a class="btn primary" href="/pulsecar-extension.zip" download>Скачать расширение</a></div></div>
+      <div class="stack" style="gap:6px"><b class="small">Ключ для расширения (свой у каждого сотрудника)</b>
+        ${tok ? html`<pre class="code">${tok}</pre><div class="row"><button class="btn sm" onClick=${() => navigator.clipboard?.writeText(tok).then(() => toast('Ключ скопирован'))}>Копировать</button><span class="muted small">Показывается один раз. Права — как у вашей учётной записи.</span></div>`
+          : html`<div class="row"><button class="btn" onClick=${async () => { const r = await act(() => api('me/ext-token', { body: {} })); setTok(r.token); }}>Получить ключ</button>
+            <${ConfirmButton} cls="btn ghost sm" label="Отключить старый ключ?" onConfirm=${async () => { await act(() => api('me/ext-token', { method: 'DELETE' }), 'Ключ отключён'); }}>Отключить ключ</${ConfirmButton}></div>
+            <div class="muted small">Новый ключ заменяет старый — старое расширение перестанет работать, пока не вставите новый.</div>`}</div>
+    </div></div>`;
+}
 
 function HowTo({ data }) {
   const base = location.origin;

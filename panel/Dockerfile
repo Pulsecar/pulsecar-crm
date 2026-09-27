@@ -4,7 +4,8 @@ COPY package.json ./
 RUN npm install --omit=dev && npm cache clean --force
 COPY src ./src
 COPY public ./public
-ENV NODE_ENV=production DB_PATH=/data/pulsecar.db PORT=3100
+ENV NODE_ENV=production DB_PATH=/data/pulsecar.db PORT=3100 TZ=Europe/Warsaw
+RUN apk add --no-cache tzdata
 VOLUME /data
 EXPOSE 3100
 CMD ["node", "--disable-warning=ExperimentalWarning", "src/index.js"]

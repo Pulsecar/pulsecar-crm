@@ -9,7 +9,7 @@ import Purchases from './pages/purchases.js';
 import Storage from './pages/storage.js';
 import Cash from './pages/cash.js';
 import Pos from './pages/pos.js';
-import Reports from './pages/reports.js';
+import Finance from './pages/finance.js';
 import Settings from './pages/settings.js';
 import Marketing from './pages/marketing.js';
 import Search from './pages/search.js';
@@ -30,7 +30,7 @@ const NAV = [
   { to: '/storage', icon: 'tire', label: 'Хранение шин', perm: 'storage.view' },
   { to: '/cash', icon: 'cash', label: 'Касса', perm: 'cash.view' },
   { to: '/pos', icon: 'qr', label: 'Pulse Points', perm: 'loyalty.use' },
-  { to: '/reports', icon: 'chart', label: 'Отчёты', perm: 'reports.view' },
+  { to: '/finance', icon: 'chart', label: 'Финансы', perm: 'reports.view' },
   { sep: true },
   { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' },
   { to: '/settings', icon: 'gear', label: 'Настройки', perm: 'settings.manage' },
@@ -83,7 +83,7 @@ function Shell({ app }) {
   else if (p0 === 'storage') page = html`<${Storage} />`;
   else if (p0 === 'cash') page = html`<${Cash} />`;
   else if (p0 === 'pos') page = html`<${Pos} />`;
-  else if (p0 === 'reports') page = html`<${Reports} />`;
+  else if (p0 === 'reports' || p0 === 'finance') page = html`<${Finance} />`;
   else if (p0 === 'settings') page = html`<${Settings} sub=${p1} />`;
   else if (p0 === 'sms') page = html`<${Sms} />`;
   else if (p0 === 'suppliers' && p1 === 'clip') page = html`<${ClipPage} />`;

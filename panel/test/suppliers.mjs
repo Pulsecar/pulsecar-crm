@@ -199,6 +199,44 @@ try {
   assert.equal(after.hourly_rate, piotr.hourly_rate, 'ставка не сбросилась');
   console.log('✓ доступы: свой логин каждому, права как в Motowarsztat (только свои заказы, без цен, без фактур), отключение доступа');
 
+  // ── 9. расширение Chrome: ключ сотрудника и кнопка «Pobierz do Pulsecar» ──
+  const tk = ok(await req('/crm-api/me/ext-token', { body: {} }), 'token').token;
+  assert.match(tk, /^pcx_/);
+  const ext = async (path, body) => { const r = await fetch(BASE + '/crm-api/' + path, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, j: await r.json() }; };
+  assert.equal(ok(await ext('ext/hello'), 'hello').can.order, true);
+  const eo = ok(await ext('ext/orders'), 'ext orders');
+  assert.ok(eo.orders.length && eo.quotes.length);
+  const item = { supplier: 'intercars', sku: 'G0XEXU', code: 'PUR-PC2015AG-2', name: 'Салонный фильтр', brand: 'PURRO', qty: 1, price_net: 31.29, sell_gross: 75.62 };
+  assert.equal((await ext('ext/pick', { items: [{ ...item, price_net: 0 }], stock: true })).status, 400, 'цена закупки 0 — на склад нельзя');
+  r = ok(await ext('ext/pick', { supplier: 'intercars', items: [item], product: true, stock: true, order_id: o2.id, quote_id: q.id }), 'pick');
+  assert.equal(r.products, 1); assert.ok(r.stock.startsWith('PZ')); assert.equal(r.order, ok(await req('/crm-api/orders/' + o2.id), 'o2').number);
+  const o2f = ok(await req('/crm-api/orders/' + o2.id), 'o2f');
+  const fp = o2f.items.find((i) => i.code === 'PUR-PC2015AG-2');
+  assert.equal(fp.price, 75.62); assert.equal(fp.cost, 31.29); assert.ok(fp.product_id);
+  assert.ok(ok(await req('/crm-api/orders/' + q.id), 'qf').items.some((i) => i.code === 'PUR-PC2015AG-2' && i.price === 75.62));
+  const prod = ok(await req('/crm-api/products?q=PUR-PC2015AG-2'), 'prod').rows[0];
+  assert.equal(prod.sell_price, 75.62); assert.equal(prod.purchase_price, 31.29); assert.equal(prod.stock, 1); assert.equal(prod.supplier_sku, 'G0XEXU');
+  const pre = ok(await ext('ext/prepare', { items: [item] }), 'prepare');
+  assert.equal(pre.items[0].product.id, prod.id);
+  ok(await req('/crm-api/me/ext-token', { method: 'DELETE' }), 'revoke token');
+  assert.equal((await ext('ext/hello')).status, 401);
+  console.log('✓ расширение Chrome: кнопка в Inter Cars → товар в картотеке, приход на склад, в заказ и смету; цена продажи = рекомендованная');
+
+  // ── 10. финансы ──
+  const f = { from: '2020-01-01', to: '2030-12-31', basis: 'created' };
+  const ov = ok(await req('/crm-api/finance/overview?' + new URLSearchParams({ ...f, compare: 'prev' })), 'overview');
+  assert.ok(ov.kpi.orders >= 1 && ov.kpi.revenue > 0 && ov.series.length && ov.pnl.length && ov.cash && ov.expenses);
+  assert.equal(Math.round(ov.kpi.grossProfit * 100), Math.round((ov.kpi.revenueNet - ov.kpi.cogs - ov.kpi.payroll) * 100));
+  const pv = ok(await req('/crm-api/finance/pivot?' + new URLSearchParams({ ...f, group: 'mechanic', group2: 'month' })), 'pivot');
+  assert.equal(pv.total.revenue, ov.kpi.revenue, 'конструктор и обзор сходятся');
+  for (const g of Object.keys(pv.groups)) ok(await req('/crm-api/finance/pivot?' + new URLSearchParams({ ...f, group: g })), 'group ' + g);
+  const csvR = await fetch(BASE + '/crm-api/finance/pivot?' + new URLSearchParams({ ...f, group: 'source', format: 'csv' }), { headers: { Cookie: jars.admin } });
+  assert.match(await csvR.text(), /Источник клиента";"Заказов"/);
+  ok(await req('/crm-api/finance/cash?' + new URLSearchParams(f)), 'cash');
+  assert.ok(ok(await req('/crm-api/finance/orders?' + new URLSearchParams({ ...f, customer: c.id })), 'drill').length >= 1);
+  assert.equal((await req('/crm-api/finance/overview?from=x&to=y')).status, 400);
+  console.log('✓ финансы: обзор с сравнением, валовая прибыль, конструктор по 15 разрезам, CSV, деньги и долги, детализация до заказов');
+
   console.log('\nВСЕ ПРОВЕРКИ ХУРТОВЕН, НАСТРОЕК И ДОСТУПОВ ПРОЙДЕНЫ');
 } catch (e) {
   console.error('✗', e.message);

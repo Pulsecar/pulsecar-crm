@@ -1,5 +1,6 @@
 // API панели panel.pulsecar.tech (CRM для сотрудников)
 import express from 'express';
+import crypto from 'node:crypto';
 import multer from 'multer';
 import { all, one, run, tx, insert, update, log, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
@@ -13,7 +14,7 @@ import {
 import { importRows, readRows, TEMPLATE_CSV } from './importer.js';
 import { addItem, createOrder, getOrder, orderFull, quoteToOrder, recalc, setStatus, updateItem } from './orders.js';
 import { invoicesEnabled, invoicePdf, issueInvoice, testFakturownia } from './invoices.js';
-import { createStockDoc } from './stock.js';
+import { createStockDoc, findOrCreateProduct } from './stock.js';
 import { publicList, save as saveIntegration, cfg, setState, def as integrationDef } from './integrations/index.js';
 import * as IC from './integrations/intercars.js';
 import * as SUP from './integrations/suppliers.js';
@@ -21,6 +22,7 @@ import { notify, testTelegram } from './integrations/notify.js';
 import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, ensureFeedToken } from './integrations/services.js';
 import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
 import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
+import * as FIN from './finance.js';
 import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate, testSmshttp, activeProvider, smsParts, translit } from './sms.js';
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
@@ -68,9 +70,11 @@ crm.get('/auth-check', (req, res) => {
 const RANK = { mechanic: 1, staff: 2, admin: 3 };
 const PERM_LABELS = Object.fromEntries(PERM_GROUPS.flatMap(([, l]) => l));
 const permLabel = (k) => `«${PERM_LABELS[k] || k}»`;
+const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 function who(req, min = 'mechanic') {
-  const sess = readSession(parseCookies(req.headers.cookie).pcs);
-  const s = sess && one('SELECT * FROM staff WHERE id = ? AND active = 1', sess.id);
+  const bearer = /^Bearer (pcx_[A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '')?.[1];
+  const sess = bearer ? null : readSession(parseCookies(req.headers.cookie).pcs);
+  const s = bearer ? one('SELECT * FROM staff WHERE ext_token = ? AND active = 1', sha(bearer)) : sess && one('SELECT * FROM staff WHERE id = ? AND active = 1', sess.id);
   if (!s) throw new HttpError(401, 'Войдите в панель.');
   if (min.includes('.')) { if (!can(s, min)) throw new HttpError(403, 'Недостаточно прав: ' + permLabel(min)); }
   else if ((RANK[s.role] || 0) < RANK[min]) throw new HttpError(403, 'Недостаточно прав.');
@@ -789,6 +793,118 @@ crm.get('/reports', (req, res) => {
     appUsers: one('SELECT COUNT(*) n FROM customers WHERE registered_at IS NOT NULL').n,
     purchases: one(`SELECT COALESCE(SUM(net),0) net, COALESCE(SUM(gross),0) gross FROM purchases WHERE doc_date BETWEEN ? AND ?`, from, to),
   });
+});
+
+// ── Расширение Chrome «Pulsecar для хуртовен» ──────────────────────────────
+crm.post('/me/ext-token', (req, res) => {
+  const s = who(req);
+  const token = 'pcx_' + crypto.randomBytes(24).toString('base64url');
+  run('UPDATE staff SET ext_token = ? WHERE id = ?', sha(token), s.id);
+  res.json({ token, panel: config.publicUrl });
+});
+crm.delete('/me/ext-token', (req, res) => { const s = who(req); run('UPDATE staff SET ext_token = NULL WHERE id = ?', s.id); res.json({ ok: true }); });
+crm.get('/ext/hello', (req, res) => {
+  const s = who(req);
+  const P = permsOf(s);
+  res.json({ name: s.name, brand: getSetting('company_brand', 'Pulsecar'), can: { stock: P['stock.docs'] || P['suppliers.receive'], product: P['products.create'], order: P['orders.jobs'], quote: P['quotes.manage'] }, markup: Number(getSetting('default_markup', '40')) || 0 });
+});
+/** Открытые заказы и сметы для выпадающих списков расширения */
+crm.get('/ext/orders', (req, res) => {
+  const s = who(req, 'orders.view');
+  const P = permsOf(s);
+  const rows = all(`SELECT o.id, o.kind, o.number, c.name cname, k.make, k.model, k.plate FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN cars k ON k.id = o.car_id LEFT JOIN order_statuses st ON st.id = o.status_id WHERE COALESCE(st.is_final,0) = 0 ORDER BY o.id DESC LIMIT 300`);
+  res.json({ orders: rows.filter((r) => r.kind === 'order'), quotes: P['quotes.manage'] ? rows.filter((r) => r.kind === 'quote') : [] });
+});
+/** Уточнить цены через API хуртовни (Inter Cars: ваша цена и рекомендованная розничная) и найти товар на складе */
+crm.post('/ext/prepare', async (req, res) => {
+  who(req, 'products.view');
+  const items = (req.body?.items || []).slice(0, 100);
+  const out = [];
+  for (const it of items) {
+    const x = { ...it };
+    if (it.supplier === 'intercars' && cfg('intercars') && (it.code || it.sku)) {
+      try {
+        const r = (await IC.search(it.code || it.sku)).find((z) => !it.sku || z.sku === it.sku) || null;
+        if (r) { x.price_net = r.priceNet || x.price_net; x.sell_gross = r.listGross || x.sell_gross || r.sellSuggested; x.sku = r.sku; x.ean ??= r.ean; x.source = 'api'; }
+      } catch {}
+    }
+    const code = String(x.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    x.product = (x.sku && one('SELECT id, name, stock, sell_price, purchase_price FROM products WHERE supplier_sku = ?', x.sku))
+      || (code && one(`SELECT id, name, stock, sell_price, purchase_price FROM products WHERE upper(replace(replace(replace(replace(code,' ',''),'.',''),'-',''),'/','')) = ?`, code)) || null;
+    out.push(x);
+  }
+  res.json({ items: out });
+});
+/** «Pobierz do Pulsecar»: товар в картотеку, приход на склад, в заказ, в смету — одной кнопкой */
+crm.post('/ext/pick', (req, res) => {
+  const s = who(req, 'products.view');
+  const P = permsOf(s);
+  const b = req.body || {};
+  const sup = SUP.wholesaler(b.supplier || 'other');
+  const items = (b.items || []).map((i) => ({
+    name: String(i.name || i.code || '').trim().slice(0, 250), code: i.code ? String(i.code).trim().slice(0, 60) : null, brand: i.brand ? String(i.brand).slice(0, 80) : null,
+    sku: i.sku || null, ean: i.ean || null, qty: Math.max(0.01, Number(i.qty) || 1), price_net: round2(Number(i.price_net) || 0), sell_gross: round2(Number(i.sell_gross) || 0), vat: Number(i.vat ?? 23),
+  })).filter((i) => i.name);
+  if (!items.length) throw new HttpError(400, 'Нет товаров');
+  if (!b.product && !b.stock && !b.order_id && !b.quote_id) throw new HttpError(400, 'Выберите, куда добавить: склад, заказ или смета');
+  if (b.stock && !(P['stock.docs'] || P['suppliers.receive'])) throw new HttpError(403, 'Нет права на приход на склад');
+  if (b.order_id && !P['orders.jobs']) throw new HttpError(403, 'Нет права добавлять запчасти в заказ');
+  if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять сметы');
+  const bad = items.filter((i) => (b.stock || b.product) && i.price_net <= 0);
+  if (bad.length && b.stock) throw new HttpError(400, `Цена закупки должна быть больше 0: ${bad.map((i) => i.code || i.name).join(', ')}`);
+  const done = { products: 0, stock: null, order: null, quote: null };
+  tx(() => {
+    const pids = items.map((i) => {
+      if (!(b.product || b.stock || b.order_id)) return null;
+      const pid = findOrCreateProduct({ name: i.name, code: i.code, manufacturer: i.brand, supplier_sku: i.sku, ean: i.ean, supplier: sup.name, sell_price: i.sell_gross, price_net: i.price_net });
+      // цена продажи = рекомендованная хуртовней, закупка = цена для сервиса
+      if (i.sell_gross > 0) run('UPDATE products SET sell_price = ? WHERE id = ?', i.sell_gross, pid);
+      if (i.price_net > 0) run('UPDATE products SET purchase_price = ? WHERE id = ?', i.price_net, pid);
+      done.products++;
+      return pid;
+    });
+    if (b.stock) {
+      const docId = createStockDoc({ type: 'PZ', counterparty: sup.name, ext_number: b.ext_number || null, note: `${sup.name}: кнопка в хуртовне`,
+        items: items.map((i, n) => ({ product_id: pids[n], qty: i.qty, price_net: i.price_net })) }, s.name);
+      done.stock = one('SELECT number FROM stock_docs WHERE id = ?', docId).number;
+    }
+    for (const [key, id] of [['order', b.order_id], ['quote', b.quote_id]]) {
+      if (!id) continue;
+      const o = getOrder(Number(id));
+      if ((key === 'order') !== (o.kind === 'order')) throw new HttpError(400, 'Выбран не тот документ');
+      assertEditable(o, s);
+      items.forEach((i, n) => addItem(o.id, { kind: 'part', name: i.name, code: i.code, product_id: key === 'order' ? pids[n] || undefined : undefined, qty: i.qty,
+        price: i.sell_gross || SUP.sellFrom({ price_net: i.price_net, vat: i.vat }), cost: i.price_net, vat: i.vat, unit: 'szt.' }));
+      recalc(o.id);
+      log('order', o.id, 'update', `Из ${sup.name}: ${items.map((i) => i.code || i.name).join(', ')}`, s.name);
+      done[key] = o.number;
+    }
+  });
+  res.json({ ok: true, ...done });
+});
+
+// ── Финансы: обзор, конструктор, прибыль и убытки, деньги ───────────────────
+crm.get('/finance/overview', (req, res) => { who(req, 'reports.view'); res.json(FIN.overview(req.query)); });
+crm.get('/finance/pivot', (req, res) => {
+  who(req, 'reports.view');
+  const piv = FIN.pivot(req.query);
+  if (req.query.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="pulsecar-${piv.group}-${req.query.from}_${req.query.to}.csv"`);
+    return res.send(FIN.toCsv(piv));
+  }
+  res.json(piv);
+});
+crm.get('/finance/pnl', (req, res) => { who(req, 'reports.view'); res.json(FIN.pnl(req.query)); });
+crm.get('/finance/cash', (req, res) => { who(req, 'reports.view'); res.json(FIN.cash(req.query)); });
+/** Заказы, из которых сложилась цифра (клик по строке отчёта) */
+crm.get('/finance/orders', (req, res) => {
+  who(req, 'reports.view');
+  const f = FIN.orderFilter(req.query);
+  res.json(all(`SELECT o.id, o.number, o.total, o.total_net, o.cost, o.paid, date(COALESCE(o.closed_at, o.created_at),'localtime') d, c.name cname, k.make, k.model, k.plate, t.name source
+    FROM orders o LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id LEFT JOIN order_types t ON t.id = o.type_id
+    WHERE ${f.where} ORDER BY o.total DESC LIMIT 300`, ...f.params));
 });
 
 // ── Настройки ──────────────────────────────────────────────────────────────
