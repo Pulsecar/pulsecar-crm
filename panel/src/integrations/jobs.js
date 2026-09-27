@@ -7,6 +7,7 @@ import { notify } from './notify.js';
 import { recalc } from '../orders.js';
 import { render, orderContext } from '../messaging.js';
 import { startIntercarsSync } from './intercars.js';
+import { startSupplierSync } from './suppliers.js';
 
 const warsaw = () => {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false })
@@ -72,6 +73,7 @@ export async function runJobs() {
 
 export function startJobs() {
   startIntercarsSync();
+  startSupplierSync();
   setInterval(() => runJobs().catch((e) => console.error('jobs:', e.message)), 10 * 60_000);
   setTimeout(() => runJobs().catch(() => {}), 20_000);
 }

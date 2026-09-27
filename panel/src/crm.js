@@ -4,7 +4,7 @@ import multer from 'multer';
 import { all, one, run, tx, insert, update, log, getSetting, setSetting } from './db.js';
 import { config } from './config.js';
 import {
-  HttpError, checkPassword, hashPassword, normPhone, normPlate, normVin, newCardNo, nextNumber, parseCookies, readSession,
+  HttpError, currentNumber, checkPassword, hashPassword, normPhone, normPlate, normVin, newCardNo, nextNumber, parseCookies, readSession,
   signSession, round2, today,
 } from './util.js';
 import {
@@ -16,8 +16,11 @@ import { invoicesEnabled, invoicePdf, issueInvoice, testFakturownia } from './in
 import { createStockDoc } from './stock.js';
 import { publicList, save as saveIntegration, cfg, setState, def as integrationDef } from './integrations/index.js';
 import * as IC from './integrations/intercars.js';
+import * as SUP from './integrations/suppliers.js';
 import { notify, testTelegram } from './integrations/notify.js';
 import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, ensureFeedToken } from './integrations/services.js';
+import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
+import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
 import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate, testSmshttp, activeProvider, smsParts, translit } from './sms.js';
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
@@ -44,6 +47,7 @@ crm.post('/login', (req, res) => {
   }
   const token = signSession({ id: s.id, exp: Date.now() + 14 * 86400_000 });
   res.setHeader('Set-Cookie', `pcs=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${14 * 86400}${config.publicUrl.startsWith('https') ? '; Secure' : ''}${process.env.COOKIE_DOMAIN ? '; Domain=' + process.env.COOKIE_DOMAIN : ''}`);
+  run("UPDATE staff SET last_login = datetime('now') WHERE id = ?", s.id);
   res.json({ ok: true });
 });
 crm.post('/logout', (_req, res) => { res.setHeader('Set-Cookie', `pcs=; Path=/; Max-Age=0${process.env.COOKIE_DOMAIN ? '; Domain=' + process.env.COOKIE_DOMAIN : ''}`); res.json({ ok: true }); });
@@ -51,8 +55,8 @@ crm.post('/logout', (_req, res) => { res.setHeader('Set-Cookie', `pcs=; Path=/; 
 // Общий вход для панели бота (marketing.pulsecar.tech): прокси спрашивает здесь, вошёл ли сотрудник
 crm.get('/auth-check', (req, res) => {
   const sess = readSession(parseCookies(req.headers.cookie).pcs);
-  const s = sess && one('SELECT role FROM staff WHERE id = ? AND active = 1', sess.id);
-  if (!s || !['admin', 'staff'].includes(s.role)) {
+  const s = sess && one('SELECT role, permissions FROM staff WHERE id = ? AND active = 1', sess.id);
+  if (!s || !can(s, 'marketing.view')) {
     // браузер без входа → на страницу входа CRM
     if (req.query.redirect) return res.redirect(302, `${config.publicUrl}/#/marketing`);
     return res.status(401).send('login required');
@@ -62,16 +66,23 @@ crm.get('/auth-check', (req, res) => {
 });
 
 const RANK = { mechanic: 1, staff: 2, admin: 3 };
+const PERM_LABELS = Object.fromEntries(PERM_GROUPS.flatMap(([, l]) => l));
+const permLabel = (k) => `«${PERM_LABELS[k] || k}»`;
 function who(req, min = 'mechanic') {
   const sess = readSession(parseCookies(req.headers.cookie).pcs);
   const s = sess && one('SELECT * FROM staff WHERE id = ? AND active = 1', sess.id);
   if (!s) throw new HttpError(401, 'Войдите в панель.');
-  if ((RANK[s.role] || 0) < RANK[min]) throw new HttpError(403, 'Недостаточно прав.');
+  if (min.includes('.')) { if (!can(s, min)) throw new HttpError(403, 'Недостаточно прав: ' + permLabel(min)); }
+  else if ((RANK[s.role] || 0) < RANK[min]) throw new HttpError(403, 'Недостаточно прав.');
   return s;
 }
 
 const lists = () => ({
   statuses: all('SELECT * FROM order_statuses ORDER BY pos'),
+  expenses: all('SELECT * FROM expense_categories ORDER BY pos, name'),
+  price_groups: all('SELECT * FROM price_groups ORDER BY pos, name'),
+  checklists: all('SELECT * FROM checklists ORDER BY pos, name').map((c) => ({ ...c, items: JSON.parse(c.items || '[]') })),
+  templates: all('SELECT * FROM order_templates ORDER BY pos, name').map((t) => ({ ...t, items: JSON.parse(t.items || '[]') })),
   types: all('SELECT * FROM order_types ORDER BY pos'),
   stations: all('SELECT * FROM stations WHERE active = 1 ORDER BY pos'),
   staff: all('SELECT id, name, role, color, is_mechanic, active, hourly_rate, commission_pct FROM staff ORDER BY name'),
@@ -81,6 +92,7 @@ crm.get('/me', (req, res) => {
   const s = who(req);
   res.json({
     user: { id: s.id, name: s.name, role: s.role },
+    perms: permsOf(s),
     ...lists(),
     settings: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])),
     loyalty: loyaltySummary(0).rules,
@@ -124,7 +136,7 @@ const PAGE = 50;
 const like = (q) => `%${String(q || '').trim().replace(/\s+/g, '%')}%`;
 
 crm.get('/customers', (req, res) => {
-  who(req);
+  who(req, 'clients.view');
   const q = String(req.query.q || '').trim();
   const page = Math.max(0, Number(req.query.page) || 0);
   const phone = normPhone(q);
@@ -146,7 +158,7 @@ crm.get('/customers', (req, res) => {
 });
 
 crm.get('/customers/:id', (req, res) => {
-  who(req);
+  who(req, 'clients.view');
   const c = one('SELECT * FROM customers WHERE id = ?', Number(req.params.id));
   if (!c) throw new HttpError(404, 'Клиент не найден');
   res.json({
@@ -177,13 +189,13 @@ function createCustomer(b) {
   return insert('customers', { ...d, card_no: newCardNo() });
 }
 crm.post('/customers', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'clients.create');
   const id = createCustomer(req.body || {});
   log('customer', id, 'create', null, s.name);
   res.json({ id });
 });
 crm.put('/customers/:id', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'clients.edit');
   const d = custData(req.body || {});
   if (d.phone && one('SELECT 1 FROM customers WHERE phone = ? AND id <> ?', d.phone, Number(req.params.id))) throw new HttpError(409, 'Этот телефон у другого клиента');
   update('customers', Number(req.params.id), d);
@@ -201,7 +213,7 @@ crm.post('/customers/:id/adjust', (req, res) => {
 
 // ── Автомобили ─────────────────────────────────────────────────────────────
 crm.get('/cars', (req, res) => {
-  who(req);
+  who(req, 'cars.view');
   const q = String(req.query.q || '').trim();
   const page = Math.max(0, Number(req.query.page) || 0);
   const pl = normPlate(q);
@@ -214,7 +226,7 @@ crm.get('/cars', (req, res) => {
   res.json({ rows, total, pageSize: PAGE });
 });
 crm.get('/cars/:id', (req, res) => {
-  who(req);
+  who(req, 'cars.view');
   const k = one('SELECT * FROM cars WHERE id = ?', Number(req.params.id));
   if (!k) throw new HttpError(404, 'Авто не найдено');
   const orders = all(`SELECT o.*, st.name status_name, st.color status_color FROM orders o LEFT JOIN order_statuses st ON st.id = o.status_id
@@ -245,13 +257,13 @@ function createCar(b) {
   return insert('cars', { ...d, car_key: normVin(d.vin) || d.plate || `ID${Date.now()}` });
 }
 crm.post('/cars', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'cars.create');
   const id = createCar(req.body || {});
   log('car', id, 'create', null, s.name);
   res.json({ id });
 });
 crm.put('/cars/:id', (req, res) => {
-  who(req, 'staff');
+  who(req, 'cars.edit');
   const d = carData(req.body || {});
   if (d.vin || d.plate) d.car_key = d.vin || d.plate;
   update('cars', Number(req.params.id), d);
@@ -260,16 +272,18 @@ crm.put('/cars/:id', (req, res) => {
 
 // ── Заказы и сметы ─────────────────────────────────────────────────────────
 crm.get('/orders', (req, res) => {
-  who(req);
-  const kind = req.query.kind === 'quote' ? 'quote' : 'order';
+  const me = who(req, req.query.kind === 'quote' ? 'quotes.manage' : 'orders.view');
+  const P = permsOf(me);
+  const kind = req.query.kind === 'quote' ? 'quote' : req.query.kind === 'all' ? 'all' : 'order';
   const q = String(req.query.q || '').trim();
   const page = Math.max(0, Number(req.query.page) || 0);
-  const cond = ['o.kind = ?'];
-  const params = [kind];
+  const cond = kind === 'all' ? [P['quotes.manage'] ? '1=1' : "o.kind = 'order'"] : ['o.kind = ?'];
+  const params = kind === 'all' ? [] : [kind];
   if (req.query.status === 'open') cond.push('st.is_final = 0');
   else if (req.query.status) { cond.push('o.status_id = ?'); params.push(Number(req.query.status)); }
   if (req.query.from) { cond.push('substr(o.created_at,1,10) >= ?'); params.push(req.query.from); }
   if (req.query.to) { cond.push('substr(o.created_at,1,10) <= ?'); params.push(req.query.to); }
+  if (P['orders.only_assigned']) { cond.push('(o.mechanic_id = ? OR o.id IN (SELECT order_id FROM order_items WHERE mechanic_id = ?))'); params.push(me.id, me.id); }
   if (req.query.mechanic) { cond.push('(o.mechanic_id = ? OR o.id IN (SELECT order_id FROM order_items WHERE mechanic_id = ?))'); params.push(Number(req.query.mechanic), Number(req.query.mechanic)); }
   if (q) {
     const pl = normPlate(q);
@@ -283,12 +297,25 @@ crm.get('/orders', (req, res) => {
       st.is_final, t.name type_name,
       (SELECT MIN(start_at) FROM appointments WHERE order_id = o.id AND status <> 'cancelled') planned_at
     ${from} ORDER BY o.id DESC LIMIT ${PAGE} OFFSET ${page * PAGE}`, ...params);
-  res.json({ rows, total: agg.n, sum: agg.s, pageSize: PAGE });
+  res.json({ rows: rows.map((o) => hideFor(P, o)), total: agg.n, sum: P['orders.prices'] ? agg.s : null, pageSize: PAGE });
 });
 
+/** Скрываем цены и контакты, если у сотрудника нет таких прав */
+function hideFor(P, o) {
+  if (!P['orders.prices']) for (const k of ['total', 'total_net', 'paid', 'cost']) o[k] = null;
+  if (!P['clients.contact']) { o.customer_phone = null; if (o.customer) o.customer = { ...o.customer, phone: null, email: null }; }
+  if (!P['orders.prices'] && o.items) o.items = o.items.map((i) => ({ ...i, price: null, cost: null, discount: null }));
+  if (!P['orders.prices'] && o.payments) o.payments = [];
+  return o;
+}
+function assertAssigned(me, o) {
+  if (!permsOf(me)['orders.only_assigned']) return;
+  if (o.mechanic_id !== me.id && !one('SELECT 1 FROM order_items WHERE order_id = ? AND mechanic_id = ?', o.id, me.id)) throw new HttpError(403, 'Этот заказ назначен другому механику');
+}
+
 crm.post('/orders', (req, res) => {
-  const s = who(req, 'staff');
   const b = req.body || {};
+  const s = who(req, b.kind === 'quote' ? 'quotes.manage' : 'orders.create');
   const id = tx(() => {
     let customerId = b.customer_id || null;
     if (!customerId && b.new_customer && (b.new_customer.name || b.new_customer.phone)) {
@@ -304,19 +331,21 @@ crm.post('/orders', (req, res) => {
 });
 
 crm.get('/orders/:id', (req, res) => {
-  who(req);
+  const me = who(req, 'orders.view');
   const o = orderFull(Number(req.params.id));
+  assertAssigned(me, o);
+  hideFor(permsOf(me), o);
   if (o.customer_id) o.redeem = redeemLimits(o.customer_id, o.total, o.payments.filter((p) => p.method === 'points').reduce((a, p) => a + p.amount, 0));
   res.json(o);
 });
 
-const ORDER_FIELDS = ['customer_id', 'car_id', 'type_id', 'mechanic_id', 'mileage', 'fuel_level', 'complaint', 'internal_note', 'mechanic_note', 'pickup_at', 'receipt_no'];
+const ORDER_FIELDS = ['customer_id', 'car_id', 'type_id', 'mechanic_id', 'mileage', 'fuel_level', 'complaint', 'internal_note', 'mechanic_note', 'pickup_at', 'receipt_no', 'external_no', 'faults', 'after_notes'];
 function assertEditable(o, s) {
   const st = one('SELECT lock_edit FROM order_statuses WHERE id = ?', o.status_id);
   if (st?.lock_edit && s.role !== 'admin') throw new HttpError(423, 'Заказ завершён и закрыт для изменений. Смените статус или обратитесь к администратору.');
 }
 crm.put('/orders/:id', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.edit');
   const o = getOrder(Number(req.params.id));
   assertEditable(o, s);
   const b = req.body || {};
@@ -331,7 +360,7 @@ crm.put('/orders/:id', (req, res) => {
 });
 
 crm.post('/orders/:id/status', (req, res) => {
-  const s = who(req);
+  const s = who(req, 'orders.status');
   const r = setStatus(Number(req.params.id), Number(req.body?.status_id), s.name);
   const o = getOrder(Number(req.params.id));
   const st = one('SELECT * FROM order_statuses WHERE id = ?', o.status_id);
@@ -345,7 +374,7 @@ crm.post('/orders/:id/status', (req, res) => {
 });
 
 crm.post('/orders/:id/items', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.jobs');
   const o = getOrder(Number(req.params.id));
   assertEditable(o, s);
   const itemId = addItem(o.id, req.body || {});
@@ -353,17 +382,23 @@ crm.post('/orders/:id/items', (req, res) => {
   res.json({ id: itemId });
 });
 crm.put('/orders/:id/items/:itemId', (req, res) => {
-  const s = who(req);
+  const s = who(req, 'orders.view');
   const o = getOrder(Number(req.params.id));
-  // механик может только отмечать выполнение
-  const b = s.role === 'mechanic' ? { done: req.body?.done } : req.body || {};
-  if (s.role !== 'mechanic') assertEditable(o, s);
-  updateItem(Number(req.params.itemId), b);
+  assertAssigned(s, o);
+  const P = permsOf(s);
+  // без права на работы — только отметка «выполнено»; без права на цены — цены не меняются
+  let b = req.body || {};
+  if (!P['orders.jobs']) b = { done: b.done };
+  else {
+    assertEditable(o, s);
+    if (!P['orders.price_edit']) { const { price: _p, discount: _d, cost: _c, ...rest } = b; b = rest; }
+  }
+  updateItem(Number(req.params.itemId), b, s);
   recalc(o.id);
   res.json({ ok: true });
 });
 crm.delete('/orders/:id/items/:itemId', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.jobs');
   const o = getOrder(Number(req.params.id));
   assertEditable(o, s);
   run('DELETE FROM order_items WHERE id = ? AND order_id = ?', Number(req.params.itemId), o.id);
@@ -372,7 +407,7 @@ crm.delete('/orders/:id/items/:itemId', (req, res) => {
 });
 
 crm.post('/orders/:id/payments', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.payments');
   const o = getOrder(Number(req.params.id));
   const method = ['cash', 'card', 'transfer'].includes(req.body?.method) ? req.body.method : null;
   const amount = round2(req.body?.amount);
@@ -399,7 +434,7 @@ crm.delete('/orders/:id/payments/:pid', (req, res) => {
 
 // баллы в заказе: скан QR клиента → списание
 crm.post('/orders/:id/scan', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'loyalty.use');
   const o = getOrder(Number(req.params.id));
   const c = req.body?.qr ? verifyQrPayload(req.body.qr) : verifyManual(req.body?.who, req.body?.code);
   if (!o.customer_id) run('UPDATE orders SET customer_id = ? WHERE id = ?', c.id, o.id);
@@ -408,7 +443,7 @@ crm.post('/orders/:id/scan', (req, res) => {
   res.json({ ticket: issueTicket(c.id, s.name), limits: redeemLimits(c.id, o.total, already), client: { name: c.name, cardNo: c.card_no } });
 });
 crm.post('/orders/:id/redeem', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'loyalty.use');
   const o = getOrder(Number(req.params.id));
   const r = redeemForOrder(req.body?.ticket, o, req.body?.points, s.name);
   recalc(o.id);
@@ -417,9 +452,11 @@ crm.post('/orders/:id/redeem', (req, res) => {
 });
 
 crm.post('/orders/:id/invoice', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'invoices.create');
   const r = await issueInvoice(Number(req.params.id), req.body || {});
   log('order', Number(req.params.id), 'invoice', r.number, s.name);
+  const target = Number(getSetting('status_on_sale_doc', '')) || null;
+  if (target) try { setStatus(Number(req.params.id), target, s.name); } catch (e) { log('order', Number(req.params.id), 'invoice_error', 'Статус после фактуры: ' + e.message, s.name); }
   res.json(r);
 });
 crm.get('/orders/:id/invoice.pdf', async (req, res) => {
@@ -430,12 +467,12 @@ crm.get('/orders/:id/invoice.pdf', async (req, res) => {
 });
 
 crm.post('/orders/:id/to-order', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.create');
   res.json({ id: quoteToOrder(Number(req.params.id), s.name) });
 });
 
 crm.delete('/orders/:id', (req, res) => {
-  const s = who(req, 'admin');
+  const s = who(req, 'orders.delete');
   const o = getOrder(Number(req.params.id));
   if (one('SELECT 1 FROM payments WHERE order_id = ?', o.id)) throw new HttpError(400, 'В заказе есть оплаты — сначала удалите их');
   if (one(`SELECT 1 FROM stock_docs WHERE order_id = ?`, o.id)) throw new HttpError(400, 'По заказу выданы запчасти со склада — сначала верните статус');
@@ -446,7 +483,7 @@ crm.delete('/orders/:id', (req, res) => {
 
 // ── Терминарз ──────────────────────────────────────────────────────────────
 crm.get('/appointments', (req, res) => {
-  who(req);
+  who(req, 'calendar.view');
   const from = String(req.query.from || today());
   const to = String(req.query.to || from);
   const base = `SELECT a.*, c.name customer_name, c.phone customer_phone, k.make, k.model, k.plate, o.number order_number,
@@ -477,7 +514,7 @@ function checkOverlap(a, ignoreId) {
   if (clash) throw new HttpError(409, `На этом посту уже занято: ${clash.title || 'запись'} в ${clash.start_at.slice(11)}`);
 }
 crm.post('/appointments', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'calendar.edit');
   const d = apptData(req.body || {});
   d.status ||= d.station_id && d.start_at ? 'planned' : 'request';
   d.source ||= 'crm';
@@ -487,7 +524,7 @@ crm.post('/appointments', (req, res) => {
   res.json({ id });
 });
 crm.put('/appointments/:id', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'calendar.edit');
   const cur = one('SELECT * FROM appointments WHERE id = ?', Number(req.params.id));
   if (!cur) throw new HttpError(404, 'Запись не найдена');
   const d = apptData(req.body || {});
@@ -498,7 +535,7 @@ crm.put('/appointments/:id', (req, res) => {
   res.json({ ok: true });
 });
 crm.delete('/appointments/:id', (req, res) => {
-  who(req, 'staff');
+  who(req, 'calendar.edit');
   run(`UPDATE appointments SET status = 'cancelled' WHERE id = ?`, Number(req.params.id));
   res.json({ ok: true });
 });
@@ -507,24 +544,34 @@ crm.delete('/appointments/:id', (req, res) => {
 crm.get('/catalog', (req, res) => {
   who(req);
   const q = String(req.query.q || '').trim();
-  res.json(q ? all('SELECT * FROM service_catalog WHERE name LIKE ? OR category LIKE ? ORDER BY category, name LIMIT 50', like(q), like(q))
-    : all('SELECT * FROM service_catalog ORDER BY category, name LIMIT 1000'));
+  res.json(q ? all('SELECT * FROM service_catalog WHERE active = 1 AND (name LIKE ? OR category LIKE ?) ORDER BY price > 0 DESC, category, name LIMIT 50', like(q), like(q))
+    : all('SELECT * FROM service_catalog ORDER BY category, name LIMIT 5000'));
 });
 crm.post('/catalog', (req, res) => {
-  who(req, 'admin');
+  who(req, 'catalog.edit');
   const b = req.body || {};
   if (!b.name) throw new HttpError(400, 'Название обязательно');
-  const d = { category: b.category || null, name: b.name, unit: b.unit || 'oper', qty: Number(b.qty) || 1, price: Number(b.price) || 0, vat: Number(b.vat ?? 23) };
+  const d = { category: b.category || null, name: b.name, unit: b.unit || 'oper', qty: Number(b.qty) || 1, price: Number(b.price) || 0, vat: Number(b.vat ?? 23),
+    active: b.active === undefined ? 1 : b.active ? 1 : 0, norm_hours: b.norm_hours === '' || b.norm_hours == null ? null : Number(b.norm_hours) };
   if (b.id) update('service_catalog', Number(b.id), d); else d.id = insert('service_catalog', d);
   res.json({ ok: true });
 });
-crm.delete('/catalog/:id', (req, res) => { who(req, 'admin'); run('DELETE FROM service_catalog WHERE id = ?', Number(req.params.id)); res.json({ ok: true }); });
+/** Массово: переименовать категорию или поставить цену всем работам категории без цены */
+crm.post('/catalog/bulk', (req, res) => {
+  who(req, 'catalog.edit');
+  const b = req.body || {};
+  if (b.rename && b.category) run('UPDATE service_catalog SET category = ? WHERE category = ?', String(b.rename).trim(), b.category);
+  if (b.price !== undefined && b.category) run(`UPDATE service_catalog SET price = ? WHERE category = ? AND ${b.onlyEmpty ? 'price = 0' : '1=1'}`, Number(b.price) || 0, b.category);
+  if (b.active !== undefined && b.category) run('UPDATE service_catalog SET active = ? WHERE category = ?', b.active ? 1 : 0, b.category);
+  res.json({ ok: true });
+});
+crm.delete('/catalog/:id', (req, res) => { who(req, 'catalog.edit'); run('DELETE FROM service_catalog WHERE id = ?', Number(req.params.id)); res.json({ ok: true }); });
 
 // ── Склад ──────────────────────────────────────────────────────────────────
 const reservedSql = `(SELECT COALESCE(SUM(i.qty),0) FROM order_items i JOIN orders o ON o.id = i.order_id JOIN order_statuses st ON st.id = o.status_id
   WHERE i.product_id = p.id AND st.is_final = 0 AND o.kind = 'order')`;
 crm.get('/products', (req, res) => {
-  who(req);
+  who(req, 'products.view');
   const q = String(req.query.q || '').trim();
   const page = Math.max(0, Number(req.query.page) || 0);
   const cond = ['p.active = 1'];
@@ -538,7 +585,7 @@ crm.get('/products', (req, res) => {
 });
 const PROD_FIELDS = ['name', 'code', 'manufacturer', 'unit', 'min_stock', 'purchase_price', 'sell_price', 'vat', 'location', 'active'];
 crm.post('/products', (req, res) => {
-  who(req, 'staff');
+  who(req, 'products.create');
   const b = req.body || {};
   if (!b.name) throw new HttpError(400, 'Название обязательно');
   const d = {};
@@ -547,7 +594,7 @@ crm.post('/products', (req, res) => {
   res.json({ id: b.id || d.id });
 });
 crm.get('/products/:id', (req, res) => {
-  who(req);
+  who(req, 'products.view');
   const p = one(`SELECT p.*, ${reservedSql} reserved FROM products p WHERE p.id = ?`, Number(req.params.id));
   if (!p) throw new HttpError(404, 'Товар не найден');
   res.json({
@@ -560,7 +607,7 @@ crm.get('/products/:id', (req, res) => {
 });
 
 crm.get('/stock-docs', (req, res) => {
-  who(req);
+  who(req, 'products.view');
   const page = Math.max(0, Number(req.query.page) || 0);
   const q = String(req.query.q || '').trim();
   const where = q ? 'WHERE number LIKE ? OR ext_number LIKE ? OR counterparty LIKE ?' : '';
@@ -571,23 +618,24 @@ crm.get('/stock-docs', (req, res) => {
   });
 });
 crm.get('/stock-docs/:id', (req, res) => {
-  who(req);
+  who(req, 'products.view');
   const d = one('SELECT * FROM stock_docs WHERE id = ?', Number(req.params.id));
   if (!d) throw new HttpError(404, 'Документ не найден');
   res.json({ ...d, items: all('SELECT i.*, p.name, p.code, p.unit FROM stock_doc_items i JOIN products p ON p.id = i.product_id WHERE doc_id = ?', d.id) });
 });
 // PZ — приход от поставщика, RW — списание, PW — оприходование (излишки)
 crm.post('/stock-docs', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'stock.docs');
   res.json({ id: createStockDoc(req.body || {}, s.name) });
 });
 
 // приход из файла любого поставщика (Auto Partner, Inter Team, Hart…): разбор CSV/XLSX → позиции для проверки
 crm.post('/stock-docs/parse-file', upload.single('file'), (req, res) => {
-  who(req, 'staff');
+  who(req, 'stock.docs');
   if (!req.file) throw new HttpError(400, 'Выберите файл');
   const rows = readRows(req.file.buffer);
   if (!rows.length) throw new HttpError(400, 'Файл пустой');
+  if (req.query.generic) return res.json(SUP.rowsToLines(rows));
   const H = Object.keys(rows[0]);
   const find = (...names) => H.find((h) => names.some((n) => h.toLowerCase().replace(/\s+/g, ' ').trim() === n));
   const col = {
@@ -614,7 +662,7 @@ crm.post('/stock-docs/parse-file', upload.single('file'), (req, res) => {
 
 // инвентаризация одного товара: фактический остаток → документ PW/RW на разницу
 crm.post('/products/:id/inventory', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'stock.docs');
   const p = one('SELECT * FROM products WHERE id = ?', Number(req.params.id));
   if (!p) throw new HttpError(404, 'Товар не найден');
   const counted = Number(req.body?.counted);
@@ -632,7 +680,7 @@ crm.post('/products/:id/inventory', (req, res) => {
 
 // ── Закупки ────────────────────────────────────────────────────────────────
 crm.get('/purchases', (req, res) => {
-  who(req, 'staff');
+  who(req, 'purchases.view');
   const q = String(req.query.q || '').trim();
   const where = q ? 'WHERE supplier LIKE ? OR number LIKE ? OR category LIKE ?' : '';
   const params = q ? [like(q), like(q), like(q)] : [];
@@ -642,7 +690,7 @@ crm.get('/purchases', (req, res) => {
   });
 });
 crm.post('/purchases', (req, res) => {
-  who(req, 'staff');
+  who(req, 'purchases.edit');
   const b = req.body || {};
   if (!b.supplier) throw new HttpError(400, 'Укажите поставщика');
   const d = {
@@ -652,11 +700,11 @@ crm.post('/purchases', (req, res) => {
   if (b.id) update('purchases', Number(b.id), d); else insert('purchases', d);
   res.json({ ok: true });
 });
-crm.delete('/purchases/:id', (req, res) => { who(req, 'admin'); run('DELETE FROM purchases WHERE id = ?', Number(req.params.id)); res.json({ ok: true }); });
+crm.delete('/purchases/:id', (req, res) => { who(req, 'purchases.edit'); run('DELETE FROM purchases WHERE id = ?', Number(req.params.id)); res.json({ ok: true }); });
 
 // ── Хранение шин ───────────────────────────────────────────────────────────
 crm.get('/storage', (req, res) => {
-  who(req);
+  who(req, 'storage.view');
   const q = String(req.query.q || '').trim();
   const cond = [req.query.all === '1' ? '1=1' : 's.date_out IS NULL'];
   const params = [];
@@ -665,7 +713,7 @@ crm.get('/storage', (req, res) => {
     LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN cars k ON k.id = s.car_id WHERE ${cond.join(' AND ')} ORDER BY s.id DESC LIMIT 300`, ...params));
 });
 crm.post('/storage', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'storage.edit');
   const b = req.body || {};
   const d = {
     customer_id: b.customer_id || null, car_id: b.car_id || null, kind: b.kind || 'opony', description: b.description || null,
@@ -679,7 +727,7 @@ crm.post('/storage', (req, res) => {
   res.json({ id });
 });
 crm.post('/storage/:id/release', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'storage.edit');
   run('UPDATE storage SET date_out = ? WHERE id = ?', req.body?.date || today(), Number(req.params.id));
   log('storage', Number(req.params.id), 'release', null, s.name);
   res.json({ ok: true });
@@ -687,7 +735,7 @@ crm.post('/storage/:id/release', (req, res) => {
 
 // ── Касса ──────────────────────────────────────────────────────────────────
 crm.get('/cash', (req, res) => {
-  who(req, 'staff');
+  who(req, 'cash.view');
   const from = String(req.query.from || today().slice(0, 8) + '01');
   const to = String(req.query.to || today());
   const rows = all(`SELECT p.*, o.number order_number, c.name customer_name FROM payments p LEFT JOIN orders o ON o.id = p.order_id
@@ -703,7 +751,7 @@ crm.get('/cash', (req, res) => {
 });
 // ручные KP (приход) / KW (расход) наличных
 crm.post('/cash', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'cash.edit');
   const direction = req.body?.direction === 'out' ? 'out' : 'in';
   const amount = round2(req.body?.amount);
   if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
@@ -715,7 +763,7 @@ crm.post('/cash', (req, res) => {
 
 // ── Отчёты ─────────────────────────────────────────────────────────────────
 crm.get('/reports', (req, res) => {
-  who(req, 'admin');
+  who(req, 'reports.view');
   const from = String(req.query.from || today().slice(0, 8) + '01');
   const to = String(req.query.to || today());
   const closed = `o.kind = 'order' AND o.closed_at IS NOT NULL AND substr(o.closed_at,1,10) BETWEEN ? AND ?`;
@@ -745,31 +793,95 @@ crm.get('/reports', (req, res) => {
 
 // ── Настройки ──────────────────────────────────────────────────────────────
 crm.put('/settings', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   const allowed = ['company_name', 'company_brand', 'company_address', 'company_phone', 'company_email', 'company_nip', 'company_bank',
-    'hours_start', 'hours_end', 'slot_min', 'default_vat', 'cash_opening', 'order_terms'];
+    'hours_start', 'hours_end', 'slot_min', 'default_vat', 'cash_opening', 'order_terms', ...SETTINGS_KEYS];
   for (const [k, v] of Object.entries(req.body || {})) if (allowed.includes(k)) setSetting(k, String(v ?? ''));
   res.json({ ok: true });
 });
 
+crm.get('/settings/schema', (req, res) => {
+  who(req, 'settings.manage');
+  res.json({ schema: SETTINGS_SCHEMA, values: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])) });
+});
+
+// Нумерация документов: шаблон, сброс, начальный и текущий номер (продолжить с Motowarsztat)
+crm.get('/numbering', (req, res) => {
+  who(req, 'settings.manage');
+  res.json(all('SELECT * FROM doc_numbering ORDER BY pos').map((r) => ({ ...r, current: currentNumber(r.key).n })));
+});
+crm.put('/numbering/:key', (req, res) => {
+  who(req, 'settings.manage');
+  const r = one('SELECT * FROM doc_numbering WHERE key = ?', req.params.key);
+  if (!r) throw new HttpError(404, 'Нет такого документа');
+  const b = req.body || {};
+  const pattern = String(b.pattern ?? r.pattern).trim();
+  if (!/\[numer\]/i.test(pattern)) throw new HttpError(400, 'В шаблоне должно быть [numer]');
+  const reset = ['month', 'year', 'never'].includes(b.reset) ? b.reset : r.reset;
+  run('UPDATE doc_numbering SET pattern = ?, reset = ?, start = ? WHERE key = ?', pattern, reset, Math.max(1, Number(b.start ?? r.start) || 1), r.key);
+  if (b.current !== undefined && b.current !== '' && b.current !== null) {
+    const ck = currentNumber(r.key).counterKey;
+    run('INSERT INTO counters (key, n) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET n = excluded.n', ck, Math.max(0, Math.trunc(Number(b.current))));
+  }
+  res.json({ ok: true, next: pattern.replace(/\[numer\]/gi, String(currentNumber(r.key).n + 1)).replace(/\[miesiac\]/gi, String(new Date().getMonth() + 1).padStart(2, '0')).replace(/\[rok\]/gi, String(new Date().getFullYear())) });
+});
+
+// Шаблоны заказов (набор работ одной кнопкой) и чек-листы
+crm.post('/orders/:id/apply-template/:tid', (req, res) => {
+  const s = who(req, 'orders.jobs');
+  const o = getOrder(Number(req.params.id));
+  assertEditable(o, s);
+  const t = one('SELECT * FROM order_templates WHERE id = ?', Number(req.params.tid));
+  if (!t) throw new HttpError(404, 'Шаблон не найден');
+  const items = JSON.parse(t.items || '[]');
+  tx(() => { for (const it of items) addItem(o.id, { ...it, id: undefined, catalog_id: undefined }); });
+  recalc(o.id);
+  log('order', o.id, 'update', `Шаблон: ${t.name}`, s.name);
+  res.json({ ok: true, added: items.length });
+});
+crm.get('/orders/:id/checklists', (req, res) => {
+  who(req, 'orders.view');
+  res.json({
+    filled: all('SELECT * FROM order_checklists WHERE order_id = ? ORDER BY id', Number(req.params.id)).map((c) => ({ ...c, results: JSON.parse(c.results) })),
+    templates: all('SELECT * FROM checklists WHERE active = 1 ORDER BY pos, name').map((c) => ({ ...c, items: JSON.parse(c.items) })),
+  });
+});
+crm.post('/orders/:id/checklists', (req, res) => {
+  const s = who(req, 'orders.view');
+  const o = getOrder(Number(req.params.id));
+  const b = req.body || {};
+  const results = JSON.stringify((b.results || []).map((r) => ({ item: String(r.item || '').slice(0, 200), state: ['ok', 'warn', 'bad', ''].includes(r.state) ? r.state : '', note: String(r.note || '').slice(0, 300) })));
+  if (b.id) run(`UPDATE order_checklists SET results = ?, staff = ?, updated_at = datetime('now') WHERE id = ? AND order_id = ?`, results, s.name, Number(b.id), o.id);
+  else {
+    const t = one('SELECT * FROM checklists WHERE id = ?', Number(b.checklist_id));
+    if (!t) throw new HttpError(404, 'Чек-лист не найден');
+    insert('order_checklists', { order_id: o.id, checklist_id: t.id, name: t.name, results: JSON.stringify(JSON.parse(t.items).map((item) => ({ item, state: '', note: '' }))), staff: s.name, updated_at: new Date().toISOString().slice(0, 19).replace('T', ' ') });
+  }
+  res.json({ ok: true });
+});
+
 const dict = {
+  expenses: { table: 'expense_categories', fields: ['name', 'pos'] },
+  price_groups: { table: 'price_groups', fields: ['name', 'markup_pct', 'pos'] },
+  checklists: { table: 'checklists', fields: ['name', 'items', 'active', 'pos'], json: ['items'] },
+  templates: { table: 'order_templates', fields: ['name', 'icon', 'items', 'active', 'pos'], json: ['items'] },
   statuses: { table: 'order_statuses', fields: ['name', 'color', 'pos', 'is_final', 'lock_edit', 'notify_client', 'client_label', 'sms_mode', 'sms_template', 'email_mode', 'email_template'] },
   types: { table: 'order_types', fields: ['name', 'pos'] },
-  stations: { table: 'stations', fields: ['name', 'color', 'pos', 'active'] },
+  stations: { table: 'stations', fields: ['name', 'color', 'pos', 'active', 'slot_min', 'max_hours_day'] },
 };
 crm.post('/dict/:name', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   const d = dict[req.params.name];
   if (!d) throw new HttpError(404, 'Нет такого справочника');
   const b = req.body || {};
   if (!b.name) throw new HttpError(400, 'Название обязательно');
   const row = {};
-  for (const f of d.fields) if (b[f] !== undefined) row[f] = b[f];
+  for (const f of d.fields) if (b[f] !== undefined) row[f] = d.json?.includes(f) && typeof b[f] !== 'string' ? JSON.stringify(b[f]) : b[f];
   if (b.id) update(d.table, Number(b.id), row); else insert(d.table, row);
   res.json({ ok: true, ...lists() });
 });
 crm.delete('/dict/:name/:id', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   const d = dict[req.params.name];
   if (!d) throw new HttpError(404, 'Нет такого справочника');
   try { run(`DELETE FROM ${d.table} WHERE id = ?`, Number(req.params.id)); }
@@ -777,15 +889,28 @@ crm.delete('/dict/:name/:id', (req, res) => {
   res.json({ ok: true, ...lists() });
 });
 
+/** Сотрудники с правами — только для администратора */
+crm.get('/staff', (req, res) => {
+  who(req, 'settings.manage');
+  res.json({
+    rows: all('SELECT id, login, name, role, color, hourly_rate, commission_pct, is_mechanic, active, phone, email, last_login, permissions, stations, (pass_hash IS NOT NULL) has_password FROM staff ORDER BY active DESC, name')
+      .map((r) => ({ ...r, permissions: r.permissions ? JSON.parse(r.permissions) : {}, stations: r.stations ? JSON.parse(r.stations) : [], effective: permsOf(r) })),
+    groups: PERM_GROUPS, presets: PRESETS,
+  });
+});
 crm.post('/staff', (req, res) => {
-  const me = who(req, 'admin');
+  const me = who(req, 'settings.manage');
   const b = req.body || {};
   if (!b.name) throw new HttpError(400, 'Имя обязательно');
   const d = {
     name: b.name, role: ['admin', 'staff', 'mechanic'].includes(b.role) ? b.role : 'mechanic', color: b.color || null,
     hourly_rate: Number(b.hourly_rate) || 0, commission_pct: Number(b.commission_pct) || 0, is_mechanic: b.is_mechanic ? 1 : 0,
     active: b.active === undefined ? 1 : (b.active ? 1 : 0), login: b.login || null,
+    phone: b.phone ?? undefined, email: b.email ?? undefined,
+    permissions: b.permissions !== undefined ? JSON.stringify(b.permissions || {}) : undefined,
+    stations: b.stations !== undefined ? JSON.stringify(b.stations || []) : undefined,
   };
+  if (b.revoke) { d.login = null; d.pass_hash = null; }
   if (d.login && one('SELECT 1 FROM staff WHERE login = ? AND id <> ?', d.login, Number(b.id) || 0)) throw new HttpError(409, 'Такой логин уже есть');
   if (b.password) {
     if (String(b.password).length < 8) throw new HttpError(400, 'Пароль — минимум 8 символов');
@@ -798,7 +923,7 @@ crm.post('/staff', (req, res) => {
 
 // ── Импорт ─────────────────────────────────────────────────────────────────
 crm.post('/import', upload.single('file'), (req, res) => {
-  const s = who(req, 'admin');
+  const s = who(req, 'settings.manage');
   if (!req.file) throw new HttpError(400, 'Выберите файл CSV или XLSX.');
   let stats;
   try { stats = importRows(readRows(req.file.buffer), req.body?.type || null); }
@@ -807,7 +932,7 @@ crm.post('/import', upload.single('file'), (req, res) => {
   res.json(stats);
 });
 crm.get('/imports', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   res.json(all('SELECT * FROM imports ORDER BY id DESC LIMIT 30').map((i) => ({ ...i, stats: JSON.parse(i.stats) })));
 });
 crm.get('/template.csv', (req, res) => {
@@ -819,7 +944,7 @@ crm.get('/template.csv', (req, res) => {
 
 // ── Интеграции ──────────────────────────────────────────────────────────────
 crm.get('/integrations', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   const token = ensureFeedToken();
   res.json({
     list: publicList(),
@@ -829,13 +954,14 @@ crm.get('/integrations', (req, res) => {
   });
 });
 crm.put('/integrations/:key', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   if (!integrationDef(req.params.key)) throw new HttpError(404, 'Нет такой интеграции');
   saveIntegration(req.params.key, !!req.body?.enabled, req.body?.values || {});
   res.json({ ok: true });
 });
 const TESTS = {
   intercars: () => IC.testIntercars(), fakturownia: () => testFakturownia(), smsapi: () => testSms(), email: () => testEmail(), tpay: () => testTpay(),
+  hart: () => SUP.testHart(), mailbox: () => SUP.testMailbox(),
   smsgate: () => testSmsgate(), serwersms: () => testSerwersms(), smsplanet: () => testSmsplanet(), twilio: () => testTwilio(), smshttp: () => testSmshttp(), plate: () => testPlate(),
   telegram: async () => { const r = await testTelegram(); const row = one(`SELECT config FROM integrations WHERE key='telegram'`); const c = row ? JSON.parse(row.config) : {};
     if (!c.chatId) run(`UPDATE integrations SET config = ? WHERE key = 'telegram'`, JSON.stringify({ ...c, chatId: r.chatId })); return r.info; },
@@ -845,7 +971,7 @@ const TESTS = {
   marketing: async () => { const u = cfg('marketing', { ignoreEnabled: true })?.url; const r = await fetch(u, { method: 'GET', redirect: 'manual' }).catch(() => null); if (!r) throw new Error('Адрес не отвечает'); return `Отвечает (${r.status})`; },
 };
 crm.post('/integrations/:key/test', async (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   const t = TESTS[req.params.key];
   if (!t) throw new HttpError(404, 'Нет проверки');
   try {
@@ -858,9 +984,108 @@ crm.post('/integrations/:key/test', async (req, res) => {
   }
 });
 
+// ── Хуртовни: документы от любых поставщиков → склад или заказ ─────────────
+crm.get('/suppliers', (req, res) => {
+  who(req, 'products.view');
+  const q = String(req.query.q || '').trim();
+  const cond = ['1=1'];
+  const p = [];
+  if (req.query.supplier) { cond.push('d.supplier = ?'); p.push(String(req.query.supplier)); }
+  if (req.query.state === 'new') cond.push('d.stock_doc_id IS NULL');
+  if (q) { cond.push('(d.ext_id LIKE ? OR d.raw LIKE ?)'); p.push(like(q), like(q)); }
+  const docs = all(`SELECT d.id, d.supplier, d.kind, d.ext_id, d.doc_date, d.total_net, d.total_gross, d.lines_count, d.stock_doc_id, d.fetched_at, s.number stock_number,
+      json_extract(d.raw, '$.usedIn') used_in FROM supplier_docs d LEFT JOIN stock_docs s ON s.id = d.stock_doc_id WHERE ${cond.join(' AND ')} ORDER BY d.doc_date DESC, d.id DESC LIMIT 200`, ...p)
+    .map((d) => ({ ...d, supplier_name: SUP.wholesaler(d.supplier).name }));
+  res.json({
+    docs,
+    wholesalers: SUP.WHOLESALERS.map((w) => ({ ...w, connected: w.api ? !!cfg(w.api) : false, docs: one('SELECT COUNT(*) n FROM supplier_docs WHERE supplier = ?', w.key).n })),
+    api: { intercars: !!cfg('intercars'), hart: !!cfg('hart'), mailbox: !!cfg('mailbox') },
+    markup: Number(getSetting('default_markup', '40')) || 0,
+  });
+});
+crm.get('/suppliers/docs/:id', (req, res) => {
+  who(req, 'products.view');
+  const d = one('SELECT * FROM supplier_docs WHERE id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Документ не найден');
+  const lines = SUP.docLines(d).map((l) => {
+    const ex = (l.sku && one('SELECT id, name, stock, sell_price FROM products WHERE supplier_sku = ?', l.sku)) || (l.ean && one('SELECT id, name, stock, sell_price FROM products WHERE ean = ?', l.ean))
+      || (l.code && one(`SELECT id, name, stock, sell_price FROM products WHERE upper(replace(replace(replace(code,' ',''),'-',''),'.','')) = ?`, String(l.code).toUpperCase().replace(/[^A-Z0-9]/g, '')));
+    return { ...l, sell: SUP.sellFrom(l), product: ex || null };
+  });
+  const raw = JSON.parse(d.raw || '{}');
+  res.json({ ...d, raw: undefined, supplier_name: SUP.wholesaler(d.supplier).name, lines, used_in: raw.usedIn || null, meta: { file: raw.file, from: raw.from, url: raw.url } });
+});
+crm.post('/suppliers/parse', (req, res) => {
+  who(req, 'products.view');
+  res.json(SUP.parsePasted(req.body?.text));
+});
+crm.post('/suppliers/parse-file', upload.single('file'), (req, res) => {
+  who(req, 'products.view');
+  if (!req.file) throw new HttpError(400, 'Выберите файл');
+  res.json(SUP.rowsToLines(readRows(req.file.buffer)));
+});
+/** Сохранить позиции (из кнопки «В Pulsecar», буфера или файла) как документ поставщика */
+crm.post('/suppliers/docs', (req, res) => {
+  const s = who(req, 'products.view');
+  const b = req.body || {};
+  const lines = (b.lines || []).map((l) => ({ code: l.code ? String(l.code).slice(0, 60) : null, name: String(l.name || l.code || '').slice(0, 250), qty: Number(l.qty) || 0, price_net: Number(l.price_net) || 0, vat: Number(l.vat ?? 23), ean: l.ean || null, brand: l.brand || null, sku: l.sku || null })).filter((l) => l.name && l.qty > 0);
+  const r = SUP.saveDoc({ supplier: b.supplier || 'other', kind: b.kind || 'manual', ext_id: b.ext_id || `${s.name} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, doc_date: b.doc_date, lines, meta: { url: b.url || null } });
+  res.json(r);
+});
+crm.post('/suppliers/docs/:id/receive', (req, res) => {
+  const s = who(req, 'suppliers.receive');
+  const d = one('SELECT supplier, raw FROM supplier_docs WHERE id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Документ не найден');
+  const generic = JSON.parse(d.raw || '{}').generic;
+  res.json(d.supplier === 'intercars' && !generic && !req.body?.pick ? IC.receiveDoc(Number(req.params.id), s.name) : SUP.receiveGeneric(Number(req.params.id), s.name, req.body?.pick || null));
+});
+crm.post('/suppliers/docs/:id/to-order', (req, res) => {
+  const s = who(req, 'orders.jobs');
+  const b = req.body || {};
+  const o = getOrder(Number(b.order_id));
+  assertEditable(o, s);
+  const r = SUP.addDocToOrder(Number(req.params.id), o.id, { pick: b.pick || null, toStock: !!b.toStock, staffName: s.name });
+  log('order', o.id, 'update', `Запчасти от поставщика: ${r.added} поз.`, s.name);
+  res.json(r);
+});
+crm.delete('/suppliers/docs/:id', (req, res) => {
+  who(req, 'suppliers.receive');
+  const d = one('SELECT stock_doc_id FROM supplier_docs WHERE id = ?', Number(req.params.id));
+  if (d?.stock_doc_id) throw new HttpError(409, 'Документ уже принят на склад — удалить нельзя');
+  run('DELETE FROM supplier_docs WHERE id = ?', Number(req.params.id));
+  res.json({ ok: true });
+});
+crm.post('/suppliers/sync', async (req, res) => {
+  who(req, 'suppliers.receive');
+  const out = {};
+  const days = Math.min(30, Math.max(1, Number(req.body?.days) || 7));
+  if (cfg('intercars')) try { out.intercars = await IC.fetchDocs(days); } catch (e) { out.intercars = { error: e.message }; }
+  if (cfg('hart')) try { out.hart = await SUP.fetchHartDocs(days); } catch (e) { out.hart = { error: e.message }; }
+  if (cfg('mailbox')) try { out.mailbox = await SUP.checkMailbox(); } catch (e) { out.mailbox = { error: e.message }; }
+  res.json(out);
+});
+/** Поиск детали у всех хуртовен с API (Inter Cars — по индексу, Hart — по коду Hart) */
+crm.get('/suppliers/search', async (req, res) => {
+  who(req, 'products.view');
+  const q = String(req.query.q || '').trim();
+  const [ic, h] = await Promise.all([
+    cfg('intercars') ? IC.search(q).then((r) => r.map((x) => ({ ...x, supplier: 'intercars' }))).catch((e) => [{ error: 'Inter Cars: ' + e.message }]) : [],
+    cfg('hart') ? SUP.searchHart(q).catch((e) => [{ error: 'Hart: ' + e.message }]) : [],
+  ]);
+  const rows = [...ic, ...h];
+  res.json({ rows: rows.filter((r) => !r.error), errors: rows.filter((r) => r.error).map((r) => r.error), connected: { intercars: !!cfg('intercars'), hart: !!cfg('hart') } });
+});
+crm.post('/suppliers/order', async (req, res) => {
+  const s = who(req, 'suppliers.order');
+  const b = req.body || {};
+  const r = b.supplier === 'hart' ? await SUP.orderHart(b.lines || []) : await IC.placeOrder(b);
+  if (b.order_id) log('order', Number(b.order_id), b.supplier === 'hart' ? 'hart_order' : 'ic_order', JSON.stringify(r), s.name);
+  res.json(r);
+});
+
 // ── Inter Cars ──────────────────────────────────────────────────────────────
 crm.get('/intercars/docs', (req, res) => {
-  who(req, 'staff');
+  who(req, 'suppliers.receive');
   const rows = all(`SELECT d.id, d.kind, d.ext_id, d.doc_date, d.total_net, d.total_gross, d.lines_count, d.stock_doc_id, d.fetched_at, s.number stock_number
     FROM supplier_docs d LEFT JOIN stock_docs s ON s.id = d.stock_doc_id WHERE d.supplier = 'intercars' ${req.query.all === '1' ? '' : 'AND (d.stock_doc_id IS NULL OR d.fetched_at >= datetime(\'now\',\'-14 days\'))'}
     ORDER BY d.doc_date DESC, d.id DESC LIMIT 300`);
@@ -868,30 +1093,30 @@ crm.get('/intercars/docs', (req, res) => {
   res.json({ rows, enabled: !!cfg('intercars'), state: st ? JSON.parse(st.state) : {} });
 });
 crm.get('/intercars/docs/:id', (req, res) => {
-  who(req, 'staff');
+  who(req, 'suppliers.receive');
   const d = one(`SELECT * FROM supplier_docs WHERE id = ? AND supplier = 'intercars'`, Number(req.params.id));
   if (!d) throw new HttpError(404, 'Документ не найден');
   res.json({ ...d, raw: JSON.parse(d.raw) });
 });
 crm.post('/intercars/sync', async (req, res) => {
-  who(req, 'staff');
+  who(req, 'suppliers.receive');
   try { res.json(await IC.fetchDocs(Math.min(30, Math.max(1, Number(req.body?.days) || 7)))); }
   catch (e) { setState('intercars', { lastError: e.message }); throw e; }
 });
 crm.post('/intercars/docs/:id/receive', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'suppliers.receive');
   res.json(IC.receiveDoc(Number(req.params.id), s.name));
 });
 crm.post('/intercars/receive-all', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'suppliers.receive');
   res.json(await IC.receiveAll(s.name));
 });
 crm.get('/intercars/search', async (req, res) => {
-  who(req, 'staff');
+  who(req, 'products.view');
   res.json(await IC.search(req.query.q));
 });
 crm.post('/intercars/order', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'suppliers.order');
   const r = await IC.placeOrder(req.body || {});
   if (req.body?.order_id) log('order', Number(req.body.order_id), 'ic_order', r.requisitionId, s.name);
   res.json(r);
@@ -899,7 +1124,7 @@ crm.post('/intercars/order', async (req, res) => {
 
 // ── Заказ: онлайн-оплата, e-mail, SMS клиенту ───────────────────────────────
 crm.post('/orders/:id/paylink', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.contact');
   const o = getOrder(Number(req.params.id));
   const c = o.customer_id ? one('SELECT * FROM customers WHERE id = ?', o.customer_id) : null;
   const r = await createPayLink(o, c, config.publicUrl);
@@ -911,14 +1136,14 @@ crm.post('/orders/:id/paylink', async (req, res) => {
   res.json(r);
 });
 crm.post('/orders/:id/paylink/check', async (req, res) => {
-  who(req, 'staff');
+  who(req, 'orders.payments');
   const o = getOrder(Number(req.params.id));
   const r = await checkPayment(o);
   if (r.justPaid) { recalc(o.id); notify('payment', `Онлайн-оплата ${o.number}: ${r.amount} zł`); }
   res.json(r);
 });
 crm.post('/orders/:id/email', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.contact');
   const o = orderFull(Number(req.params.id));
   const to = String(req.body?.to || o.customer?.email || '').trim();
   const S = Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value]));
@@ -938,7 +1163,7 @@ crm.post('/orders/:id/email', async (req, res) => {
   res.json({ ok: true, to });
 });
 crm.post('/orders/:id/sms', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.contact');
   const o = getOrder(Number(req.params.id));
   const c = o.customer_id ? one('SELECT phone FROM customers WHERE id = ?', o.customer_id) : null;
   const text = String(req.body?.text || '').trim();
@@ -950,7 +1175,7 @@ crm.post('/orders/:id/sms', async (req, res) => {
 });
 /** Готовый текст SMS/e-mail по шаблону: kind = card | quote | paylink | reminder | review | status:<id> */
 crm.get('/orders/:id/template', (req, res) => {
-  who(req, 'staff');
+  who(req, 'orders.contact');
   const o = getOrder(Number(req.params.id));
   const kind = String(req.query.kind || (o.kind === 'quote' ? 'quote' : 'card'));
   const ctx = orderContext(o.id);
@@ -966,12 +1191,12 @@ crm.get('/orders/:id/template', (req, res) => {
 });
 /** Ссылка на электронную карту заказа (создаётся один раз) */
 crm.post('/orders/:id/card', (req, res) => {
-  who(req, 'staff');
+  who(req, 'orders.contact');
   const o = getOrder(Number(req.params.id));
   res.json({ url: cardUrl(o.id) });
 });
 crm.post('/orders/:id/accept-reset', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'orders.edit');
   const o = getOrder(Number(req.params.id));
   run('UPDATE orders SET accepted_at = NULL, accepted_via = NULL WHERE id = ?', o.id);
   log('order', o.id, 'accept_reset', null, s.name);
@@ -980,7 +1205,7 @@ crm.post('/orders/:id/accept-reset', (req, res) => {
 
 // ── SMS: журнал, отправка любому клиенту, шаблоны ───────────────────────────
 crm.get('/sms', (req, res) => {
-  who(req, 'staff');
+  who(req, 'sms.view');
   const q = String(req.query.q || '').trim();
   const page = Math.max(0, Number(req.query.page) || 0);
   const cond = [];
@@ -995,7 +1220,7 @@ crm.get('/sms', (req, res) => {
   res.json({ rows, total, pageSize: PAGE, month, provider: activeProvider() });
 });
 crm.post('/sms', async (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'sms.send');
   const b = req.body || {};
   const c = b.customer_id ? one('SELECT id, phone FROM customers WHERE id = ?', Number(b.customer_id)) : null;
   const phone = normPhone(b.phone) || c?.phone;
@@ -1004,7 +1229,7 @@ crm.post('/sms', async (req, res) => {
   res.json({ ok: true, ...r });
 });
 crm.post('/sms/preview', (req, res) => {
-  who(req, 'staff');
+  who(req, 'sms.send');
   let t = String(req.body?.text || '');
   if (getSetting('sms_translit', '1') === '1') t = translit(t);
   res.json({ text: t, length: t.length, parts: t ? smsParts(t) : 0 });
@@ -1015,7 +1240,7 @@ const MSG_KEYS = ['sms_tpl_reminder', 'sms_tpl_card', 'sms_tpl_quote', 'sms_tpl_
   'card_accept', 'card_show_status', 'card_show_net', 'card_show_bank', 'card_show_invoice', 'card_quote_after_protocol', 'card_accept_status_id', 'card_rodo', 'card_extra',
   'booking_widget', 'booking_color'];
 crm.get('/messaging', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   res.json({
     values: Object.fromEntries(MSG_KEYS.map((k) => [k, getSetting(k, '')])),
     fields: TPL_FIELDS, provider: activeProvider(),
@@ -1024,7 +1249,7 @@ crm.get('/messaging', (req, res) => {
   });
 });
 crm.put('/messaging', (req, res) => {
-  who(req, 'admin');
+  who(req, 'settings.manage');
   for (const [k, v] of Object.entries(req.body || {})) if (MSG_KEYS.includes(k)) setSetting(k, String(v ?? ''));
   res.json({ ok: true });
 });
@@ -1033,7 +1258,7 @@ if (process.env.NODE_ENV === 'test') crm.post('/_jobs', async (req, res) => { wh
 
 // ── Данные авто: код Aztec с техпаспорта и поиск по номеру ─────────────────
 crm.post('/vehicle/aztec', (req, res) => {
-  who(req, 'staff');
+  who(req, 'cars.view');
   const d = decodeAztec(req.body?.raw);
   const vin = normVin(d.car.vin);
   const plate = normPlate(d.car.plate);
@@ -1041,20 +1266,20 @@ crm.post('/vehicle/aztec', (req, res) => {
   res.json({ ...d, car: { ...d.car, plate }, existing: car });
 });
 crm.get('/vehicle/plate/:plate', async (req, res) => {
-  who(req, 'staff');
+  who(req, 'cars.view');
   const r = await lookupPlate(req.params.plate);
   let vin = null;
   if (r.vin && (!r.make || !r.model)) vin = await decodeVin(r.vin).catch(() => null);
   res.json({ ...r, make: r.make || vin?.make || '', model: r.model || vin?.model || '', year: r.year || vin?.year || '' });
 });
 crm.get('/vin/:vin', async (req, res) => {
-  who(req, 'staff');
+  who(req, 'cars.view');
   res.json(await decodeVin(req.params.vin));
 });
 
 // ── Касса Pulse Points без заказа (быстрая продажа) ─────────────────────────
 crm.post('/pos/scan', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'loyalty.use');
   const c = req.body?.qr ? verifyQrPayload(req.body.qr) : verifyManual(req.body?.who, req.body?.code);
   res.json({
     ticket: issueTicket(c.id, s.name),
@@ -1062,13 +1287,13 @@ crm.post('/pos/scan', (req, res) => {
   });
 });
 crm.post('/pos/quote', (req, res) => {
-  who(req, 'staff');
+  who(req, 'loyalty.use');
   const c = one('SELECT id FROM customers WHERE card_no = ?', String(req.body?.cardNo || ''));
   if (!c) throw new HttpError(404, 'Клиент не найден');
   res.json(quote(c.id, Number(req.body?.orderTotal) || 0, Number(req.body?.redeemPoints) || 0));
 });
 crm.post('/pos/checkout', (req, res) => {
-  const s = who(req, 'staff');
+  const s = who(req, 'loyalty.use');
   res.json(checkout(req.body || {}, s.name));
 });
 

@@ -1,27 +1,26 @@
 import { html, useState, useEffect, useData, api, act, go, qs, useApp, Loading, ErrorBox, Icon, Modal, Pager, Picker, ConfirmButton, useDebounced, zl, num, fdate, fdt, todayStr, toast } from '../lib.js';
+import { SuppliersPage } from './suppliers.js';
 
 const DOC = { PZ: 'Приход (PZ)', WZ: 'Выдача в заказ (WZ)', RW: 'Списание (RW)', PW: 'Оприходование (PW)' };
 
 export default function Stock({ sub, id }) {
-  const tab = ['docs', 'receive', 'writeoff', 'intercars', 'file'].includes(sub) ? sub : 'products';
+  const tab = ['intercars', 'file', 'suppliers'].includes(sub) ? 'suppliers' : ['docs', 'receive', 'writeoff'].includes(sub) ? sub : 'products';
   return html`
     <div class="page-head"><h1>Склад</h1>
       <div class="actions"><a class="btn" href="#/stock/writeoff">Списание</a><a class="btn" href="#/stock/receive"><${Icon} n="plus" />Приход вручную</a>
-        <a class="btn primary" href="#/stock/intercars"><${Icon} n="upload" />Inter Cars</a></div></div>
+        <a class="btn primary" href="#/stock/suppliers"><${Icon} n="upload" />От хуртовен</a></div></div>
     <div class="pill-tabs" style="margin-bottom:14px">
       <button class=${tab === 'products' ? 'on' : ''} onClick=${() => go('/stock')}>Товары</button>
       <button class=${tab === 'docs' ? 'on' : ''} onClick=${() => go('/stock/docs')}>Документы</button>
       <button class=${tab === 'receive' ? 'on' : ''} onClick=${() => go('/stock/receive')}>Приход (PZ)</button>
       <button class=${tab === 'writeoff' ? 'on' : ''} onClick=${() => go('/stock/writeoff')}>Списание (RW)</button>
-      <button class=${tab === 'intercars' ? 'on' : ''} onClick=${() => go('/stock/intercars')}>Inter Cars</button>
-      <button class=${tab === 'file' ? 'on' : ''} onClick=${() => go('/stock/file')}>Из файла поставщика</button>
+      <button class=${tab === 'suppliers' ? 'on' : ''} onClick=${() => go('/stock/suppliers')}>Хуртовни</button>
     </div>
     ${tab === 'products' && html`<${Products} openId=${sub === 'product' ? id : null} />`}
     ${tab === 'docs' && html`<${Docs} openId=${id} />`}
     ${tab === 'receive' && html`<${DocForm} type="PZ" />`}
     ${tab === 'writeoff' && html`<${DocForm} type="RW" />`}
-    ${tab === 'intercars' && html`<${InterCars} />`}
-    ${tab === 'file' && html`<${FromFile} />`}`;
+    ${tab === 'suppliers' && html`<${SuppliersPage} />`}`;
 }
 
 function Products({ openId }) {
@@ -153,84 +152,4 @@ function DocForm({ type, initialItems = [], initialHead = {} }) {
       <tfoot><tr><td colspan=${type === 'PZ' ? 5 : 4}>Итого нетто</td><td class="r">${zl(total)}</td><td></td></tr></tfoot></table></div>` : html`<div class="empty">Добавьте позиции</div>`}
     <div class="row" style="margin-top:14px"><button class="btn primary lg" disabled=${!items.length} onClick=${save}>Провести ${type === 'PZ' ? 'приход' : 'списание'}</button></div>
   </div>`;
-}
-
-// ── Inter Cars: документы → склад одной кнопкой ─────────────────────────────
-function InterCars() {
-  const [all, setAll] = useState(false);
-  const { data, reload } = useData('intercars/docs' + (all ? '?all=1' : ''));
-  const [busy, setBusy] = useState(false);
-  const [view, setView] = useState(null);
-  if (!data) return html`<${Loading} />`;
-  if (!data.enabled) return html`<div class="card">Inter Cars не подключён. Откройте <a href="#/settings/integrations">Настройки → Интеграции → Inter Cars</a> и вставьте ClientId и ClientSecret (те же, что в Motowarsztat).</div>`;
-  const fresh = data.rows.filter((d) => !d.stock_doc_id);
-  const sync = async (days) => {
-    setBusy(true);
-    try { const r = await api('intercars/sync', { body: { days } }); toast(r.created ? `Загружено новых документов: ${r.created}` : 'Новых документов нет'); reload(); }
-    catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
-  };
-  const receiveAll = async () => {
-    setBusy(true);
-    try { const r = await api('intercars/receive-all', { body: {} }); toast(`Принято на склад: ${r.received}` + (r.errors.length ? ` · ошибок ${r.errors.length}` : '')); if (r.errors.length) toast(r.errors[0], 'error'); reload(); }
-    catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
-  };
-  return html`
-    <div class="card" style="margin-bottom:12px"><div class="row">
-      <button class="btn primary lg" disabled=${busy} onClick=${receiveAll}><${Icon} n="upload" />Принять всё новое на склад${fresh.length ? ` (${fresh.length})` : ''}</button>
-      <button class="btn" disabled=${busy} onClick=${() => sync(7)}>${busy ? 'Загружаю…' : 'Проверить Inter Cars'}</button>
-      <button class="btn ghost" disabled=${busy} onClick=${() => sync(30)}>за 30 дней</button>
-      <label class="check" style="margin-left:auto"><input type="checkbox" checked=${all} onChange=${(e) => setAll(e.target.checked)} />Показать все</label>
-    </div>
-    <div class="muted small" style="margin-top:8px">${data.state.lastSync ? 'Последняя проверка: ' + fdt(data.state.lastSync.replace('T', ' ')) : 'Ещё не проверяли'}. Новые поставки проверяются автоматически каждые 30 минут.
-      Товары сопоставляются по SKU Inter Cars, EAN и индексу; новые создаются сами с ценой закупки и продажи.
-      ${data.state.lastError ? html`<span class="err"> Ошибка: ${data.state.lastError}</span>` : ''}</div></div>
-    <div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Документ Inter Cars</th><th>Тип</th><th>Дата</th><th class="r">Позиций</th><th class="r">Нетто</th><th class="r">Брутто</th><th>Склад</th><th></th></tr></thead>
-      <tbody>${data.rows.map((d) => html`<tr class="click" onClick=${() => setView(d.id)}>
-        <td><b>${d.ext_id}</b></td><td class="sub">${d.kind === 'invoice' ? 'Фактура' : 'Поставка'}</td><td class="nowrap">${fdate(d.doc_date)}</td>
-        <td class="r">${d.lines_count}</td><td class="r">${zl(d.total_net)}</td><td class="r">${zl(d.total_gross)}</td>
-        <td>${d.stock_doc_id ? html`<a href=${'#/stock/docs/' + d.stock_doc_id} onClick=${(e) => e.stopPropagation()} class="pos">✓ ${d.stock_number}</a>` : html`<span class="badge" style="border-color:var(--warn);color:var(--warn)">новый</span>`}</td>
-        <td class="act" onClick=${(e) => e.stopPropagation()}>${!d.stock_doc_id && html`<button class="btn primary sm" onClick=${async () => { await act(() => api(`intercars/docs/${d.id}/receive`, { body: {} }), 'Принято на склад'); reload(); }}>Принять</button>`}</td></tr>`)}</tbody></table></div>
-      ${!data.rows.length ? html`<div class="empty">Документов пока нет — нажмите «Проверить Inter Cars»</div>` : ''}</div>
-    ${view && html`<${ICDoc} id=${view} onClose=${() => setView(null)} />`}`;
-}
-
-function ICDoc({ id, onClose }) {
-  const { data: d } = useData('intercars/docs/' + id);
-  if (!d) return null;
-  const lines = d.raw.lines || [];
-  return html`<${Modal} title=${'Inter Cars ' + d.ext_id} wide onClose=${onClose}>
-    <div class="muted">${fdate(d.doc_date)} · ${d.raw.shipFrom || d.raw.issueFrom || ''} ${d.raw.deliveryMethod ? '· ' + d.raw.deliveryMethod : ''} ${d.raw.orderId ? '· заказ ' + d.raw.orderId : ''} ${d.raw.ksefNumber ? '· KSeF ' + d.raw.ksefNumber : ''}</div>
-    <table class="tbl"><thead><tr><th>Индекс</th><th>Название</th><th>Бренд</th><th class="r">Кол-во</th><th class="r">Цена нетто</th><th class="r">Розница брутто</th></tr></thead>
-      <tbody>${lines.map((l) => html`<tr><td class="nowrap"><b>${l.index || ''}</b><div class="sub">${l.sku || ''}</div></td><td>${l.name}</td><td class="sub">${l.brandReference?.name || ''}</td>
-        <td class="r">${l.quantity ?? ((l.shippedQuantity || 0) - (l.returnedQuantity || 0))}</td><td class="r">${zl(l.unitPriceNet)}</td><td class="r">${l.retailPrice ? zl(l.retailPrice.priceGross) : '—'}</td></tr>`)}</tbody></table>
-  </${Modal}>`;
-}
-
-// ── Любой поставщик: приход из файла CSV/XLSX ───────────────────────────────
-function FromFile() {
-  const [parsed, setParsed] = useState(null);
-  const [supplier, setSupplier] = useState('AUTO PARTNER S.A.');
-  const [busy, setBusy] = useState(false);
-  const upload = async (e) => {
-    e.preventDefault();
-    const f = e.target.querySelector('input[type=file]').files[0];
-    if (!f) return;
-    const fd = new FormData(); fd.append('file', f);
-    setBusy(true);
-    try { setParsed(await api('stock-docs/parse-file', { form: fd })); } catch (x) { toast(x.message, 'error'); } finally { setBusy(false); }
-  };
-  if (parsed) return html`<div class="stack"><div class="card small">Распознано позиций: <b>${parsed.items.length}</b> (новых товаров: ${parsed.items.filter((i) => i.isNew).length}). Проверьте цены и количество, затем проведите приход.
-      <a href="#" onClick=${(e) => { e.preventDefault(); setParsed(null); }}>Другой файл</a></div>
-    <${DocForm} type="PZ" initialItems=${parsed.items} initialHead=${{ counterparty: supplier }} /></div>`;
-  return html`<div class="card stack">
-    <h2>Приход из файла поставщика</h2>
-    <p class="muted" style="margin:0">Для Auto Partner, Inter Team, Hart, Gordon и любых других оптовиков: скачайте документ (WZ или фактуру) из их интернет-магазина в CSV или Excel и загрузите сюда.
-      Колонки распознаются автоматически: индекс / название / количество / цена нетто / EAN / производитель.</p>
-    <form class="row end" onSubmit=${upload}>
-      <label class="f" style="width:240px">Поставщик<input value=${supplier} onInput=${(e) => setSupplier(e.target.value)} list="suppliers" /></label>
-      <datalist id="suppliers">${['AUTO PARTNER S.A.', 'INTER CARS S.A.', 'INTER-TEAM', 'HART', 'GORDON', 'MOTO-PROFIL (ProfiAuto)', 'AUTO-ZATOKA', 'CAREX', 'JARO-FILTR', 'MOTORES'].map((x) => html`<option value=${x} />`)}</datalist>
-      <label class="f grow">Файл<input type="file" accept=".csv,.xlsx,.xls" required /></label>
-      <button class="btn primary" disabled=${busy}><${Icon} n="upload" />${busy ? 'Читаю…' : 'Загрузить'}</button>
-    </form></div>`;
 }

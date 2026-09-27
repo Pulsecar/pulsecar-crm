@@ -1,5 +1,5 @@
 // Логика заказов: пересчёт сумм, статусы, выдача со склада, баллы, уведомления
-import { all, one, run, tx, insert, update, log } from './db.js';
+import { all, one, run, tx, insert, update, log, getSetting } from './db.js';
 import { HttpError, nextNumber, round2 } from './util.js';
 import { earnForOrder } from './loyalty.js';
 import { sendSms } from './sms.js';
@@ -42,6 +42,7 @@ export function createOrder(data, staffName) {
       mileage: data.mileage || null,
       complaint: data.complaint || null,
       internal_note: data.internal_note || null,
+      external_no: data.external_no || null,
       source: data.source || 'crm',
       created_by: staffName,
     });
@@ -61,6 +62,10 @@ export function addItem(orderId, it) {
   row.order_id = orderId;
   row.kind = it.kind === 'part' ? 'part' : 'labor';
   row.qty = Number(it.qty ?? 1);
+  // работа в нормо-часах без цены — по ставке RBH из настроек (нетто → брутто)
+  if (row.kind === 'labor' && (it.price === undefined || it.price === null || it.price === '') && String(it.unit || '').toLowerCase() === 'rbh') {
+    it.price = round2((Number(getSetting('rbh_rate', '0')) || 0) * (1 + Number(it.vat ?? getSetting('default_vat', '23')) / 100));
+  }
   row.price = Number(it.price ?? 0);
   if (it.product_id && it.cost === undefined) {
     const p = one('SELECT purchase_price, code, unit, vat FROM products WHERE id = ?', it.product_id);
@@ -71,10 +76,28 @@ export function addItem(orderId, it) {
   return id;
 }
 
-export function updateItem(itemId, it) {
+export function updateItem(itemId, it, staff) {
+  const cur = one('SELECT * FROM order_items WHERE id = ?', itemId);
+  if (!cur) throw new HttpError(404, 'Позиция не найдена');
   const row = {};
   for (const k of ITEM_FIELDS) if (it[k] !== undefined && k !== 'kind') row[k] = it[k];
+  if (row.done && !cur.done && cur.kind === 'labor') {
+    const mech = row.mechanic_id ?? cur.mechanic_id;
+    if (getSetting('require_mechanic_job') === '1' && !mech) throw new HttpError(400, 'Сначала выберите механика для этой работы');
+    if (getSetting('only_assigned_finish') === '1' && staff && staff.role !== 'admin' && mech && mech !== staff.id) throw new HttpError(403, 'Отметить работу может только назначенный механик');
+  }
   update('order_items', itemId, row);
+  if (row.done !== undefined && !!row.done !== !!cur.done && cur.kind === 'labor') autoStatusOnJobs(cur.order_id, staff?.name);
+}
+
+/** Статус сам меняется, когда начата первая работа / выполнены все работы (Настройки → Мастерская) */
+function autoStatusOnJobs(orderId, staffName) {
+  const o = getOrder(orderId);
+  if (o.kind !== 'order' || isFinal(o.status_id)) return;
+  const jobs = all(`SELECT done FROM order_items WHERE order_id = ? AND kind = 'labor'`, orderId);
+  const doneN = jobs.filter((j) => j.done).length;
+  const target = jobs.length && doneN === jobs.length ? getSetting('status_on_all_jobs') : doneN >= 1 ? getSetting('status_on_first_job') : null;
+  if (target && Number(target) !== o.status_id && one('SELECT 1 FROM order_statuses WHERE id = ?', Number(target))) setStatus(orderId, Number(target), staffName || 'авто');
 }
 
 function isFinal(statusId) {
@@ -112,6 +135,15 @@ export function setStatus(orderId, statusId, staffName) {
   if (!st) throw new HttpError(400, 'Нет такого статуса');
   if (o.status_id === st.id) return { earned: 0 };
   const wasFinal = isFinal(o.status_id);
+  if (st.is_final && !wasFinal && o.kind === 'order') {
+    const jobs = all(`SELECT * FROM order_items WHERE order_id = ? AND kind = 'labor'`, o.id);
+    if (getSetting('block_finish_open_jobs') === '1' && jobs.some((j) => !j.done)) throw new HttpError(400, 'Нельзя завершить заказ: есть невыполненные работы');
+    if (getSetting('require_mechanic_all') === '1' && jobs.some((j) => !j.mechanic_id)) throw new HttpError(400, 'Нельзя завершить заказ: не во всех работах выбран механик');
+    if (getSetting('stock_negative', '1') !== '1') {
+      const short = all(`SELECT i.name, i.qty, p.stock FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = ? AND i.kind = 'part' AND p.stock < i.qty`, o.id);
+      if (short.length && !one(`SELECT 1 FROM stock_docs WHERE order_id = ? AND type = 'WZ'`, o.id)) throw new HttpError(400, `Не хватает на складе: ${short.map((x) => `${x.name} (есть ${x.stock}, нужно ${x.qty})`).join(', ')}. Сделайте приход или разрешите минусовой остаток в настройках.`);
+    }
+  }
   let earned = 0;
   tx(() => {
     run('UPDATE orders SET status_id = ?, closed_at = ? WHERE id = ?', st.id, st.is_final ? (o.closed_at || new Date().toISOString().slice(0, 19).replace('T', ' ')) : null, o.id);

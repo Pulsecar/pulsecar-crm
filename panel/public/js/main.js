@@ -14,25 +14,26 @@ import Settings from './pages/settings.js';
 import Marketing from './pages/marketing.js';
 import Search from './pages/search.js';
 import Sms from './pages/sms.js';
+import { ClipPage } from './pages/suppliers.js';
 
 const NAV = [
   { to: '/', icon: 'home', label: 'Главная' },
-  { to: '/orders', icon: 'wrench', label: 'Заказы' },
-  { to: '/quotes', icon: 'file', label: 'Сметы' },
-  { to: '/calendar', icon: 'cal', label: 'Терминарз', badge: 'requests' },
-  { to: '/customers', icon: 'users', label: 'Клиенты' },
-  { to: '/cars', icon: 'car', label: 'Автомобили' },
-  { to: '/sms', icon: 'chat', label: 'SMS', min: 'staff' },
+  { to: '/orders', icon: 'wrench', label: 'Заказы', perm: 'orders.view' },
+  { to: '/quotes', icon: 'file', label: 'Сметы', perm: 'quotes.manage' },
+  { to: '/calendar', icon: 'cal', label: 'Терминарз', badge: 'requests', perm: 'calendar.view' },
+  { to: '/customers', icon: 'users', label: 'Клиенты', perm: 'clients.view' },
+  { to: '/cars', icon: 'car', label: 'Автомобили', perm: 'cars.view' },
+  { to: '/sms', icon: 'chat', label: 'SMS', perm: 'sms.view' },
   { sep: true },
-  { to: '/stock', icon: 'box', label: 'Склад' },
-  { to: '/purchases', icon: 'cart', label: 'Закупки', min: 'staff' },
-  { to: '/storage', icon: 'tire', label: 'Хранение шин' },
-  { to: '/cash', icon: 'cash', label: 'Касса', min: 'staff' },
-  { to: '/pos', icon: 'qr', label: 'Pulse Points', min: 'staff' },
-  { to: '/reports', icon: 'chart', label: 'Отчёты', min: 'admin' },
+  { to: '/stock', icon: 'box', label: 'Склад', perm: 'products.view' },
+  { to: '/purchases', icon: 'cart', label: 'Закупки', perm: 'purchases.view' },
+  { to: '/storage', icon: 'tire', label: 'Хранение шин', perm: 'storage.view' },
+  { to: '/cash', icon: 'cash', label: 'Касса', perm: 'cash.view' },
+  { to: '/pos', icon: 'qr', label: 'Pulse Points', perm: 'loyalty.use' },
+  { to: '/reports', icon: 'chart', label: 'Отчёты', perm: 'reports.view' },
   { sep: true },
-  { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', min: 'staff' },
-  { to: '/settings', icon: 'gear', label: 'Настройки', min: 'admin' },
+  { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' },
+  { to: '/settings', icon: 'gear', label: 'Настройки', perm: 'settings.manage' },
 ];
 const RANK = { mechanic: 1, staff: 2, admin: 3 };
 
@@ -85,6 +86,7 @@ function Shell({ app }) {
   else if (p0 === 'reports') page = html`<${Reports} />`;
   else if (p0 === 'settings') page = html`<${Settings} sub=${p1} />`;
   else if (p0 === 'sms') page = html`<${Sms} />`;
+  else if (p0 === 'suppliers' && p1 === 'clip') page = html`<${ClipPage} />`;
   else if (p0 === 'marketing') page = html`<${Marketing} />`;
   else if (p0 === 'search') page = html`<${Search} q=${route.query.q || ''} key=${route.query.q} />`;
   else page = html`<div class="empty">Страница не найдена</div>`;
@@ -93,7 +95,7 @@ function Shell({ app }) {
   return html`<div class="shell">
     <aside class=${'side' + (menu ? ' open' : '')}>
       <div class="brand"><img src="/logo.png" alt="Pulsecar" /></div>
-      ${NAV.filter((n) => n.sep || role >= (RANK[n.min] || 1)).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
+      ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
         <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to}>
           <${Icon} n=${n.icon} />${n.label}${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}
       <div class="nav-foot">${app.settings.company_brand || 'Pulsecar'} · ${app.user.name}</div>

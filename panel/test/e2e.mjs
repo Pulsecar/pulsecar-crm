@@ -135,7 +135,7 @@ try {
   // 6. смета → заказ, печать, фактура без настроек
   const q = ok(await req('/crm-api/orders', { body: { kind: 'quote', customer_id: jan.id, items: [{ kind: 'labor', name: 'Rozrząd', price: 1000 }] } }), 'quote');
   const qq = ok(await req('/crm-api/orders/' + q.id), 'quote get');
-  assert.match(qq.number, /^WY 1\//);
+  assert.match(qq.number, /^WYC 1\//);
   const conv = ok(await req(`/crm-api/orders/${q.id}/to-order`, { body: {} }), 'to order');
   const co = ok(await req('/crm-api/orders/' + conv.id), 'conv get');
   assert.equal(co.total, 1000); assert.equal(co.kind, 'order'); assert.equal(co.quote_id, q.id);

@@ -114,13 +114,37 @@ export class HttpError extends Error {
 
 // ── Нумерация документов: ZL 12/09/2026 (счётчик по месяцам) ──────────────────
 import { db as _db } from './db.js';
-export function nextNumber(prefix, date = new Date(), perYear = false) {
+/**
+ * Следующий номер документа по настройке нумерации (Настройки → Нумерация), как в Motowarsztat:
+ * шаблон «ZL [numer]/[miesiac]/[rok]», сброс каждый месяц / год / никогда, начальный номер.
+ * Для заказов и смет пропускает номера, которые уже есть (например, из импорта Motowarsztat).
+ */
+export function nextNumber(key, date = new Date(), perYear = false) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
-  const key = perYear ? `${prefix}-${y}` : `${prefix}-${y}-${m}`;
-  _db.prepare('INSERT INTO counters (key, n) VALUES (?, 1) ON CONFLICT(key) DO UPDATE SET n = n + 1').run(key);
-  const n = _db.prepare('SELECT n FROM counters WHERE key = ?').get(key).n;
-  return perYear ? `${prefix} ${n}/${y}` : `${prefix} ${n}/${m}/${y}`;
+  const d = String(date.getDate()).padStart(2, '0');
+  const cfg = _db.prepare('SELECT * FROM doc_numbering WHERE key = ?').get(key);
+  const reset = cfg?.reset || (perYear ? 'year' : 'month');
+  const pattern = cfg?.pattern || (perYear ? `${key} [numer]/[rok]` : `${key} [numer]/[miesiac]/[rok]`);
+  const ck = reset === 'never' ? key : reset === 'year' ? `${key}-${y}` : `${key}-${y}-${m}`;
+  const start = Math.max(1, Number(cfg?.start) || 1);
+  const table = key === 'ZL' || key === 'WY' ? 'orders' : key === 'PR' ? 'storage' : null;
+  for (let guard = 0; guard < 100000; guard++) {
+    _db.prepare('INSERT INTO counters (key, n) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET n = n + 1').run(ck, start);
+    const n = _db.prepare('SELECT n FROM counters WHERE key = ?').get(ck).n;
+    const num = pattern.replace(/\[numer\]/gi, String(n)).replace(/\[miesiac\]/gi, m).replace(/\[rok\]/gi, String(y)).replace(/\[dzien\]/gi, d).replace(/\[rok2\]/gi, String(y).slice(2));
+    if (!table || !_db.prepare(`SELECT 1 FROM ${table} WHERE number = ?`).get(num)) return num;
+  }
+  throw new Error('Не удалось подобрать свободный номер');
+}
+
+/** Текущий номер периода для показа в настройках */
+export function currentNumber(key, date = new Date()) {
+  const cfg = _db.prepare('SELECT * FROM doc_numbering WHERE key = ?').get(key);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const ck = cfg?.reset === 'never' ? key : cfg?.reset === 'year' ? `${key}-${y}` : `${key}-${y}-${m}`;
+  return { counterKey: ck, n: _db.prepare('SELECT n FROM counters WHERE key = ?').get(ck)?.n || 0 };
 }
 
 export const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;

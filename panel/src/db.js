@@ -1,3 +1,4 @@
+import { MW_SERVICES } from './data/services-mw.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -378,6 +379,46 @@ db.exec(`CREATE TABLE IF NOT EXISTS sms_log (
 )`);
 db.exec('CREATE INDEX IF NOT EXISTS sms_log_created ON sms_log(created_at)');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS orders_card_token ON orders(card_token)');
+// ── Настройки как в Motowarsztat ─────────────────────────────────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS doc_numbering (
+  key TEXT PRIMARY KEY, label TEXT NOT NULL, pattern TEXT NOT NULL,
+  reset TEXT NOT NULL DEFAULT 'month',   -- month | year | never
+  start INTEGER NOT NULL DEFAULT 1, pos INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS order_templates (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, icon TEXT, items TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1, pos INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS checklists (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, items TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1, pos INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS order_checklists (
+  id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE, checklist_id INTEGER, name TEXT,
+  results TEXT NOT NULL DEFAULT '[]', staff TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS expense_categories (id INTEGER PRIMARY KEY, name TEXT NOT NULL, pos INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS price_groups (id INTEGER PRIMARY KEY, name TEXT NOT NULL, markup_pct REAL NOT NULL DEFAULT 0, pos INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS suppliers (
+  id INTEGER PRIMARY KEY, key TEXT UNIQUE NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+  config TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL DEFAULT '{}', updated_at TEXT
+);
+`);
+addColumn('service_catalog', 'source', 'TEXT');
+addColumn('service_catalog', 'active', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('service_catalog', 'norm_hours', 'REAL');
+addColumn('staff', 'permissions', 'TEXT');          // JSON: права как в Motowarsztat
+addColumn('staff', 'stations', 'TEXT');             // JSON: посты, которые видит сотрудник
+addColumn('staff', 'phone', 'TEXT');
+addColumn('staff', 'email', 'TEXT');
+addColumn('staff', 'last_login', 'TEXT');
+addColumn('orders', 'external_no', 'TEXT');
+addColumn('orders', 'faults', 'TEXT');              // wykryte usterki
+addColumn('orders', 'after_notes', 'TEXT');         // uwagi po wykonaniu zlecenia
+addColumn('products', 'price_group_id', 'INTEGER');
+addColumn('products', 'gtu', 'TEXT');
+addColumn('stations', 'slot_min', 'INTEGER');
+addColumn('stations', 'max_hours_day', 'REAL');
+
 db.exec('CREATE INDEX IF NOT EXISTS products_sku ON products(supplier_sku)');
 db.exec('CREATE INDEX IF NOT EXISTS products_ean ON products(ean)');
 
@@ -477,6 +518,61 @@ function seed() {
 }
 seed();
 seedMessaging();
+seedMotowarsztat();
+
+// Нумерация, прайс работ, статьи расходов, шаблоны — как настроено в Motowarsztat
+function seedMotowarsztat() {
+  if (!one('SELECT 1 FROM doc_numbering')) {
+    [['ZL', 'Заказ (zlecenie naprawy)', 'ZL [numer]/[miesiac]/[rok]', 'month'], ['WY', 'Смета (wycena)', 'WYC [numer]/[miesiac]/[rok]', 'month'],
+      ['PZ', 'Приход от поставщика (PZ)', 'PZ [numer]/[miesiac]/[rok]', 'month'], ['WZ', 'Выдача в заказ (WZ)', 'WZ [numer]/[miesiac]/[rok]', 'month'],
+      ['RW', 'Списание (RW)', 'RW [numer]/[miesiac]/[rok]', 'month'], ['PW', 'Внутренний приход (PW)', 'PW [numer]/[miesiac]/[rok]', 'month'],
+      ['KP', 'Касса: приход (KP)', 'KP [numer]/[miesiac]/[rok]', 'month'], ['KW', 'Касса: расход (KW)', 'KW [numer]/[miesiac]/[rok]', 'month'],
+      ['PR', 'Хранение шин (przechowalnia)', 'P [numer]/[rok]', 'year']]
+      .forEach(([k, l, p, r], i) => run('INSERT INTO doc_numbering (key, label, pattern, reset, pos) VALUES (?, ?, ?, ?, ?)', k, l, p, r, i));
+  }
+  if (!getSetting('mw_services_seeded')) {
+    const site = new Set(all(`SELECT lower(name) n FROM service_catalog WHERE COALESCE(source, '') <> 'motowarsztat'`).map((r) => r.n));
+    const have = new Set(all('SELECT lower(category) || \'|\' || lower(name) k FROM service_catalog').map((r) => r.k));
+    for (const [cat, name, price] of MW_SERVICES) {
+      const k = cat.toLowerCase() + '|' + name.toLowerCase();
+      if (site.has(name.toLowerCase()) || have.has(k)) continue; // своя цена с сайта важнее
+      have.add(k);
+      run(`INSERT INTO service_catalog (category, name, price, unit, source) VALUES (?, ?, ?, 'oper', 'motowarsztat')`, cat, name, price);
+    }
+    setSetting('mw_services_seeded', '1');
+  }
+  if (!one('SELECT 1 FROM expense_categories')) {
+    ['Energia elektryczna', 'Ogrzewanie', 'Czynsz', 'Paliwo', 'Materiały biurowe', 'Transport', 'Usługi', 'Inne', 'Części i materiały']
+      .forEach((n, i) => run('INSERT INTO expense_categories (name, pos) VALUES (?, ?)', n, i));
+  }
+  if (!one('SELECT 1 FROM price_groups')) {
+    [['Detal', 40], ['Stały klient', 30], ['Firmy / flota', 20]].forEach(([n, m], i) => run('INSERT INTO price_groups (name, markup_pct, pos) VALUES (?, ?, ?)', n, m, i));
+  }
+  if (!one('SELECT 1 FROM checklists')) {
+    run('INSERT INTO checklists (name, items) VALUES (?, ?)', 'Przyjęcie pojazdu', JSON.stringify(['Stan paliwa', 'Uszkodzenia nadwozia', 'Stan opon', 'Kontrolki na desce', 'Rzeczy wartościowe w aucie', 'Dowód rejestracyjny', 'Kluczyki / karta']));
+    run('INSERT INTO checklists (name, items) VALUES (?, ?)', 'Przegląd okresowy', JSON.stringify(['Poziom oleju', 'Płyn hamulcowy', 'Płyn chłodniczy', 'Klocki i tarcze', 'Zawieszenie i luzy', 'Oświetlenie', 'Wycieraczki i spryskiwacze', 'Akumulator', 'Opony i ciśnienie', 'Błędy w sterownikach']));
+  }
+  if (!one('SELECT 1 FROM order_templates')) {
+    const pick = (names) => names.map((n) => one('SELECT id, name, price, unit, vat FROM service_catalog WHERE name = ?', n)).filter(Boolean)
+      .map((c) => ({ kind: 'labor', catalog_id: c.id, name: c.name, qty: 1, price: c.price, unit: c.unit, vat: c.vat }));
+    run('INSERT INTO order_templates (name, icon, items, pos) VALUES (?, ?, ?, ?)', 'Wulkanizacja', 'tire', JSON.stringify(pick(['Wymiana opon R16', 'Felga z czujnikiem'])), 1);
+    run('INSERT INTO order_templates (name, icon, items, pos) VALUES (?, ?, ?, ?)', 'Wymiana oleju', 'wrench', JSON.stringify(pick(['Wymiana oleju i filtra oleju', 'Wymiana filtra powietrznego', 'Wymiana filtra kabinowego'])), 2);
+    run('INSERT INTO order_templates (name, icon, items, pos) VALUES (?, ?, ?, ?)', 'Klimatyzacja', 'wrench', JSON.stringify(pick(['Napełnianie klimatyzacji i sprawdzanie próżni', 'Odgrzybianie klimatyzacji ozonem'])), 3);
+  }
+  const W = {
+    show_amounts: 'gross', vat_rates: '23,8,5,0', payment_term_days: '0', payment_method_default: 'cash', discounts_on: '1', proforma_on: '1',
+    rbh_rate: '250', rbh_cost: '0', max_job_hours: '0', mileage_unit: 'km', power_unit: 'kW', labor_units: 'oper,rbh', labor_unit_default: 'oper',
+    only_assigned_finish: '0', require_time_before_finish: '0', require_mechanic_all: '0', require_mechanic_job: '0', block_finish_open_jobs: '0',
+    save_owner_from_aztec: '1', order_type_on: '1', field_internal: '1', field_mechanic: '1', field_faults: '1', field_after: '1', field_external_no: '0',
+    parts_to_jobs: '0', show_cost_column: '1', free_code: '1', pickup_format: 'datetime', pickup_warn_orange: '2', pickup_warn_red: '0',
+    status_on_first_job: '', status_on_all_jobs: '', status_on_sale_doc: '', vehicle_types: 'Samochód osobowy,Bus,Motocykl',
+    car_field_inspection: '1', car_field_insurance: '1', car_field_tacho: '0', car_field_key: '1', car_field_axle: '0', car_field_hsn: '0', car_field_paint: '1',
+    client_require_phone: '0', client_marketing_default: '1', calendar_scale_day: '15', calendar_scale_week: '15', calendar_auto_jobs: '1',
+    work_hours: JSON.stringify({ 1: ['09:00', '18:00'], 2: ['09:00', '18:00'], 3: ['09:00', '18:00'], 4: ['09:00', '18:00'], 5: ['09:00', '18:00'], 6: ['10:00', '14:00'], 0: null }),
+    stock_negative: '1', stock_reserve_on_order: '1', default_markup: '40', storage_months: '6', storage_price: '200', doc_show_logo: '1', doc_show_signatures: '1', doc_footer: '',
+  };
+  for (const [k, v] of Object.entries(W)) if (getSetting(k) === null) setSetting(k, v);
+}
 
 // Шаблоны SMS и e-mail — перенесены из Motowarsztat (Ustawienia → Zlecenia, Wyceny, Statusy zleceń, Szablony e-mail)
 function seedMessaging() {

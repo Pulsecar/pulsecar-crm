@@ -1,6 +1,6 @@
 import { html, useState, useData, api, act, qs, useApp, ErrorBox, Icon, Modal, ConfirmButton, useDebounced, zl, fdate, todayStr } from '../lib.js';
 
-const CATS = ['Запчасти', 'Расходники', 'Инструмент', 'Аренда', 'Коммунальные', 'Реклама', 'Зарплата', 'Прочее'];
+const CATS0 = ['Części i materiały', 'Inne'];
 
 export default function Purchases() {
   const app = useApp();
@@ -23,19 +23,20 @@ export default function Purchases() {
         <td class="nowrap">${fdate(p.doc_date)}</td><td>${p.number || ''}</td><td><b>${p.supplier}</b><div class="sub">${p.description || ''}</div></td><td class="sub">${p.category || ''}</td>
         <td class=${'nowrap ' + (p.paid < p.gross && p.due_date && p.due_date < todayStr() ? 'neg' : '')}>${fdate(p.due_date)}</td>
         <td class="r">${zl(p.net)}</td><td class="r">${zl(p.gross)}</td><td class=${'r ' + (p.paid >= p.gross ? 'pos' : '')}>${zl(p.paid)}</td>
-        <td class="act" onClick=${(e) => e.stopPropagation()}>${app.user.role === 'admin' && html`<${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api('purchases/' + p.id, { method: 'DELETE' })); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table></div>
+        <td class="act" onClick=${(e) => e.stopPropagation()}>${app.perms['purchases.edit'] && html`<${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api('purchases/' + p.id, { method: 'DELETE' })); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table></div>
       ${!data?.rows?.length ? html`<div class="empty">Пока пусто</div>` : ''}</div>`}
     ${edit && html`<${PurchaseForm} p=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}`;
 }
 
 function PurchaseForm({ p, onClose, onSaved }) {
-  const [f, set] = useState({ id: p.id, supplier: p.supplier || '', number: p.number || '', category: p.category || 'Запчасти', description: p.description || '',
+  const app = useApp();
+  const [f, set] = useState({ id: p.id, supplier: p.supplier || '', number: p.number || '', category: p.category || 'Części i materiały', description: p.description || '',
     doc_date: p.doc_date || todayStr(), due_date: p.due_date || '', net: p.net || '', gross: p.gross || '', paid: p.paid || 0 });
   const inp = (k, l, t = 'text') => html`<label class="f">${l}<input type=${t} step="0.01" value=${f[k]} onInput=${(e) => set({ ...f, [k]: e.target.value })} /></label>`;
   return html`<${Modal} title=${p.id ? 'Фактура поставщика' : 'Новая фактура поставщика'} onClose=${onClose} foot=${html`<button class="btn" onClick=${onClose}>Отмена</button>
       <button class="btn primary" onClick=${async () => { await act(() => api('purchases', { body: { ...f, net: Number(f.net), gross: Number(f.gross) || Number(f.net) * 1.23, paid: Number(f.paid) } }), 'Сохранено'); onSaved(); }}>Сохранить</button>`}>
     <div class="grid g2">${inp('supplier', 'Поставщик')}${inp('number', 'Номер фактуры')}</div>
-    <div class="grid g3"><label class="f">Категория<select value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>${CATS.map((c) => html`<option>${c}</option>`)}</select></label>
+    <div class="grid g3"><label class="f">Категория<select value=${f.category} onChange=${(e) => set({ ...f, category: e.target.value })}>${[...new Set([...(app.expenses || []).map((x) => x.name), ...CATS0, f.category].filter(Boolean))].map((c) => html`<option>${c}</option>`)}</select></label>
       ${inp('doc_date', 'Дата', 'date')}${inp('due_date', 'Оплатить до', 'date')}</div>
     <div class="grid g3">${inp('net', 'Нетто', 'number')}${inp('gross', 'Брутто', 'number')}${inp('paid', 'Оплачено', 'number')}</div>
     ${inp('description', 'Описание')}

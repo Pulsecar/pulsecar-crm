@@ -2,6 +2,7 @@ import {
   html, useState, useEffect, useData, api, act, go, qs, useApp, Loading, ErrorBox, Badge, Icon, Modal, Field, Pager, Picker,
   ConfirmButton, useDebounced, zl, num, fdate, fdt, carName, METHOD, toast,
 } from '../lib.js';
+import { SupplierParts } from './suppliers.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ScanBox } from '../scan.js';
 
@@ -154,7 +155,7 @@ export function OrderPage({ id }) {
     if (r.sms || r.email) setNotice({ sms: r.sms, email: r.email, sendSms: !!r.sms, sendEmail: !!r.email });
     reload();
   };
-  const tabs = [['items', 'Работы и запчасти'], ['main', 'Данные заказа'], ...(isQuote ? [] : [['pay', 'Оплата' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')], ['plan', 'Терминарз']]), ['log', 'История']];
+  const tabs = [['items', 'Работы и запчасти'], ['main', 'Данные заказа'], ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['check', 'Чек-листы'], ['plan', 'Терминарз']]), ['log', 'История']];
   return html`
     <div class="crumbs"><a href=${isQuote ? '#/quotes' : '#/orders'}>${isQuote ? 'Сметы' : 'Заказы'}</a></div>
     <div class="order-head">
@@ -171,16 +172,16 @@ export function OrderPage({ id }) {
       <div class="row">
         <a class="btn" href=${'/crm-api/print/order/' + o.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать</a>
         ${isQuote && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/to-order`, { body: {} }), 'Заказ создан'); go('/orders/' + r.id); }}>Превратить в заказ</button>`}
-        ${app.user.role === 'admin' && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
+        ${app.perms['orders.delete'] && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
       </div>
     </div>
-    <div class="totals" style="margin-bottom:14px">
+    ${app.perms['orders.prices'] && html`<div class="totals" style="margin-bottom:14px">
       <div><span>Итого брутто</span><b>${zl(o.total)}</b></div>
       <div><span>Нетто</span><b>${zl(o.total_net)}</b></div>
       ${!isQuote && html`<div class=${o.total > 0 && due < 0.01 ? 'ok' : ''}><span>Оплачено</span><b>${zl(o.paid)}</b></div>`}
       ${!isQuote && html`<div class=${due > 0.01 ? 'due' : 'ok'}><span>К оплате</span><b>${zl(due)}</b></div>`}
-      ${app.user.role !== 'mechanic' && html`<div><span>Маржа на запчастях</span><b>${zl(o.items.filter((i) => i.kind === 'part').reduce((s, i) => s + (i.qty * i.price * (1 - i.discount / 100)) / (1 + i.vat / 100) - i.qty * i.cost, 0))}</b></div>`}
-    </div>
+      ${app.perms['products.prices'] && html`<div><span>Маржа на запчастях</span><b>${zl(o.items.filter((i) => i.kind === 'part').reduce((s, i) => s + (i.qty * i.price * (1 - i.discount / 100)) / (1 + i.vat / 100) - i.qty * i.cost, 0))}</b></div>`}
+    </div>`}
     <div class="pill-tabs" style="margin-bottom:14px">${tabs.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
     ${o.accepted_at && html`<div class="card ok-card small" style="margin-bottom:14px">✓ Клиент подтвердил ${isQuote ? 'смету' : 'заказ'} по электронной карте ${fdt(o.accepted_at)}${o.accepted_via === 'sms' ? ' (кодом SMS)' : ''}</div>`}
     ${notice && html`<${StatusNotice} o=${o} n=${notice} set=${setNotice} reload=${reload} />`}
@@ -189,6 +190,7 @@ export function OrderPage({ id }) {
     ${tab === 'main' && html`<${MainData} o=${o} reload=${reload} />`}
     ${tab === 'pay' && html`<${Payments} o=${o} reload=${reload} />`}
     ${tab === 'plan' && html`<${Plan} o=${o} />`}
+    ${tab === 'check' && html`<${Checklists} o=${o} />`}
     ${tab === 'log' && html`<div class="card"><table class="tbl"><tbody>${o.activity.map((a) => html`<tr><td class="nowrap sub">${fdt(a.created_at)}</td><td>${ACTION[a.action] || a.action} ${a.action === 'status' ? html`<b>${JSON.parse(a.details || '""')}</b>` : ''}</td><td class="sub">${a.staff || ''}</td></tr>`)}</tbody></table></div>`}`;
 }
 const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', to_order: 'Создан заказ из сметы', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
@@ -197,7 +199,7 @@ const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', payl
 function Items({ o, reload }) {
   const app = useApp();
   const [ic, setIc] = useState(false);
-  const mech = app.user.role === 'mechanic';
+  const mech = !app.perms['orders.jobs'];
   const labor = o.items.filter((i) => i.kind === 'labor');
   const parts = o.items.filter((i) => i.kind === 'part');
   const add = async (it) => { await act(() => api(`orders/${o.id}/items`, { body: it })); reload(); };
@@ -208,36 +210,42 @@ function Items({ o, reload }) {
   return html`
     <div class="card tight">
       <div class="row" style="padding:12px 14px"><h2 style="margin:0">Работы</h2><span class="muted small">${num(labor.reduce((s, i) => s + i.qty, 0), 2)} н/ч</span>
+        ${!mech && app.templates?.filter((t) => t.active).length ? html`<select style="width:auto" value="" onChange=${async (e) => { const tid = e.target.value; e.target.value = ''; if (!tid) return; const r = await act(() => api(`orders/${o.id}/apply-template/${tid}`, { body: {} })); toast(`Добавлено из шаблона: ${r.added}`); reload(); }}>
+          <option value="">+ Шаблон…</option>${app.templates.filter((t) => t.active).map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select>` : ''}
         ${!mech && html`<div class="grow" style="max-width:520px;margin-left:auto"><${Picker} placeholder="+ Добавить работу из прайса или новую…" path=${(q) => 'catalog?q=' + encodeURIComponent(q)}
           render=${(c) => html`<b>${c.name}</b> <span class="sub">${c.category || ''} · ${c.qty} ${c.unit} · ${zl(c.price)}</span>`}
           onPick=${(c) => add({ kind: 'labor', name: c.name, qty: c.qty, unit: c.unit, price: c.price, vat: c.vat, discount: discL, mechanic_id: o.mechanic_id })}
           extra=${{ label: 'Новая работа', onClick: (q) => q && add({ kind: 'labor', name: q, qty: 1, unit: 'oper', price: 0, discount: discL, mechanic_id: o.mechanic_id }) }} /></div>`}
       </div>
-      <${ItemTable} rows=${labor} kind="labor" save=${save} del=${del} mech=${mech} staff=${app.staff} />
+      <${ItemTable} rows=${labor} kind="labor" save=${save} del=${del} mech=${mech} staff=${app.staff} perms=${app.perms} settings=${app.settings} />
     </div>
     <div class="card tight">
       <div class="row" style="padding:12px 14px"><h2 style="margin:0">Запчасти</h2>
-        ${!mech && app.features.intercars && html`<button class="btn sm" style="margin-left:auto" onClick=${() => setIc(true)}>Искать в Inter Cars</button>`}
-        ${!mech && html`<div class="grow" style=${'max-width:520px;' + (app.features.intercars ? '' : 'margin-left:auto')}><${Picker} placeholder="+ Со склада (название, индекс) или новая позиция…" path=${(q) => 'products?q=' + encodeURIComponent(q)}
+        ${!mech && html`<button class="btn sm" style="margin-left:auto" onClick=${() => setIc(true)}><${Icon} n="box" />Из хуртовни</button>`}
+        ${!mech && html`<div class="grow" style="max-width:520px"><${Picker} placeholder="+ Со склада (название, индекс) или новая позиция…" path=${(q) => 'products?q=' + encodeURIComponent(q)}
           render=${(p) => html`<b>${p.name}</b> <span class="sub">${p.code || ''} · в наличии ${num(p.stock - p.reserved, 2)} ${p.unit} · ${zl(p.sell_price)}</span>`}
           onPick=${(p) => add({ kind: 'part', product_id: p.id, name: p.name, code: p.code, qty: 1, unit: p.unit, price: p.sell_price, vat: p.vat, discount: discP })}
           extra=${{ label: 'Без склада (заказать / свою)', onClick: (q) => q && add({ kind: 'part', name: q, qty: 1, unit: 'szt.', price: 0, discount: discP }) }} /></div>`}
       </div>
-      <${ItemTable} rows=${parts} kind="part" save=${save} del=${del} mech=${mech} staff=${app.staff} />
+      <${ItemTable} rows=${parts} kind="part" save=${save} del=${del} mech=${mech} staff=${app.staff} perms=${app.perms} settings=${app.settings} />
     </div>
-    ${ic && html`<${ICSearch} o=${o} onClose=${() => setIc(false)} onAdd=${async (it) => { await add(it); }} />`}
+    ${ic && html`<${SupplierParts} o=${o} onClose=${() => { setIc(false); reload(); }} onAdd=${async (it) => { await add(it); }} />`}
     <div class="card"><label class="f">Заметка для механика<textarea rows="2" value=${o.mechanic_note || ''} disabled=${mech}
       onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { mechanic_note: e.target.value } }), 'Сохранено'); }}></textarea></label>
       ${o.complaint && html`<div class="small" style="margin-top:8px"><span class="muted">Жалоба клиента:</span> ${o.complaint}</div>`}</div>`;
 }
 
-function ItemTable({ rows, kind, save, del, mech, staff }) {
+function ItemTable({ rows, kind, save, del, mech, staff, perms = {}, settings = {} }) {
   if (!rows.length) return html`<div class="empty" style="padding:16px">Пока пусто</div>`;
-  const cell = (it, k, cls, step = '0.01') => html`<input class=${'inline-input num ' + cls} type="number" step=${step} value=${it[k]} disabled=${mech}
+  const seePrice = perms['orders.prices'] !== false;
+  const editPrice = !mech && perms['orders.price_edit'] !== false;
+  const showCost = kind === 'part' && !mech && seePrice && settings.show_cost_column !== '0';
+  const showDisc = settings.discounts_on !== '0';
+  const cell = (it, k, cls, step = '0.01', dis = mech) => html`<input class=${'inline-input num ' + cls} type="number" step=${step} value=${it[k]} disabled=${dis}
     onChange=${(e) => save(it, { [k]: Number(e.target.value) })} />`;
   return html`<div class="tbl-wrap"><table class="tbl items"><thead><tr>
       <th style="width:30px">${kind === 'labor' ? '✓' : ''}</th><th>${kind === 'labor' ? 'Работа' : 'Запчасть'}</th>${kind === 'labor' ? html`<th>Механик</th>` : html`<th>Индекс</th>`}
-      <th class="r">Кол-во</th><th class="r">Цена брутто</th>${kind === 'part' && !mech ? html`<th class="r">Закупка нетто</th>` : ''}<th class="r">Скидка %</th><th class="r">Сумма</th><th></th></tr></thead>
+      <th class="r">Кол-во</th>${seePrice ? html`<th class="r">Цена брутто</th>` : ''}${showCost ? html`<th class="r">Закупка нетто</th>` : ''}${seePrice && showDisc ? html`<th class="r">Скидка %</th>` : ''}${seePrice ? html`<th class="r">Сумма</th>` : ''}<th></th></tr></thead>
     <tbody>${rows.map((it) => html`<tr>
       <td>${kind === 'labor' ? html`<input type="checkbox" class="done-toggle" checked=${!!it.done} onChange=${(e) => save(it, { done: e.target.checked ? 1 : 0 })} title="Выполнено" />` : ''}</td>
       <td><input class="inline-input" value=${it.name} disabled=${mech} onChange=${(e) => save(it, { name: e.target.value })} />
@@ -247,10 +255,10 @@ function ItemTable({ rows, kind, save, del, mech, staff }) {
           <option value="">—</option>${staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></td>`
         : html`<td><input class="inline-input" style="width:130px" value=${it.code || ''} disabled=${mech} onChange=${(e) => save(it, { code: e.target.value })} /></td>`}
       <td class="r">${cell(it, 'qty', 'qty', '0.1')}</td>
-      <td class="r">${cell(it, 'price', 'price')}</td>
-      ${kind === 'part' && !mech ? html`<td class="r">${cell(it, 'cost', 'price')}</td>` : ''}
-      <td class="r">${cell(it, 'discount', 'disc', '1')}</td>
-      <td class="r nowrap"><b>${zl(it.qty * it.price * (1 - it.discount / 100))}</b></td>
+      ${seePrice ? html`<td class="r">${cell(it, 'price', 'price', '0.01', !editPrice)}</td>` : ''}
+      ${showCost ? html`<td class="r">${cell(it, 'cost', 'price', '0.01', !editPrice)}</td>` : ''}
+      ${seePrice && showDisc ? html`<td class="r">${cell(it, 'discount', 'disc', '1', !editPrice)}</td>` : ''}
+      ${seePrice ? html`<td class="r nowrap"><b>${zl(it.qty * it.price * (1 - it.discount / 100))}</b></td>` : ''}
       <td class="act">${!mech && html`<button class="icon-btn" title="Удалить" onClick=${() => del(it)}><${Icon} n="trash" /></button>`}</td>
     </tr>`)}</tbody></table></div>`;
 }
@@ -261,7 +269,10 @@ function MainData({ o, reload }) {
   const [f, set] = useState({
     mileage: o.mileage ?? '', fuel_level: o.fuel_level || '', complaint: o.complaint || '', internal_note: o.internal_note || '',
     type_id: o.type_id || '', mechanic_id: o.mechanic_id || '', pickup_at: o.pickup_at || '', flags: o.flags || {},
+    faults: o.faults || '', after_notes: o.after_notes || '', external_no: o.external_no || '', mechanic_note: o.mechanic_note || '',
   });
+  const S = app.settings;
+  const on = (k) => S[k] !== '0';
   const [cc, setCc] = useState({ customer: o.customer, car: o.car });
   const save = async () => {
     let customer_id = cc.customer?.id ?? null;
@@ -276,13 +287,18 @@ function MainData({ o, reload }) {
     <div class="card"><div class="grid g4">
       <label class="f">Пробег, км<input type="number" value=${f.mileage} onInput=${(e) => set({ ...f, mileage: e.target.value })} /></label>
       <label class="f">Уровень топлива<select value=${f.fuel_level} onChange=${(e) => set({ ...f, fuel_level: e.target.value })}>${FUEL.map((x) => html`<option value=${x}>${x || '—'}</option>`)}</select></label>
-      <label class="f">Источник заказа<select value=${f.type_id} onChange=${(e) => set({ ...f, type_id: e.target.value })}><option value="">—</option>${app.types.map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select></label>
+      ${on('order_type_on') && html`<label class="f">Источник заказа<select value=${f.type_id} onChange=${(e) => set({ ...f, type_id: e.target.value })}><option value="">—</option>${app.types.map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select></label>`}
       <label class="f">Ответственный механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
-      <label class="f">Срок выдачи<input type="datetime-local" value=${(f.pickup_at || '').replace(' ', 'T')} onInput=${(e) => set({ ...f, pickup_at: e.target.value.replace('T', ' ') })} /></label>
+      <label class="f">Срок выдачи${S.pickup_format === 'date'
+        ? html`<input type="date" value=${(f.pickup_at || '').slice(0, 10)} onInput=${(e) => set({ ...f, pickup_at: e.target.value })} />`
+        : html`<input type="datetime-local" value=${(f.pickup_at || '').replace(' ', 'T')} onInput=${(e) => set({ ...f, pickup_at: e.target.value.replace('T', ' ') })} />`}</label>
+      ${S.field_external_no === '1' && html`<label class="f">Внешний номер заказа<input value=${f.external_no} onInput=${(e) => set({ ...f, external_no: e.target.value })} /></label>`}
     </div>
     <div class="grid g2" style="margin-top:12px">
       <label class="f">Описание от клиента (попадает в печать)<textarea rows="4" value=${f.complaint} onInput=${(e) => set({ ...f, complaint: e.target.value })}></textarea></label>
-      <label class="f">Внутренняя заметка (клиент не видит)<textarea rows="4" value=${f.internal_note} onInput=${(e) => set({ ...f, internal_note: e.target.value })}></textarea></label>
+      ${on('field_internal') && html`<label class="f">Внутренняя заметка (клиент не видит)<textarea rows="4" value=${f.internal_note} onInput=${(e) => set({ ...f, internal_note: e.target.value })}></textarea></label>`}
+      ${on('field_faults') && html`<label class="f">Обнаруженные неисправности<textarea rows="3" value=${f.faults} onInput=${(e) => set({ ...f, faults: e.target.value })}></textarea></label>`}
+      ${on('field_after') && html`<label class="f">Замечания после выполнения<textarea rows="3" value=${f.after_notes} onInput=${(e) => set({ ...f, after_notes: e.target.value })}></textarea></label>`}
     </div>
     <div class="row" style="margin-top:12px;gap:18px">${FLAGS.map(([k, l]) => html`<label class="check"><input type="checkbox" checked=${!!f.flags[k]} onChange=${(e) => set({ ...f, flags: { ...f.flags, [k]: e.target.checked } })} />${l}</label>`)}</div>
     <div class="row" style="margin-top:14px"><button class="btn primary" onClick=${save}>Сохранить</button></div></div>`;
@@ -365,42 +381,6 @@ function Plan({ o }) {
 }
 
 // ── Поиск детали в Inter Cars: цена, наличие, добавить в заказ, заказать в IC ─
-function ICSearch({ o, onClose, onAdd }) {
-  const [q, setQ] = useState('');
-  const [rows, setRows] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [cart, setCart] = useState([]);
-  const search = async (e) => {
-    e?.preventDefault();
-    if (!q.trim()) return;
-    setBusy(true);
-    try { setRows(await api('intercars/search?q=' + encodeURIComponent(q.trim()))); } catch (x) { toast(x.message, 'error'); } finally { setBusy(false); }
-  };
-  const addToOrder = async (r) => {
-    await onAdd({ kind: 'part', name: `${r.name} ${r.index || ''}`.trim(), code: r.index, qty: 1, unit: 'szt.', price: r.sellSuggested, cost: r.priceNet, vat: r.vat });
-    setCart((c) => (c.some((x) => x.sku === r.sku) ? c : [...c, { ...r, qty: 1 }]));
-    toast('Добавлено в заказ');
-  };
-  const orderIC = async () => {
-    const r = await act(() => api('intercars/order', { body: { order_id: o.id, customNumber: o.number, lines: cart } }));
-    toast(`Заказ в Inter Cars отправлен: ${r.requisitionId || r.id} (${r.phase || 'принят'})`);
-    setCart([]);
-  };
-  return html`<${Modal} title="Inter Cars — поиск детали" wide onClose=${onClose} foot=${cart.length ? html`
-      <span class="muted small" style="margin-right:auto">К заказу в IC: ${cart.map((c) => c.index).join(', ')}</span>
-      <${ConfirmButton} cls="btn primary" label=${'Точно заказать ' + cart.length + ' поз.?'} onConfirm=${orderIC}>Заказать в Inter Cars</${ConfirmButton}>` : null}>
-    <form class="row" onSubmit=${search}><input class="grow" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер детали / индекс, например OP 520, GDB1330" autofocus />
-      <button class="btn primary" disabled=${busy}>${busy ? 'Ищу…' : 'Найти'}</button></form>
-    ${rows && (rows.length ? html`<table class="tbl"><thead><tr><th>Деталь</th><th class="r">Ваша цена нетто</th><th class="r">Продажа (с наценкой)</th><th class="r">Наличие</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => html`<tr><td><b>${r.index}</b> ${r.name}<div class="sub">${r.sku}${r.ean ? ' · EAN ' + r.ean : ''}</div></td>
-        <td class="r nowrap">${zl(r.priceNet)}</td><td class="r nowrap"><b>${zl(r.sellSuggested)}</b>${r.listGross ? html`<div class="sub">каталог ${zl(r.listGross)}</div>` : ''}</td>
-        <td class="r nowrap ${r.availability ? 'pos' : 'neg'}">${r.availability} шт.<div class="sub">${r.locations.slice(0, 3).join(', ')}</div>${r.deliveryBy ? html`<div class="sub">рейс ${fdt(r.deliveryBy.replace('T', ' '))}</div>` : ''}</td>
-        <td class="act"><button class="btn sm" onClick=${() => addToOrder(r)}>В заказ</button></td></tr>`)}</tbody></table>`
-      : html`<div class="empty">Inter Cars ничего не нашёл по «${q}»</div>`)}
-    <div class="muted small">«В заказ» добавляет деталь в этот заказ клиента (закупка = ваша цена IC). «Заказать в Inter Cars» отправляет заказ поставщику — деталь приедет рейсом, а поставка сама появится в Склад → Inter Cars.</div>
-  </${Modal}>`;
-}
-
 function StatusNotice({ o, n, set, reload }) {
   const app = useApp();
   const [busy, setBusy] = useState(false);
@@ -472,5 +452,22 @@ function Contact({ o, reload }) {
       <label class="f">Текст<textarea rows="6" value=${mail.message} onInput=${(e) => setMail({ ...mail, message: e.target.value })}></textarea></label>
       ${o.invoice_ext_id && html`<label class="check"><input type="checkbox" checked=${mail.invoice} onChange=${(e) => setMail({ ...mail, invoice: e.target.checked })} />Приложить фактуру ${o.invoice_no} (PDF)</label>`}
       <div class="muted small">Ниже текста в письме — список работ и запчастей и итоговая сумма.</div></${Modal}>`}
+  </div>`;
+}
+
+// ── Чек-листы (Listy kontrolne): осмотр при приёме, ТО и т. д. ──────────────
+function Checklists({ o }) {
+  const { data, reload } = useData(`orders/${o.id}/checklists`);
+  if (!data) return html`<${Loading} />`;
+  const save = async (c, results) => { await act(() => api(`orders/${o.id}/checklists`, { body: { id: c.id, results } })); reload(); };
+  const ST = [['ok', '✓ OK', 'pos'], ['warn', '! Внимание', 'warn'], ['bad', '✗ Заменить', 'neg']];
+  return html`<div class="stack">
+    <div class="card row"><span class="muted small">Добавить чек-лист:</span>
+      ${data.templates.map((t) => html`<button class="btn sm" onClick=${async () => { await act(() => api(`orders/${o.id}/checklists`, { body: { checklist_id: t.id } })); reload(); }}>${t.name}</button>`)}
+      ${!data.templates.length && html`<span class="muted small">Создайте чек-листы в Настройки → Чек-листы</span>`}</div>
+    ${data.filled.map((c) => html`<div class="card tight"><div class="row" style="padding:12px 14px"><h2 style="margin:0">${c.name}</h2><span class="muted small">${c.staff || ''} ${fdt(c.updated_at)}</span></div>
+      <table class="tbl"><tbody>${c.results.map((r, i) => html`<tr><td>${r.item}</td>
+        <td class="nowrap">${ST.map(([k, l, cls]) => html`<button class=${'btn sm ' + (r.state === k ? cls + ' on-state' : 'ghost')} style="margin-right:4px" onClick=${() => save(c, c.results.map((x, j) => (j === i ? { ...x, state: x.state === k ? '' : k } : x)))}>${l}</button>`)}</td>
+        <td><input class="inline-input" placeholder="Заметка" value=${r.note} onChange=${(e) => save(c, c.results.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} /></td></tr>`)}</tbody></table></div>`)}
   </div>`;
 }

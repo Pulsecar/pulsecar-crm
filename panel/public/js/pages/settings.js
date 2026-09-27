@@ -1,8 +1,9 @@
 import { html, useState, useData, api, act, go, useApp, Icon, Modal, ConfirmButton, Badge, zl, num, fdt } from '../lib.js';
 import Integrations from './integrations.js';
 import Messaging, { TplField } from './messaging.js';
+import { Params, Numbering, StaffAccess, CatalogFull, Templates, ChecklistsSettings, Lists } from './settings2.js';
 
-const TABS = [['integrations', 'Интеграции'], ['messages', 'SMS и шаблоны'], ['company', 'Фирма'], ['statuses', 'Статусы заказов'], ['types', 'Источники'], ['stations', 'Посты'], ['staff', 'Сотрудники'], ['catalog', 'Прайс работ'], ['import', 'Импорт данных']];
+const TABS = [['integrations', 'Интеграции'], ['staff', 'Сотрудники и доступы'], ['params', 'Параметры'], ['messages', 'SMS и шаблоны'], ['company', 'Фирма'], ['numbering', 'Нумерация'], ['statuses', 'Статусы заказов'], ['catalog', 'Прайс работ'], ['templates', 'Шаблоны заказов'], ['checklists', 'Чек-листы'], ['types', 'Источники'], ['stations', 'Посты'], ['lists', 'Справочники'], ['import', 'Импорт данных']];
 
 export default function Settings({ sub }) {
   const tab = TABS.some(([k]) => k === sub) ? sub : 'integrations';
@@ -14,8 +15,13 @@ export default function Settings({ sub }) {
     ${tab === 'statuses' && html`<${Dict} name="statuses" />`}
     ${tab === 'types' && html`<${Dict} name="types" />`}
     ${tab === 'stations' && html`<${Dict} name="stations" />`}
-    ${tab === 'staff' && html`<${Staff} />`}
-    ${tab === 'catalog' && html`<${Catalog} />`}
+    ${tab === 'staff' && html`<${StaffAccess} />`}
+    ${tab === 'catalog' && html`<${CatalogFull} />`}
+    ${tab === 'params' && html`<${Params} />`}
+    ${tab === 'numbering' && html`<${Numbering} />`}
+    ${tab === 'templates' && html`<${Templates} />`}
+    ${tab === 'checklists' && html`<${ChecklistsSettings} />`}
+    ${tab === 'lists' && html`<${Lists} />`}
     ${tab === 'import' && html`<${Import} />`}`;
 }
 
@@ -40,7 +46,7 @@ function Company() {
 const DICT = {
   statuses: { title: 'Статус', cols: [['name', 'Название'], ['color', 'Цвет', 'color'], ['client_label', 'Как видит клиент в приложении'], ['is_final', 'Завершает заказ', 'bool'], ['lock_edit', 'Блокирует изменения', 'bool'], ['sms_mode', 'SMS клиенту', 'sms'], ['pos', 'Порядок', 'number']] },
   types: { title: 'Источник', cols: [['name', 'Название'], ['pos', 'Порядок', 'number']] },
-  stations: { title: 'Пост', cols: [['name', 'Название'], ['color', 'Цвет', 'color'], ['pos', 'Порядок', 'number'], ['active', 'Активен', 'bool']] },
+  stations: { title: 'Пост', cols: [['name', 'Название'], ['color', 'Цвет', 'color'], ['max_hours_day', 'Макс. часов в день', 'number'], ['pos', 'Порядок', 'number'], ['active', 'Активен', 'bool']] },
 };
 const SMS_MODE = { off: '', ask: 'SMS (спросить)', auto: 'SMS (сразу)' };
 /** SMS и e-mail клиенту при смене на этот статус — как «SMS do klienta» в Motowarsztat */
@@ -72,51 +78,6 @@ function Dict({ name }) {
     ${edit && html`<${Modal} title=${cfg.title} onClose=${() => setEdit(null)} foot=${html`<button class="btn primary" onClick=${save}>Сохранить</button>`}>
       ${cfg.cols.map(([k, l, t]) => t === 'sms' ? html`<${StatusMessages} edit=${edit} setEdit=${setEdit} />` : t === 'bool' ? html`<label class="check"><input type="checkbox" checked=${!!edit[k]} onChange=${(e) => setEdit({ ...edit, [k]: e.target.checked ? 1 : 0 })} />${l}</label>`
         : html`<label class="f">${l}<input type=${t || 'text'} value=${edit[k] ?? (t === 'color' ? '#1BF372' : '')} onInput=${(e) => setEdit({ ...edit, [k]: t === 'number' ? Number(e.target.value) : e.target.value })} /></label>`)}
-    </${Modal}>`}
-  </div>`;
-}
-
-function Staff() {
-  const app = useApp();
-  const [edit, setEdit] = useState(null);
-  const save = async () => { await act(() => api('staff', { body: edit }), 'Сохранено'); setEdit(null); app.reload(); };
-  const ROLE = { admin: 'Администратор', staff: 'Приёмщик / менеджер', mechanic: 'Механик' };
-  return html`<div class="card tight">
-    <div class="row" style="padding:12px 14px"><span class="muted small">Механик видит заказы и терминарз и отмечает работы. Приёмщик — всё, кроме отчётов и настроек.</span>
-      <button class="btn primary sm" style="margin-left:auto" onClick=${() => setEdit({ role: 'mechanic', is_mechanic: 1, commission_pct: 40, hourly_rate: 250, active: 1 })}><${Icon} n="plus" />Сотрудник</button></div>
-    <table class="tbl"><thead><tr><th>Имя</th><th>Логин</th><th>Роль</th><th class="r">Ставка н/ч</th><th class="r">% от работ</th><th>Активен</th></tr></thead>
-      <tbody>${app.staff.map((s) => html`<tr class="click" onClick=${() => setEdit({ ...s, password: '' })}><td><b>${s.name}</b></td><td class="sub">${s.login || '—'}</td><td>${ROLE[s.role]}</td>
-        <td class="r">${zl(s.hourly_rate)}</td><td class="r">${s.commission_pct}%</td><td>${s.active ? '✓' : html`<span class="faint">отключён</span>`}</td></tr>`)}</tbody></table>
-    ${edit && html`<${Modal} title="Сотрудник" onClose=${() => setEdit(null)} foot=${html`<button class="btn primary" onClick=${save}>Сохранить</button>`}>
-      <div class="grid g2"><label class="f">Имя<input value=${edit.name || ''} onInput=${(e) => setEdit({ ...edit, name: e.target.value })} /></label>
-        <label class="f">Роль<select value=${edit.role} onChange=${(e) => setEdit({ ...edit, role: e.target.value })}>${Object.entries(ROLE).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label></div>
-      <div class="grid g2"><label class="f">Ставка за нормо-час, zł<input type="number" value=${edit.hourly_rate} onInput=${(e) => setEdit({ ...edit, hourly_rate: e.target.value })} /></label>
-        <label class="f">% от работ в заказах<input type="number" value=${edit.commission_pct} onInput=${(e) => setEdit({ ...edit, commission_pct: e.target.value })} /></label></div>
-      <div class="grid g2"><label class="f">Логин для входа (можно пусто)<input value=${edit.login || ''} autocomplete="off" onInput=${(e) => setEdit({ ...edit, login: e.target.value })} /></label>
-        <label class="f">${edit.id ? 'Новый пароль (оставьте пустым)' : 'Пароль'}<input type="password" autocomplete="new-password" value=${edit.password || ''} onInput=${(e) => setEdit({ ...edit, password: e.target.value })} /></label></div>
-      <label class="check"><input type="checkbox" checked=${!!edit.active} onChange=${(e) => setEdit({ ...edit, active: e.target.checked })} />Активен</label>
-    </${Modal}>`}
-  </div>`;
-}
-
-function Catalog() {
-  const { data, reload } = useData('catalog');
-  const [edit, setEdit] = useState(null);
-  const [q, setQ] = useState('');
-  const rows = (data || []).filter((r) => !q || (r.name + ' ' + (r.category || '')).toLowerCase().includes(q.toLowerCase()));
-  return html`<div class="card tight">
-    <div class="row" style="padding:12px 14px"><input class="grow" type="search" placeholder="Поиск по прайсу…" value=${q} onInput=${(e) => setQ(e.target.value)} />
-      <button class="btn primary sm" onClick=${() => setEdit({ unit: 'oper', qty: 1, price: 0, vat: 23 })}><${Icon} n="plus" />Работа</button></div>
-    <table class="tbl"><thead><tr><th>Категория</th><th>Работа</th><th class="r">Кол-во</th><th>Ед.</th><th class="r">Цена брутто</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => html`<tr class="click" onClick=${() => setEdit({ ...r })}><td class="sub">${r.category || ''}</td><td>${r.name}</td><td class="r">${r.qty}</td><td>${r.unit}</td><td class="r">${zl(r.price)}</td>
-        <td class="act" onClick=${(e) => e.stopPropagation()}><${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api('catalog/' + r.id, { method: 'DELETE' })); reload(); }}><${Icon} n="trash" /></${ConfirmButton}></td></tr>`)}</tbody></table>
-    ${!rows.length ? html`<div class="empty">Прайс пуст — при импорте его можно загрузить из файла, а на сайте уже есть 45 позиций цен.</div>` : ''}
-    ${edit && html`<${Modal} title="Работа из прайса" onClose=${() => setEdit(null)} foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api('catalog', { body: edit }), 'Сохранено'); setEdit(null); reload(); }}>Сохранить</button>`}>
-      <label class="f">Категория<input value=${edit.category || ''} onInput=${(e) => setEdit({ ...edit, category: e.target.value })} /></label>
-      <label class="f">Название<input value=${edit.name || ''} onInput=${(e) => setEdit({ ...edit, name: e.target.value })} /></label>
-      <div class="grid g3"><label class="f">Кол-во (н/ч)<input type="number" step="0.1" value=${edit.qty} onInput=${(e) => setEdit({ ...edit, qty: e.target.value })} /></label>
-        <label class="f">Ед.<input value=${edit.unit} onInput=${(e) => setEdit({ ...edit, unit: e.target.value })} /></label>
-        <label class="f">Цена брутто<input type="number" step="0.01" value=${edit.price} onInput=${(e) => setEdit({ ...edit, price: e.target.value })} /></label></div>
     </${Modal}>`}
   </div>`;
 }
