@@ -17,9 +17,12 @@
 
   // ── Inter Cars: карточки деталей по «Kod Inter Cars: XXXX» ─────────────────
   const IC_CODE = /(?:Kod Inter Cars|Код Inter Cars|Inter Cars code|Kód Inter Cars|Kod IC|Код IC)\s*:?\s*([A-Z0-9]{4,14})/i;
-  const REC = /rekomend|sugerow|detaliczn|katalogow|рекоменд|розничн|recommend|retail|list price/i;
+  const REC = /rekomend|sugerow|detal|katalogow|рекоменд|розничн|recommend|retail|list price/i;
 
   function icCards() {
+    // e-Catalog Inter Cars (pl.e-cat.intercars.eu): одна деталь = tbody.listingcollapsed__item
+    const exact = [...document.querySelectorAll('tbody.listingcollapsed__item, .listingcollapsed__item, .producttile, .productdetails')].filter((c) => c.querySelector('.js-quantity__amount--new, [data-product-code]'));
+    if (exact.length) return exact.filter((c) => !exact.some((o) => o !== c && o.contains(c)));
     const labels = [...document.querySelectorAll('body *')].filter((el) => el.childElementCount <= 4 && el.textContent.length < 400 && IC_CODE.test(el.textContent)
       && ![...el.children].some((c) => IC_CODE.test(c.textContent)));
     const cards = new Set();
@@ -38,6 +41,19 @@
   }
 
   function parseIcCard(card) {
+    const amounts = [...card.querySelectorAll('.js-quantity__amount--new')].map((e) => toNum(T(e)));
+    const exactName = T(card.querySelector('.productname'));
+    const exactCode = T(card.querySelector('.activenumber'));
+    if (amounts.length >= 2 && (exactName || exactCode)) {
+      // порядок цен в e-Catalog: ваша нетто, ваша брутто, детальная (рекомендованная) нетто, детальная брутто
+      const sku = card.querySelector('[data-product-code]')?.dataset.productCode || (IC_CODE.exec(T(card)) || [])[1] || null;
+      const img = card.querySelector('img.listingcollapsed__manufacturerimg, .listingcollapsed__manufacturer img, [class*=manufacturer] img');
+      const qty = toNum(card.querySelector('input.js-order-item-count, input[name=quantity]')?.value || '1') || 1;
+      return {
+        supplier: SUPPLIER, sku, code: exactCode || sku, name: exactName || exactCode, brand: (img?.title || img?.alt || '').trim() || null, qty, vat: 23,
+        price_net: amounts[0] || 0, sell_gross: amounts.length >= 4 ? amounts[3] : 0,
+      };
+    }
     const text = T(card);
     const sku = (IC_CODE.exec(text) || [])[1] || null;
     const lines = text.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -76,9 +92,11 @@
   function decorateIc() {
     for (const card of icCards()) {
       if (card.querySelector('.pulsecar-btn') || card.closest('.pulsecar-host')) continue;
+      const b = makeBtn(() => openModal([parseIcCard(card)]));
+      const cart = card.querySelector('.productaddtocart');
+      if (cart) { b.style.margin = '6px 0 0 0'; b.style.width = '100%'; b.style.boxSizing = 'border-box'; cart.insertAdjacentElement('afterend', b); continue; }
       const btns = [...card.querySelectorAll('button')];
       const anchor = btns.length ? btns[btns.length - 1] : null;
-      const b = makeBtn(() => openModal([parseIcCard(card)]));
       if (anchor?.parentElement) anchor.parentElement.appendChild(b); else card.appendChild(b);
     }
   }

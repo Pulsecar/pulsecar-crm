@@ -1,0 +1,8 @@
+# Добавка для VPS: панель в одной сети с Caddy из autoservice-smm-bot, чтобы он проксировал panel.pulsecar.tech
+services:
+  panel:
+    networks: [default, edge]
+networks:
+  edge:
+    external: true
+    name: autoservice-smm-bot_default
