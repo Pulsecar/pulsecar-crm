@@ -865,7 +865,7 @@ crm.get('/fiscal/ping-job', (req, res) => {
 crm.get('/reports/list', (req, res) => { who(req, 'reports.view'); res.json({ reports: RPT.reportList() }); });
 crm.get('/reports/run/:id', (req, res) => {
   who(req, 'reports.view');
-  const rep = RPT.runReport(req.params.id, req.query);
+  const rep = RPT.localize(RPT.runReport(req.params.id, req.query), req.query.format ? String(req.query.lang || '') : '');
   const fname = `raport-${req.params.id}-${req.query.from || ''}_${req.query.to || ''}`.replace(/[^\w.-]+/g, '_').replace(/_+$/, '');
   if (req.query.format === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

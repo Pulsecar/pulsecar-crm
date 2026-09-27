@@ -1,5 +1,6 @@
 // Рапорты (как Raporty в Motowarsztat): слева группы и рапорты, справа параметры → таблица → CSV / Excel / печать
 import { html, useState, useEffect, useData, api, qs, useApp, ErrorBox, Loading, Icon, Picker, zl, num, fdate, todayStr, addDays, carName } from '../lib.js';
+import { getLang } from '../i18n.js';
 
 const GROUP_ORDER = ['Сотрудники', 'Заказы', 'Продажи', 'Клиенты', 'Касса', 'Автомобили', 'Затраты', 'Склад', 'Хранение'];
 const PERIODS = [
@@ -48,7 +49,7 @@ export default function Reports({ query }) {
   useEffect(() => { if (has('register') && !regs.length) api('cash/registers').then((r) => setRegs(Array.isArray(r) ? r : []), () => {}); }, [id, list]);
   useEffect(() => { setRep(null); setErr(''); if (cur && !(has('car') && id === 'car_history') && !(id === 'client_orders')) runIt(); }, [id, list]);
   const set = (k) => (e) => setP({ ...p, [k]: e.target.value });
-  const url = (f) => `/crm-api/reports/run/${id}?${params()}&format=${f}`;
+  const url = (f) => `/crm-api/reports/run/${id}?${params()}&format=${f}&lang=${getLang()}`;
 
   if (le) return html`<${ErrorBox} error=${le} />`;
   if (!list) return html`<${Loading} />`;

@@ -333,3 +333,8 @@ table.pnl tfoot td, .tbl tfoot td { border-top: 2px solid var(--border2); }
 .row.wrap{flex-wrap:wrap}
 a.btn.disabled{pointer-events:none;opacity:.5}
 @media (max-width:900px){.rpt{grid-template-columns:1fr}.rpt-nav{position:static}}
+
+/* Переключатель языка */
+.lang-switch{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;cursor:pointer;width:auto}
+.top .lang-switch{margin-left:auto}
+.top .lang-switch + .user{margin-left:10px}

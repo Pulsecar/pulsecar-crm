@@ -17,6 +17,7 @@ import Marketing from './pages/marketing.js';
 import Search from './pages/search.js';
 import Sms from './pages/sms.js';
 import { ClipPage } from './pages/suppliers.js';
+import { initI18n, LangSwitch } from './i18n.js';
 
 const NAV = [
   { to: '/', icon: 'home', label: 'Главная' },
@@ -56,6 +57,7 @@ function Login({ onDone }) {
     <label class="f">Пароль<input id="password" type="password" autocomplete="current-password" value=${f.password} onInput=${(e) => set({ ...f, password: e.target.value })} required /></label>
     <button class="btn primary lg" type="submit">Войти</button>
     ${err && html`<div class="err">${err}</div>`}
+    <div class="c" style="margin-top:12px"><${LangSwitch} html=${html} /></div>
   </form></div>`;
 }
 
@@ -113,6 +115,7 @@ function Shell({ app }) {
           <input type="search" placeholder="Поиск: клиент, телефон, номер авто, VIN, заказ…" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Поиск" />
         </form>
         <a class="btn primary" href="#/orders/new"><${Icon} n="plus" />Заказ</a>
+        <${LangSwitch} html=${html} compact />
         <div class="user"><span>${app.user.name}</span>
           <button class="icon-btn" title="Выйти" aria-label="Выйти" onClick=${async () => { await api('logout', { body: {} }).catch(() => {}); location.reload(); }}><${Icon} n="logout" /></button></div>
       </div>
@@ -138,6 +141,6 @@ function Root() {
   </${AppCtx.Provider}>`;
 }
 
-render(html`<${Root} />`, document.getElementById('root'));
+initI18n().finally(() => render(html`<${Root} />`, document.getElementById('root')));
 window.addEventListener('unhandledrejection', (e) => { if (e.reason?.message) console.warn(e.reason.message); });
 export { toast };

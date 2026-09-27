@@ -1,6 +1,7 @@
 // Рапорты (как Raporty в Motowarsztat): заказы, продажи, клиенты, сотрудники (зарплата механиков), касса, авто, затраты, склад, хранение.
 // Каждый рапорт: параметры → { columns, rows, totals }; выгрузка CSV / XLSX и печать делаются из этого же ответа.
 import XLSX from 'xlsx';
+import fs from 'node:fs';
 import { all, one } from './db.js';
 import { HttpError, round2 } from './util.js';
 
@@ -348,14 +349,14 @@ export function runReport(id, q) {
 export function toCsv(rep) {
   const cell = (v) => { const s = v === null || v === undefined ? '' : typeof v === 'number' ? String(v).replace('.', ',') : String(v); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [rep.columns.map((c) => cell(c[1])).join(';'), ...rep.rows.map((r) => rep.columns.map((c) => cell(r[c[0]])).join(';'))];
-  if (Object.keys(rep.totals || {}).length) lines.push(rep.columns.map((c, i) => cell(i === 0 ? 'Итого' : rep.totals[c[0]] ?? '')).join(';'));
+  if (Object.keys(rep.totals || {}).length) lines.push(rep.columns.map((c, i) => cell(i === 0 ? rep.total || 'Итого' : rep.totals[c[0]] ?? '')).join(';'));
   return '﻿' + lines.join('\r\n');
 }
 
 export function toXlsx(rep) {
   const head = rep.columns.map((c) => c[1]);
   const body = rep.rows.map((r) => rep.columns.map((c) => r[c[0]] ?? ''));
-  if (Object.keys(rep.totals || {}).length) body.push(rep.columns.map((c, i) => (i === 0 ? 'Итого' : rep.totals[c[0]] ?? '')));
+  if (Object.keys(rep.totals || {}).length) body.push(rep.columns.map((c, i) => (i === 0 ? rep.total || 'Итого' : rep.totals[c[0]] ?? '')));
   const ws = XLSX.utils.aoa_to_sheet([head, ...body]);
   ws['!cols'] = rep.columns.map((c) => ({ wch: Math.min(40, Math.max(10, c[1].length + 2, c[2] === 'text' ? 22 : 12)) }));
   rep.columns.forEach((c, ci) => {
@@ -371,13 +372,23 @@ const fmt = (v, t) => (v === null || v === undefined || v === '' ? '' : t === 'm
 export function toHtml(rep, S = {}, q = {}) {
   const right = (t) => (t === 'money' || t === 'num' || t === 'pct' ? ' class="r"' : '');
   const tot = Object.keys(rep.totals || {}).length
-    ? `<tfoot><tr>${rep.columns.map((c, i) => `<td${right(c[2])}>${i === 0 ? '<b>Итого</b>' : `<b>${esc(fmt(rep.totals[c[0]], c[2]))}</b>`}</td>`).join('')}</tr></tfoot>` : '';
+    ? `<tfoot><tr>${rep.columns.map((c, i) => `<td${right(c[2])}>${i === 0 ? `<b>${esc(rep.total || 'Итого')}</b>` : `<b>${esc(fmt(rep.totals[c[0]], c[2]))}</b>`}</td>`).join('')}</tr></tfoot>` : '';
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>${esc(rep.title)}</title><style>
   body{font:12px/1.35 Arial,sans-serif;color:#111;margin:18px}h1{font-size:17px;margin:0 0 4px}.m{color:#555;margin-bottom:10px}
   table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:4px 6px;vertical-align:top}th{background:#f1f1f1;text-align:left}
   .r{text-align:right;white-space:nowrap}tfoot td{background:#fafafa}.bar{margin-bottom:12px}@media print{.bar{display:none}body{margin:0}}
-  </style></head><body><div class="bar"><button onclick="print()">Печать</button></div>
+  </style></head><body><div class="bar"><button onclick="print()">${esc(rep.printLabel || 'Печать')}</button></div>
   <h1>${esc(rep.title)}</h1><div class="m">${esc(S.company_legal_name || S.company_name || '')}${q.from ? ` · ${esc(q.from)} — ${esc(q.to)}` : ''}${rep.note ? ` · ${esc(rep.note)}` : ''}</div>
   <table><thead><tr>${rep.columns.map((c) => `<th${right(c[2])}>${esc(c[1])}</th>`).join('')}</tr></thead>
-  <tbody>${rep.rows.map((r) => `<tr>${rep.columns.map((c) => `<td${right(c[2])}>${esc(fmt(r[c[0]], c[2]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${rep.columns.length}">Нет данных</td></tr>`}</tbody>${tot}</table></body></html>`;
+  <tbody>${rep.rows.map((r) => `<tr>${rep.columns.map((c) => `<td${right(c[2])}>${esc(fmt(r[c[0]], c[2]))}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${rep.columns.length}">${esc(rep.emptyLabel || 'Нет данных')}</td></tr>`}</tbody>${tot}</table></body></html>`;
+}
+
+// Выгрузки на языке интерфейса: заголовки и названия колонок по словарю public/i18n/<lang>.json
+const DICTS = {};
+export function localize(rep, lang) {
+  if (!['pl', 'en', 'uk'].includes(lang)) return rep;
+  const d = (DICTS[lang] ||= (() => { try { return JSON.parse(fs.readFileSync(new URL(`../public/i18n/${lang}.json`, import.meta.url), 'utf8')); } catch { return {}; } })());
+  const t = (x) => (typeof x === 'string' && d[x.trim()] !== undefined ? d[x.trim()] : x);
+  return { ...rep, title: t(rep.title), note: t(rep.note), total: t('Итого'), printLabel: t('Печать'), emptyLabel: t('Нет данных'), columns: rep.columns.map(([k, l, ty]) => [k, t(l), ty]),
+    rows: rep.rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, t(v)]))) };
 }

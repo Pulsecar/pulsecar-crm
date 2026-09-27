@@ -201,7 +201,9 @@ try {
     const r = await fetch(`${BASE}/crm-api/reports/run/orders_detail?from=2020-01-01&to=${td}&format=${f}`, { headers: { Cookie: jars.admin } });
     assert.equal(r.status, 200, f); assert.ok((await r.arrayBuffer()).byteLength > 50, f);
   }
-  console.log('✓ рапорты: все считаются, зарплата 40%, CSV/XLSX/печать');
+  const plCsv = await (await fetch(`${BASE}/crm-api/reports/run/staff_pay?from=2020-01-01&to=${td}&format=csv&lang=pl`, { headers: { Cookie: jars.admin } })).text();
+  assert.ok(/Pracownik/.test(plCsv) && !/Сотрудник|Итого/.test(plCsv), plCsv.slice(0, 200));
+  console.log('✓ рапорты: все считаются, зарплата 40%, CSV/XLSX/печать, выгрузка на польском');
 
   // 9c. фискальная касса (Novitus NoviAPI через расширение)
   assert.equal((await req(`/crm-api/orders/${co.id}/receipt`, { body: {} })).status, 400);
