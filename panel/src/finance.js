@@ -201,10 +201,10 @@ export function pnl(q) {
 /** Деньги: поступления и выплаты по дням / способам, касса, долги клиентов с возрастом */
 export function cash(q) {
   if (!isDate(q.from) || !isDate(q.to)) throw new HttpError(400, 'Укажите период');
-  const byMethod = all(`SELECT method, direction, COUNT(*) n, ROUND(SUM(amount),2) s FROM payments WHERE ${LOCAL('created_at')} BETWEEN ? AND ? GROUP BY method, direction ORDER BY s DESC`, q.from, q.to);
+  const byMethod = all(`SELECT method, direction, COUNT(*) n, ROUND(SUM(amount),2) s FROM payments WHERE transfer_id IS NULL AND ${LOCAL('created_at')} BETWEEN ? AND ? GROUP BY method, direction ORDER BY s DESC`, q.from, q.to);
   const byDay = all(`SELECT ${LOCAL('created_at')} d, ROUND(SUM(CASE WHEN direction='in' AND method <> 'points' THEN amount ELSE 0 END),2) inflow,
-      ROUND(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),2) outflow FROM payments WHERE ${LOCAL('created_at')} BETWEEN ? AND ? GROUP BY d ORDER BY d`, q.from, q.to);
-  const cashBalance = r2((Number(getSetting('cash_opening', '0')) || 0) + (one(`SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE -amount END),0) s FROM payments WHERE method='cash'`).s || 0));
+      ROUND(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END),2) outflow FROM payments WHERE transfer_id IS NULL AND ${LOCAL('created_at')} BETWEEN ? AND ? GROUP BY d ORDER BY d`, q.from, q.to);
+  const cashBalance = r2(one(`SELECT COALESCE(SUM(r.opening),0) + COALESCE((SELECT SUM(CASE WHEN p.direction='in' THEN p.amount ELSE -p.amount END) FROM payments p JOIN cash_registers r2 ON r2.id = p.register_id WHERE r2.kind = 'cash'),0) s FROM cash_registers r WHERE r.kind = 'cash'`).s || 0);
   const debts = all(`SELECT o.id, o.number, o.total, o.paid, ROUND(o.total - o.paid,2) due, date(o.closed_at,'localtime') closed, c.name cname, c.phone,
       CAST(julianday('now') - julianday(o.closed_at) AS INTEGER) days
     FROM orders o JOIN order_statuses st ON st.id = o.status_id LEFT JOIN customers c ON c.id = o.customer_id
@@ -221,7 +221,7 @@ export function cash(q) {
   };
 }
 
-/** Прочее для обзора: сметы → заказы, склад, лояльность, НДС */
+/** Прочее для обзора: выцены → заказы, склад, лояльность, НДС */
 export function extras(q) {
   const quotes = one(`SELECT COUNT(*) n, COALESCE(SUM(total),0) s FROM orders WHERE kind='quote' AND ${LOCAL('created_at')} BETWEEN ? AND ?`, q.from, q.to);
   const converted = one(`SELECT COUNT(*) n, COALESCE(SUM(o.total),0) s FROM orders q JOIN orders o ON o.quote_id = q.id WHERE q.kind='quote' AND ${LOCAL('q.created_at')} BETWEEN ? AND ?`, q.from, q.to);

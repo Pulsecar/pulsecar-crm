@@ -46,7 +46,7 @@ export const SETTINGS_SCHEMA = [
       { k: 'status_on_sale_doc', label: 'После выставления фактуры — статус', type: 'status' },
     ] },
   ] },
-  { id: 'orders', title: 'Заказы и сметы', icon: 'file', sections: [
+  { id: 'orders', title: 'Заказы и выцены', icon: 'file', sections: [
     { title: 'Поля в заказе', fields: [
       yes('order_type_on', 'Источник заказа (Sarafanka, Facebook…)'),
       yes('field_internal', 'Внутренняя заметка'),
@@ -142,7 +142,7 @@ export const SETTINGS_SCHEMA = [
     { title: 'Общее', fields: [
       yes('card_show_company', 'Данные сервиса в шапке карты'), yes('card_show_status', 'Текущий статус заказа'), yes('card_files', 'Фото и файлы из заказа'),
       yes('card_show_invoice', 'Документы продажи (фактуры) по ссылке'), yes('card_show_bank', 'Номер счёта для перевода'), yes('card_drawn_signature', 'Подпись от руки (пальцем на телефоне)'),
-      { k: 'card_accept_status_id', label: 'После принятия сметы клиентом — статус', type: 'status' },
+      { k: 'card_accept_status_id', label: 'После принятия выцены клиентом — статус', type: 'status' },
     ] },
     { title: 'Протокол приёма', fields: [
       yes('card_intake_on', 'Показывать протокол приёма'), ACC('card_intake_accept', 'Как клиент подписывает'),

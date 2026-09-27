@@ -40,9 +40,17 @@ export function createOrder(data, staffName) {
       type_id: data.type_id || null,
       mechanic_id: data.mechanic_id || null,
       mileage: data.mileage || null,
-      fuel_level: data.fuel_level || null,
       complaint: data.complaint || null,
       internal_note: data.internal_note || null,
+      mechanic_note: data.mechanic_note || null,
+      notes: data.notes || null,
+      contact_person: data.contact_person || null,
+      contact_phone: data.contact_phone || null,
+      pickup_at: data.pickup_at || null,
+      flags: data.flags ? JSON.stringify(data.flags) : null,
+      damages: Array.isArray(data.damages) ? JSON.stringify(data.damages.slice(0, 60)) : null,
+      damages_note: data.damages_note || null,
+      fuel_level: data.fuel_level || null,
       external_no: data.external_no || null,
       source: data.source || 'crm',
       created_by: staffName,
@@ -55,7 +63,7 @@ export function createOrder(data, staffName) {
   });
 }
 
-const ITEM_FIELDS = ['kind', 'name', 'code', 'product_id', 'mechanic_id', 'qty', 'unit', 'price', 'cost', 'discount', 'vat', 'done', 'pos'];
+const ITEM_FIELDS = ['kind', 'name', 'code', 'product_id', 'mechanic_id', 'qty', 'unit', 'price', 'cost', 'discount', 'vat', 'done', 'pos', 'task_id'];
 export function addItem(orderId, it) {
   if (!it.name) throw new HttpError(400, 'Название позиции обязательно');
   const row = {};
@@ -168,10 +176,10 @@ export function setStatus(orderId, statusId, staffName) {
   return { earned, sms: sms?.mode === 'ask' ? sms : null, email: email?.mode === 'ask' ? email : null };
 }
 
-/** Смета → заказ (копия позиций) */
+/** Выцена → заказ (копия позиций) */
 export function quoteToOrder(quoteId, staffName) {
   const q = getOrder(quoteId);
-  if (q.kind !== 'quote') throw new HttpError(400, 'Это не смета');
+  if (q.kind !== 'quote') throw new HttpError(400, 'Это не выцена');
   const items = all('SELECT * FROM order_items WHERE order_id = ? ORDER BY pos', q.id);
   return tx(() => {
     const id = createOrder({ ...q, kind: 'order', status_id: null, items: items.map(({ id: _i, order_id: _o, ...it }) => it) }, staffName);

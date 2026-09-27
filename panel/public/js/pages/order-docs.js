@@ -2,13 +2,13 @@
 // приём авто (схема повреждений, фото и файлы, подписи клиента)
 import { html, useState, useRef, api, act, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast } from '../lib.js';
 
-const PRINTS = [['intake', 'Протокол приёма', 'Protokół przyjęcia'], ['estimate', 'Kosztorys / смета', 'Kosztorys'], ['spec', 'Спецификация заказа', 'Specyfikacja'],
+const PRINTS = [['intake', 'Протокол приёма', 'Protokół przyjęcia'], ['estimate', 'Kosztorys / выцена', 'Kosztorys'], ['spec', 'Спецификация заказа', 'Specyfikacja'],
   ['mechanic', 'Карта для механика', 'Karta dla mechanika'], ['release', 'Протокол выдачи', 'Protokół wydania']];
 
 export function DocsMenu({ o }) {
   const app = useApp();
   const [open, setOpen] = useState(false);
-  const list = o.kind === 'quote' ? [['estimate', 'Wycena (смета)']] : PRINTS.filter(([k]) => app.perms['orders.prices'] || k === 'mechanic' || k === 'intake');
+  const list = o.kind === 'quote' ? [['estimate', 'Wycena (выцена)']] : PRINTS.filter(([k]) => app.perms['orders.prices'] || k === 'mechanic' || k === 'intake');
   return html`<div class="menu-wrap" onMouseLeave=${() => setOpen(false)}>
     <button class="btn" onClick=${() => setOpen(!open)} aria-expanded=${open}><${Icon} n="print" />Документы ▾</button>
     ${open && html`<div class="menu">${list.map(([k, l]) => html`<a href=${`/crm-api/print/${k}/${o.id}`} target="_blank" rel="noopener" onClick=${() => setOpen(false)}>${l}</a>`)}
@@ -96,11 +96,11 @@ export function SalesDocs({ o, reload }) {
 }
 
 // ── Приём авто: схема повреждений, фото, подписи ──────────────────────────
-const DMG = [['rysa', 'Царапина'], ['wgniecenie', 'Вмятина'], ['odprysk', 'Скол'], ['pekniecie', 'Трещина'], ['korozja', 'Коррозия'], ['brak', 'Нет детали'], ['inne', 'Другое']];
-const DOCNAME = { intake: 'Протокол приёма', estimate: 'Kosztorys', quote: 'Смета', release: 'Протокол выдачи' };
+export const DMG = [['rysa', 'Царапина'], ['wgniecenie', 'Вмятина'], ['odprysk', 'Скол'], ['pekniecie', 'Трещина'], ['korozja', 'Коррозия'], ['brak', 'Нет детали'], ['inne', 'Другое']];
+const DOCNAME = { intake: 'Протокол приёма', estimate: 'Kosztorys', quote: 'Выцена', release: 'Протокол выдачи' };
 const SIGN = { button: 'кнопка «Akceptuję»', sms: 'код SMS', drawn: 'подпись от руки', paper: 'на бумаге' };
 
-function CarDiagram({ marks, onAdd, onPick, sel }) {
+export function CarDiagram({ marks, onAdd, onPick, sel }) {
   const ref = useRef(null);
   const click = (e) => {
     const r = ref.current.getBoundingClientRect();
@@ -123,13 +123,8 @@ function CarDiagram({ marks, onAdd, onPick, sel }) {
 
 export function Intake({ o, reload }) {
   const app = useApp();
-  const [marks, setMarks] = useState(o.damages || []);
-  const [sel, setSel] = useState(null);
-  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const canEdit = !!app.perms['orders.edit'];
-  const upd = (m) => { setMarks(m); setDirty(true); };
-  const save = async () => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { damages: marks } }), 'Повреждения сохранены'); setDirty(false); reload(); };
   const upload = async (files) => {
     if (!files?.length) return;
     const fd = new FormData();
@@ -138,20 +133,6 @@ export function Intake({ o, reload }) {
     try { await act(() => api(`orders/${o.id}/files`, { form: fd }), 'Файлы загружены'); reload(); } finally { setBusy(false); }
   };
   return html`<div class="grid g2">
-    <div class="card">
-      <div class="row" style="margin-bottom:8px"><h2 style="margin:0">Повреждения при приёме</h2>
-        ${dirty && html`<button class="btn primary sm" style="margin-left:auto" onClick=${save}>Сохранить</button>`}</div>
-      <div class="muted small" style="margin-bottom:10px">${canEdit ? 'Нажмите на схему, чтобы отметить место. Отметки видны клиенту в электронной карте и в протоколе приёма.' : ''}</div>
-      <div class="dmg-edit">
-        <${CarDiagram} marks=${marks} sel=${sel} onPick=${setSel} onAdd=${(p) => { if (!canEdit) return; upd([...marks, { ...p, type: 'rysa', note: '' }]); setSel(marks.length); }} />
-        <div class="stack" style="gap:8px">${marks.length ? marks.map((m, i) => html`<div class=${'dmg-row' + (sel === i ? ' on' : '')} onClick=${() => setSel(i)}>
-            <b>${i + 1}</b><select value=${m.type} disabled=${!canEdit} onChange=${(e) => { const M = [...marks]; M[i] = { ...m, type: e.target.value }; upd(M); }}>${DMG.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>
-            <input value=${m.note} disabled=${!canEdit} placeholder="Где и какое, например: левая передняя дверь" onInput=${(e) => { const M = [...marks]; M[i] = { ...m, note: e.target.value }; upd(M); }} />
-            ${canEdit && html`<button class="icon-btn" title="Удалить" onClick=${(e) => { e.stopPropagation(); upd(marks.filter((_, j) => j !== i)); setSel(null); }}><${Icon} n="trash" /></button>`}</div>`)
-          : html`<div class="empty">Повреждений не отмечено</div>`}</div>
-      </div>
-    </div>
-    <div class="stack">
       <div class="card">
         <div class="row" style="margin-bottom:8px"><h2 style="margin:0">Фото и файлы</h2>
           ${canEdit && html`<label class="btn sm primary" style="margin-left:auto">${busy ? 'Загружаю…' : 'Добавить'}<input type="file" multiple accept="image/*,video/*,application/pdf" style="display:none" onChange=${(e) => upload(e.target.files)} /></label>`}</div>
@@ -165,9 +146,8 @@ export function Intake({ o, reload }) {
       <div class="card">
         <h2>Подписи клиента</h2>
         ${o.signatures?.length ? html`<table class="tbl"><tbody>${o.signatures.map((g) => html`<tr><td>${DOCNAME[g.doc] || g.doc}</td><td class="sub">${fdt(g.signed_at)}</td><td class="sub">${SIGN[g.method] || g.method}${g.signer_name ? ' · ' + g.signer_name : ''}</td></tr>`)}</tbody></table>`
-          : html`<div class="muted small">Клиент ещё ничего не подписал. Отправьте ссылку на электронную карту (SMS / e-mail) — он подпишет протокол и смету с телефона.</div>`}
+          : html`<div class="muted small">Клиент ещё ничего не подписал. Отправьте ссылку на электронную карту (SMS / e-mail) — он подпишет протокол и выцену с телефона.</div>`}
         ${canEdit && html`<div class="row" style="margin-top:10px">${['intake', o.kind === 'quote' ? 'quote' : 'estimate', 'release'].filter((d) => o.kind !== 'quote' || d === 'quote').map((d) => html`<button class="btn sm" onClick=${async () => { await act(() => api(`orders/${o.id}/signatures`, { body: { doc: d } }), 'Отмечено'); reload(); }}>${DOCNAME[d]}: подписан на бумаге</button>`)}</div>`}
       </div>
-    </div>
   </div>`;
 }

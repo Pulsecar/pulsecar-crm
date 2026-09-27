@@ -34,11 +34,11 @@ function Lines({ lines, pick, setPick, editable, setLines, markup }) {
       <td class="sub">${l.product ? html`есть · ${num(l.product.stock, 2)}` : 'новый товар'}</td></tr>`)}</tbody></table></div>`;
 }
 
-/** Выбор заказа или сметы, куда добавить запчасти */
+/** Выбор заказа или выцены, куда добавить запчасти */
 function OrderPick({ value, onPick }) {
   return value ? html`<div class="row"><b>${value.number}</b> <span class="muted">${value.customer_name || ''} ${value.plate || ''}</span><button class="btn ghost sm" onClick=${() => onPick(null)}>Сменить</button></div>`
-    : html`<${Picker} placeholder="Заказ или смета: номер, клиент, авто…" path=${(q) => 'orders?' + qs({ q, status: 'open', kind: 'all' })}
-        render=${(o) => html`<b>${o.number}</b> <span class="chip">${o.kind === 'quote' ? 'смета' : 'заказ'}</span> <span class="sub">${o.customer_name || ''} · ${[o.make, o.model, o.plate].filter(Boolean).join(' ')}</span>`}
+    : html`<${Picker} placeholder="Заказ или выцена: номер, клиент, авто…" path=${(q) => 'orders?' + qs({ q, status: 'open', kind: 'all' })}
+        render=${(o) => html`<b>${o.number}</b> <span class="chip">${o.kind === 'quote' ? 'выцена' : 'заказ'}</span> <span class="sub">${o.customer_name || ''} · ${[o.make, o.model, o.plate].filter(Boolean).join(' ')}</span>`}
         onPick=${onPick} />`;
 }
 
@@ -119,7 +119,7 @@ function Extension() {
       <span class="badge" style=${'border-color:' + (ext?.connected ? 'var(--accent)' : ext ? 'var(--warn)' : 'var(--border)') + ';color:' + (ext?.connected ? 'var(--accent)' : ext ? 'var(--warn)' : 'var(--muted)')}>${!ext ? 'не установлено в этом браузере' : ext.connected ? `подключено · ${ext.user} · v${ext.version}` : `установлено v${ext.version} · не подключено`}</span></div>
     <div class="grid g2">
       <div class="stack" style="gap:6px">
-        <div class="small">У каждой детали в каталоге Inter Cars — кнопка <b>Pulsecar</b> рядом с «Do koszyka»: <b>товар в картотеку, приход на склад, в заказ или в смету</b>. Цена закупки — ваша цена, цена продажи — рекомендованная розничная цена поставщика. Кнопка в углу на сайтах поставщиков забирает <b>корзину, фактуру или WZ</b> целиком: документ сохраняется в CRM (без дублей по номеру) и сразу приходуется на склад или уходит в заказ. Поставщики нет в списке — включите кнопку на её сайте из окна расширения.</div>
+        <div class="small">У каждой детали в каталоге Inter Cars — кнопка <b>Pulsecar</b> рядом с «Do koszyka»: <b>товар в картотеку, приход на склад, в заказ или в выцену</b>. Цена закупки — ваша цена, цена продажи — рекомендованная розничная цена поставщика. Кнопка в углу на сайтах поставщиков забирает <b>корзину, фактуру или WZ</b> целиком: документ сохраняется в CRM (без дублей по номеру) и сразу приходуется на склад или уходит в заказ. Поставщики нет в списке — включите кнопку на её сайте из окна расширения.</div>
         ${!ext ? html`<ol class="small muted" style="margin:0;padding-left:18px"><li>Скачайте архив и распакуйте.</li><li>Chrome → <code>chrome://extensions</code> → «Режим разработчика» → «Загрузить распакованное» → папка <code>pulsecar-extension</code>.</li><li>Обновите эту страницу и нажмите «Подключить расширение».</li></ol>` : ''}
         ${outdated ? html`<div class="small" style="color:var(--warn)">Есть новая версия ${latest}: скачайте архив, распакуйте поверх старой папки и нажмите ⟳ у расширения в <code>chrome://extensions</code>.</div>` : ''}
         <div class="row"><a class=${'btn ' + (ext && !outdated ? '' : 'primary')} href="/pulsecar-extension.zip" download>Скачать расширение${latest ? ' v' + latest : ''}</a>
@@ -176,7 +176,7 @@ function DocModal({ id, markup, onClose }) {
       ${d.stock_doc_id ? html` · <span class="pos">✓ принято на склад</span>` : ''}${d.used_in ? html` · в заказе ${d.used_in}` : ''}${d.meta?.file ? ' · файл ' + d.meta.file : ''}</div>
     <${Lines} lines=${d.lines} pick=${sel} setPick=${setPick} markup=${markup} />
     ${app.perms['orders.jobs'] && html`<div class="card" style="margin-top:12px;background:var(--surface2)">
-      <b>Сразу в заказ или смету клиента</b>
+      <b>Сразу в заказ или выцену клиента</b>
       <div class="row" style="margin-top:8px"><div class="grow"><${OrderPick} value=${order} onPick=${setOrder} /></div></div>
       ${order && html`<div class="row" style="margin-top:8px">
         ${order.kind !== 'quote' && !d.stock_doc_id && html`<label class="check"><input type="checkbox" checked=${toStock} onChange=${(e) => setToStock(e.target.checked)} />Заодно оприходовать на склад и выдать в заказ</label>`}
@@ -285,7 +285,7 @@ function Search({ o, onAdd }) {
       <tbody>${res.rows.sort((a, b) => a.priceNet - b.priceNet).map((r) => html`<tr><td><b>${r.supplier === 'hart' ? 'Hart' : 'Inter Cars'}</b></td>
         <td><b>${r.index}</b> ${r.name}<div class="sub">${r.sku}</div></td><td class="r nowrap">${zl(r.priceNet)}</td><td class="r nowrap"><b>${zl(r.sellSuggested)}</b></td>
         <td class="r nowrap ${r.availability ? 'pos' : 'neg'}">${r.availability} шт.<div class="sub">${(r.locations || []).slice(0, 3).join(', ')}</div></td>
-        <td class="act"><button class="btn sm" onClick=${() => add(r)}>В ${o.kind === 'quote' ? 'смету' : 'заказ'}</button></td></tr>`)}</tbody></table>`
+        <td class="act"><button class="btn sm" onClick=${() => add(r)}>В ${o.kind === 'quote' ? 'выцену' : 'заказ'}</button></td></tr>`)}</tbody></table>`
       : html`<div class="empty">Ничего не найдено по «${q}»</div>`)}
     ${sups.length ? html`<div class="row" style="margin-top:10px"><span class="muted small" style="margin-right:auto">Заказать у поставщика то, что добавили:</span>
       ${sups.map((sp) => html`<${ConfirmButton} cls="btn primary" label=${'Отправить заказ?'} onConfirm=${() => orderAt(sp)}>Заказать в ${sp === 'hart' ? 'Hart' : 'Inter Cars'} (${cart.filter((c) => c.supplier === sp).length})</${ConfirmButton}>`)}</div>` : ''}`;

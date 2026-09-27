@@ -58,7 +58,7 @@ export default function Messaging() {
       <div class="muted small">SMS при смене статуса настраиваются в каждом статусе: Настройки → Статусы заказов.</div>
       <div class="grid g2">
         ${tpl('sms_tpl_card', 'Ссылка на карту заказа', 'Кнопка «SMS с картой заказа» в заказе.')}
-        ${tpl('sms_tpl_quote', 'Ссылка на смету', 'Кнопка «SMS со сметой».')}
+        ${tpl('sms_tpl_quote', 'Ссылка на выцену', 'Кнопка «SMS со выценой».')}
         ${tpl('sms_tpl_paylink', 'Ссылка на онлайн-оплату (Tpay)')}
         ${tpl('sms_tpl_booking', 'Ответ на онлайн-запись с сайта', 'Пусто — не отправлять.')}
         ${tpl('sms_tpl_code', 'Код подтверждения карты заказа', 'Поле [[kod]] — сам код.', 2)}
@@ -76,7 +76,7 @@ export default function Messaging() {
     <div class="card stack">
       <h2>Шаблоны e-mail</h2>
       <div class="grid g2">
-        ${[['order', 'Карта заказа'], ['quote', 'Смета'], ['invoice', 'Фактура'], ['receipt', 'Чек (paragon)'], ['storage', 'Документ хранения']].map(([k, l]) => html`<div class="stack" style="gap:4px">
+        ${[['order', 'Карта заказа'], ['quote', 'Выцена'], ['invoice', 'Фактура'], ['receipt', 'Чек (paragon)'], ['storage', 'Документ хранения']].map(([k, l]) => html`<div class="stack" style="gap:4px">
           <label class="f">${l}: тема<input value=${v[`mail_${k}_subject`]} onInput=${(e) => set(`mail_${k}_subject`, e.target.value)} /></label>
           <${TplField} label="Текст" value=${v[`mail_${k}_body`] || ''} onInput=${(x) => set(`mail_${k}_body`, x)} fields=${data.fields} sms=${false} rows=${4} /></div>`)}
       </div>

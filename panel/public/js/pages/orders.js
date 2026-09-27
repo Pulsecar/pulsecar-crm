@@ -4,11 +4,10 @@ import {
 } from '../lib.js';
 import { SupplierParts } from './suppliers.js';
 import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
+import { OrderMain, ItemsMW } from './order-form.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ScanBox } from '../scan.js';
 
-const FLAGS = [['return_parts', 'Вернуть детали клиенту'], ['reg_doc', 'Техпаспорт оставлен'], ['test_drive', 'Согласие на тест-драйв'], ['fluids', 'Долить жидкости'], ['lights', 'Проверить освещение']];
-const FUEL = ['', 'резерв', '1/4', '1/2', '3/4', 'полный'];
 
 // ── Список ────────────────────────────────────────────────────────────────
 export function OrdersList({ kind, query }) {
@@ -23,8 +22,8 @@ export function OrdersList({ kind, query }) {
   const { data, loading, error } = useData('orders?' + qs({ kind, q: dq, status, from, to, page }));
   const base = kind === 'quote' ? '/quotes' : '/orders';
   return html`
-    <div class="page-head"><h1>${kind === 'quote' ? 'Сметы' : 'Заказы'}</h1>
-      <div class="actions"><a class="btn primary" href=${'#' + base + '/new'}><${Icon} n="plus" />${kind === 'quote' ? 'Новая смета' : 'Новый заказ'}</a></div></div>
+    <div class="page-head"><h1>${kind === 'quote' ? 'Выцены' : 'Заказы'}</h1>
+      <div class="actions"><a class="btn primary" href=${'#' + base + '/new'}><${Icon} n="plus" />${kind === 'quote' ? 'Новая выцена' : 'Новый заказ'}</a></div></div>
     <div class="card" style="margin-bottom:12px"><div class="row end">
       <label class="f grow">Поиск<input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, клиент, телефон, авто, VIN" /></label>
       <label class="f" style="width:220px">Статус<select value=${status} onChange=${(e) => setStatus(e.target.value)}>
@@ -53,14 +52,13 @@ export function OrdersList({ kind, query }) {
 }
 
 // ── Выбор клиента и авто (используется и в новом заказе, и в карточке) ─────────
-export function CustomerCarPicker({ value, onChange }) {
+export function CustomerCarPicker({ value, onChange, only }) {
   const { customer, car } = value;
   const [newC, setNewC] = useState(null);
   const [newCar, setNewCar] = useState(null);
   const { data: cust } = useData(customer?.id ? 'customers/' + customer.id : null, [customer?.id]);
-  return html`<div class="grid g2">
-    <div class="stack">
-      <h3>Клиент</h3>
+  const custCol = only === 'car' ? '' : html`<div class="stack">
+      ${!only && html`<h3>Клиент</h3>`}
       ${customer ? html`<div class="row"><div class="grow"><b>${customer.name || '—'}</b><div class="muted small">${customer.phone || ''}</div></div>
           <button class="btn sm" onClick=${() => onChange({ customer: null, car: null })}>Сменить</button></div>`
         : newC ? html`<div class="stack">
@@ -71,9 +69,9 @@ export function CustomerCarPicker({ value, onChange }) {
             render=${(c) => html`<b>${c.name || '—'}</b> <span class="sub">${c.phone || ''}${c.cars ? ' · ' + c.cars : ''}</span>`}
             onPick=${(c) => onChange({ customer: c, car: null })}
             extra=${{ label: 'Новый клиент', onClick: (q) => { const n = /\d{6,}/.test(q) ? { name: '', phone: q } : { name: q, phone: '' }; setNewC(n); onChange({ ...value, newCustomer: n }); } }} />`}
-    </div>
-    <div class="stack">
-      <h3>Автомобиль</h3>
+    </div>`;
+  const carCol = only === 'customer' ? '' : html`<div class="stack">
+      ${!only && html`<h3>Автомобиль</h3>`}
       ${car ? html`<div class="row"><div class="grow"><b>${carName(car)}</b> ${car.plate ? html`<span class="plate">${car.plate}</span>` : ''}<div class="muted small">${car.vin || ''}</div></div>
           <button class="btn sm" onClick=${() => onChange({ ...value, car: null })}>Сменить</button></div>`
         : newCar ? html`<div class="grid g2">
@@ -102,42 +100,16 @@ export function CustomerCarPicker({ value, onChange }) {
                 onChange(patch);
               }} />
             </div></div>`}
-    </div></div>`;
+    </div>`;
+  return only ? (only === 'car' ? carCol : custCol) : html`<div class="grid g2">${custCol}${carCol}</div>`;
 }
 
-// ── Новый заказ / смета ────────────────────────────────────────────────────
+// ── Новый заказ / выцена ────────────────────────────────────────────────────
 export function NewOrder({ kind, query }) {
-  const app = useApp();
-  const [cc, setCc] = useState({ customer: null, car: null });
-  const [f, set] = useState({ complaint: query.note || '', type_id: '', mechanic_id: '', mileage: '' });
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (query.customer_id) api('customers/' + query.customer_id).then((c) => setCc((v) => ({ ...v, customer: c, car: query.car_id ? c.cars.find((k) => String(k.id) === query.car_id) || null : null })));
-    else if (query.name || query.phone) setCc((v) => ({ ...v, newCustomer: { name: query.name || '', phone: query.phone || '' } }));
-  }, []);
-  const submit = async () => {
-    setBusy(true);
-    try {
-      const r = await act(() => api('orders', { body: {
-        kind, customer_id: cc.customer?.id, car_id: cc.car?.id, new_customer: cc.customer ? null : cc.newCustomer, new_car: cc.car ? null : cc.newCar,
-        complaint: f.complaint, type_id: f.type_id || null, mechanic_id: f.mechanic_id || null, mileage: f.mileage || null,
-        appointment_id: query.appointment_id || null, source: query.appointment_id ? undefined : 'crm',
-      } }));
-      go((kind === 'quote' ? '/quotes/' : '/orders/') + r.id);
-    } finally { setBusy(false); }
-  };
   return html`
-    <div class="crumbs"><a href=${kind === 'quote' ? '#/quotes' : '#/orders'}>${kind === 'quote' ? 'Сметы' : 'Заказы'}</a></div>
-    <div class="page-head"><h1>${kind === 'quote' ? 'Новая смета' : 'Новый заказ'}</h1></div>
-    <div class="card"><${CustomerCarPicker} value=${cc} onChange=${setCc} /></div>
-    <div class="card"><div class="grid g4">
-      <label class="f">Пробег, км<input type="number" value=${f.mileage} onInput=${(e) => set({ ...f, mileage: e.target.value })} /></label>
-      <label class="f">Источник<select value=${f.type_id} onChange=${(e) => set({ ...f, type_id: e.target.value })}><option value="">—</option>${app.types.map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select></label>
-      <label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
-    </div>
-    <label class="f" style="margin-top:12px">Что беспокоит клиента / что сделать<textarea rows="3" value=${f.complaint} onInput=${(e) => set({ ...f, complaint: e.target.value })}></textarea></label>
-    <div class="row" style="margin-top:14px"><button class="btn primary lg" disabled=${busy} onClick=${submit}>Создать ${kind === 'quote' ? 'смету' : 'заказ'}</button>
-      <span class="muted small">Работы и запчасти добавите на следующем шаге</span></div></div>`;
+    <div class="crumbs"><a href=${kind === 'quote' ? '#/quotes' : '#/orders'}>${kind === 'quote' ? 'Выцены' : 'Заказы'}</a></div>
+    <div class="page-head"><h1>${kind === 'quote' ? 'Новая выцена' : 'Новый заказ'}</h1></div>
+    <${OrderMain} isNew kind=${kind} query=${query} onCreate=${(id) => go((kind === 'quote' ? '/quotes/' : '/orders/') + id)} />`;
 }
 
 // ── Карточка заказа ────────────────────────────────────────────────────────
@@ -145,6 +117,7 @@ export function OrderPage({ id }) {
   const app = useApp();
   const { data: o, loading, error, reload } = useData('orders/' + id);
   const [tab, setTab] = useState('items');
+  useEffect(() => { if (location.hash.endsWith('?new=1')) setTab('items'); }, []);
   if (loading && !o) return html`<${Loading} />`;
   if (error) return html`<${ErrorBox} error=${error} />`;
   const isQuote = o.kind === 'quote';
@@ -156,9 +129,10 @@ export function OrderPage({ id }) {
     if (r.sms || r.email) setNotice({ sms: r.sms, email: r.email, sendSms: !!r.sms, sendEmail: !!r.email });
     reload();
   };
-  const tabs = [['items', 'Работы и запчасти'], ['main', 'Данные заказа'], ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['intake', 'Приём авто' + (o.damages?.length || o.files?.length ? ` · ${(o.damages?.length || 0) + (o.files?.length || 0)}` : '')], ['check', 'Чек-листы'], ['plan', 'Терминарз']]), ['log', 'История']];
+  const tabs = [['main', 'Основное'], ['items', 'Работы и товары'], ['files', 'Файлы и подписи' + (o.files?.length ? ' · ' + o.files.length : '')],
+    ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата и документы' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['plan', 'Терминарз'], ['check', 'Чек-листы']]), ['log', 'История']];
   return html`
-    <div class="crumbs"><a href=${isQuote ? '#/quotes' : '#/orders'}>${isQuote ? 'Сметы' : 'Заказы'}</a></div>
+    <div class="crumbs"><a href=${isQuote ? '#/quotes' : '#/orders'}>${isQuote ? 'Выцены' : 'Заказы'}</a></div>
     <div class="order-head">
       <div class="title grow">
         <h1>${o.number}
@@ -167,7 +141,7 @@ export function OrderPage({ id }) {
         <div class="muted">
           ${o.customer ? html`<a href=${'#/customers/' + o.customer.id}>${o.customer.name || o.customer.phone}</a> · <a href=${'tel:' + o.customer.phone}>${o.customer.phone || ''}</a>` : 'Клиент не выбран'}
           ${o.car ? html` · <a href=${'#/cars/' + o.car.id}>${carName(o.car)}</a> <span class="plate">${o.car.plate || ''}</span>` : ''}
-          · создан ${fdt(o.created_at)}${o.created_by ? ' · ' + o.created_by : ''}${o.source === 'app' ? ' · из приложения' : ''}${o.quote_id ? html` · <a href=${'#/quotes/' + o.quote_id}>из сметы</a>` : ''}
+          · создан ${fdt(o.created_at)}${o.created_by ? ' · ' + o.created_by : ''}${o.source === 'app' ? ' · из приложения' : ''}${o.quote_id ? html` · <a href=${'#/quotes/' + o.quote_id}>из выцены</a>` : ''}
         </div>
       </div>
       <div class="row">
@@ -184,127 +158,18 @@ export function OrderPage({ id }) {
       ${app.perms['products.prices'] && html`<div><span>Маржа на запчастях</span><b>${zl(o.items.filter((i) => i.kind === 'part').reduce((s, i) => s + (i.qty * i.price * (1 - i.discount / 100)) / (1 + i.vat / 100) - i.qty * i.cost, 0))}</b></div>`}
     </div>`}
     <div class="pill-tabs" style="margin-bottom:14px">${tabs.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
-    ${o.accepted_at && html`<div class="card ok-card small" style="margin-bottom:14px">✓ Клиент подтвердил ${isQuote ? 'смету' : 'заказ'} по электронной карте ${fdt(o.accepted_at)}${o.accepted_via === 'sms' ? ' (кодом SMS)' : ''}</div>`}
+    ${o.accepted_at && html`<div class="card ok-card small" style="margin-bottom:14px">✓ Клиент подтвердил ${isQuote ? 'выцену' : 'заказ'} по электронной карте ${fdt(o.accepted_at)}${o.accepted_via === 'sms' ? ' (кодом SMS)' : ''}</div>`}
     ${notice && html`<${StatusNotice} o=${o} n=${notice} set=${setNotice} reload=${reload} />`}
-    ${tab === 'items' && html`<${Items} o=${o} reload=${reload} />`}
+    ${tab === 'items' && html`<${ItemsMW} o=${o} reload=${reload} />`}
     ${tab === 'items' && isQuote && html`<div style="margin-top:14px"><${Contact} o=${o} reload=${reload} /></div>`}
-    ${tab === 'main' && html`<${MainData} o=${o} reload=${reload} />`}
+    ${tab === 'main' && html`<${OrderMain} o=${o} reload=${reload} />`}
+    ${tab === 'files' && html`<${Intake} o=${o} reload=${reload} />`}
     ${tab === 'pay' && html`<${Payments} o=${o} reload=${reload} />`}
     ${tab === 'plan' && html`<${Plan} o=${o} />`}
     ${tab === 'check' && html`<${Checklists} o=${o} />`}
-    ${tab === 'intake' && html`<${Intake} o=${o} reload=${reload} />`}
     ${tab === 'log' && html`<div class="card"><table class="tbl"><tbody>${o.activity.map((a) => html`<tr><td class="nowrap sub">${fdt(a.created_at)}</td><td>${ACTION[a.action] || a.action} ${a.action === 'status' ? html`<b>${JSON.parse(a.details || '""')}</b>` : ''}</td><td class="sub">${a.staff || ''}</td></tr>`)}</tbody></table></div>`}`;
 }
-const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', proforma: 'Выставлена Pro forma', to_order: 'Создан заказ из сметы', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
-
-// ── Позиции ────────────────────────────────────────────────────────────────
-function Items({ o, reload }) {
-  const app = useApp();
-  const [ic, setIc] = useState(false);
-  const mech = !app.perms['orders.jobs'];
-  const labor = o.items.filter((i) => i.kind === 'labor');
-  const parts = o.items.filter((i) => i.kind === 'part');
-  const add = async (it) => { await act(() => api(`orders/${o.id}/items`, { body: it })); reload(); };
-  const save = async (it, patch) => { await act(() => api(`orders/${o.id}/items/${it.id}`, { method: 'PUT', body: patch })); reload(); };
-  const del = async (it) => { await act(() => api(`orders/${o.id}/items/${it.id}`, { method: 'DELETE' })); reload(); };
-  const discL = o.customer?.discount_labor || 0;
-  const discP = o.customer?.discount_parts || 0;
-  return html`
-    <div class="card tight">
-      <div class="row" style="padding:12px 14px"><h2 style="margin:0">Работы</h2><span class="muted small">${num(labor.reduce((s, i) => s + i.qty, 0), 2)} н/ч</span>
-        ${!mech && app.templates?.filter((t) => t.active).length ? html`<select style="width:auto" value="" onChange=${async (e) => { const tid = e.target.value; e.target.value = ''; if (!tid) return; const r = await act(() => api(`orders/${o.id}/apply-template/${tid}`, { body: {} })); toast(`Добавлено из шаблона: ${r.added}`); reload(); }}>
-          <option value="">+ Шаблон…</option>${app.templates.filter((t) => t.active).map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select>` : ''}
-        ${!mech && html`<div class="grow" style="max-width:520px;margin-left:auto"><${Picker} placeholder="+ Добавить работу из прайса или новую…" path=${(q) => 'catalog?q=' + encodeURIComponent(q)}
-          render=${(c) => html`<b>${c.name}</b> <span class="sub">${c.category || ''} · ${c.qty} ${c.unit} · ${zl(c.price)}</span>`}
-          onPick=${(c) => add({ kind: 'labor', name: c.name, qty: c.qty, unit: c.unit, price: c.price, vat: c.vat, discount: discL, mechanic_id: o.mechanic_id })}
-          extra=${{ label: 'Новая работа', onClick: (q) => q && add({ kind: 'labor', name: q, qty: 1, unit: 'oper', price: 0, discount: discL, mechanic_id: o.mechanic_id }) }} /></div>`}
-      </div>
-      <${ItemTable} rows=${labor} kind="labor" save=${save} del=${del} mech=${mech} staff=${app.staff} perms=${app.perms} settings=${app.settings} />
-    </div>
-    <div class="card tight">
-      <div class="row" style="padding:12px 14px"><h2 style="margin:0">Запчасти</h2>
-        ${!mech && html`<button class="btn sm" style="margin-left:auto" onClick=${() => setIc(true)}><${Icon} n="box" />От поставщика</button>`}
-        ${!mech && html`<div class="grow" style="max-width:520px"><${Picker} placeholder="+ Со склада (название, индекс) или новая позиция…" path=${(q) => 'products?q=' + encodeURIComponent(q)}
-          render=${(p) => html`<b>${p.name}</b> <span class="sub">${p.code || ''} · в наличии ${num(p.stock - p.reserved, 2)} ${p.unit} · ${zl(p.sell_price)}</span>`}
-          onPick=${(p) => add({ kind: 'part', product_id: p.id, name: p.name, code: p.code, qty: 1, unit: p.unit, price: p.sell_price, vat: p.vat, discount: discP })}
-          extra=${{ label: 'Без склада (заказать / свою)', onClick: (q) => q && add({ kind: 'part', name: q, qty: 1, unit: 'szt.', price: 0, discount: discP }) }} /></div>`}
-      </div>
-      <${ItemTable} rows=${parts} kind="part" save=${save} del=${del} mech=${mech} staff=${app.staff} perms=${app.perms} settings=${app.settings} />
-    </div>
-    ${ic && html`<${SupplierParts} o=${o} onClose=${() => { setIc(false); reload(); }} onAdd=${async (it) => { await add(it); }} />`}
-    <div class="card"><label class="f">Заметка для механика<textarea rows="2" value=${o.mechanic_note || ''} disabled=${mech}
-      onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { mechanic_note: e.target.value } }), 'Сохранено'); }}></textarea></label>
-      ${o.complaint && html`<div class="small" style="margin-top:8px"><span class="muted">Жалоба клиента:</span> ${o.complaint}</div>`}</div>`;
-}
-
-function ItemTable({ rows, kind, save, del, mech, staff, perms = {}, settings = {} }) {
-  if (!rows.length) return html`<div class="empty" style="padding:16px">Пока пусто</div>`;
-  const seePrice = perms['orders.prices'] !== false;
-  const editPrice = !mech && perms['orders.price_edit'] !== false;
-  const showCost = kind === 'part' && !mech && seePrice && settings.show_cost_column !== '0';
-  const showDisc = settings.discounts_on !== '0';
-  const cell = (it, k, cls, step = '0.01', dis = mech) => html`<input class=${'inline-input num ' + cls} type="number" step=${step} value=${it[k]} disabled=${dis}
-    onChange=${(e) => save(it, { [k]: Number(e.target.value) })} />`;
-  return html`<div class="tbl-wrap"><table class="tbl items"><thead><tr>
-      <th style="width:30px">${kind === 'labor' ? '✓' : ''}</th><th>${kind === 'labor' ? 'Работа' : 'Запчасть'}</th>${kind === 'labor' ? html`<th>Механик</th>` : html`<th>Индекс</th>`}
-      <th class="r">Кол-во</th>${seePrice ? html`<th class="r">Цена брутто</th>` : ''}${showCost ? html`<th class="r">Закупка нетто</th>` : ''}${seePrice && showDisc ? html`<th class="r">Скидка %</th>` : ''}${seePrice ? html`<th class="r">Сумма</th>` : ''}<th></th></tr></thead>
-    <tbody>${rows.map((it) => html`<tr>
-      <td>${kind === 'labor' ? html`<input type="checkbox" class="done-toggle" checked=${!!it.done} onChange=${(e) => save(it, { done: e.target.checked ? 1 : 0 })} title="Выполнено" />` : ''}</td>
-      <td><input class="inline-input" value=${it.name} disabled=${mech} onChange=${(e) => save(it, { name: e.target.value })} />
-        ${kind === 'part' && it.product_id && it.product_stock !== null && it.product_stock < it.qty ? html`<div class="stock-warn">на складе ${num(it.product_stock, 2)} — нужно заказать</div>` : ''}
-        ${kind === 'part' && !it.product_id ? html`<div class="sub">без склада</div>` : ''}</td>
-      ${kind === 'labor' ? html`<td><select class="inline-input" value=${it.mechanic_id || ''} disabled=${mech} onChange=${(e) => save(it, { mechanic_id: e.target.value ? Number(e.target.value) : null })}>
-          <option value="">—</option>${staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></td>`
-        : html`<td><input class="inline-input" style="width:130px" value=${it.code || ''} disabled=${mech} onChange=${(e) => save(it, { code: e.target.value })} /></td>`}
-      <td class="r">${cell(it, 'qty', 'qty', '0.1')}</td>
-      ${seePrice ? html`<td class="r">${cell(it, 'price', 'price', '0.01', !editPrice)}</td>` : ''}
-      ${showCost ? html`<td class="r">${cell(it, 'cost', 'price', '0.01', !editPrice)}</td>` : ''}
-      ${seePrice && showDisc ? html`<td class="r">${cell(it, 'discount', 'disc', '1', !editPrice)}</td>` : ''}
-      ${seePrice ? html`<td class="r nowrap"><b>${zl(it.qty * it.price * (1 - it.discount / 100))}</b></td>` : ''}
-      <td class="act">${!mech && html`<button class="icon-btn" title="Удалить" onClick=${() => del(it)}><${Icon} n="trash" /></button>`}</td>
-    </tr>`)}</tbody></table></div>`;
-}
-
-// ── Данные заказа ──────────────────────────────────────────────────────────
-function MainData({ o, reload }) {
-  const app = useApp();
-  const [f, set] = useState({
-    mileage: o.mileage ?? '', fuel_level: o.fuel_level || '', complaint: o.complaint || '', internal_note: o.internal_note || '',
-    type_id: o.type_id || '', mechanic_id: o.mechanic_id || '', pickup_at: o.pickup_at || '', flags: o.flags || {},
-    faults: o.faults || '', after_notes: o.after_notes || '', external_no: o.external_no || '', mechanic_note: o.mechanic_note || '',
-  });
-  const S = app.settings;
-  const on = (k) => S[k] !== '0';
-  const [cc, setCc] = useState({ customer: o.customer, car: o.car });
-  const save = async () => {
-    let customer_id = cc.customer?.id ?? null;
-    let car_id = cc.car?.id ?? null;
-    if (!customer_id && (cc.newCustomer?.phone || cc.newCustomer?.name)) customer_id = (await act(() => api('customers', { body: cc.newCustomer }))).id;
-    if (!car_id && (cc.newCar?.plate || cc.newCar?.vin || cc.newCar?.make)) car_id = (await act(() => api('cars', { body: { ...cc.newCar, customer_id } }))).id;
-    await act(() => api('orders/' + o.id, { method: 'PUT', body: { ...f, customer_id, car_id, mileage: f.mileage || null, type_id: f.type_id || null, mechanic_id: f.mechanic_id || null } }), 'Сохранено');
-    reload();
-  };
-  return html`
-    <div class="card"><${CustomerCarPicker} value=${cc} onChange=${setCc} /></div>
-    <div class="card"><div class="grid g4">
-      <label class="f">Пробег, км<input type="number" value=${f.mileage} onInput=${(e) => set({ ...f, mileage: e.target.value })} /></label>
-      <label class="f">Уровень топлива<select value=${f.fuel_level} onChange=${(e) => set({ ...f, fuel_level: e.target.value })}>${FUEL.map((x) => html`<option value=${x}>${x || '—'}</option>`)}</select></label>
-      ${on('order_type_on') && html`<label class="f">Источник заказа<select value=${f.type_id} onChange=${(e) => set({ ...f, type_id: e.target.value })}><option value="">—</option>${app.types.map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select></label>`}
-      <label class="f">Ответственный механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
-      <label class="f">Срок выдачи${S.pickup_format === 'date'
-        ? html`<input type="date" value=${(f.pickup_at || '').slice(0, 10)} onInput=${(e) => set({ ...f, pickup_at: e.target.value })} />`
-        : html`<input type="datetime-local" value=${(f.pickup_at || '').replace(' ', 'T')} onInput=${(e) => set({ ...f, pickup_at: e.target.value.replace('T', ' ') })} />`}</label>
-      ${S.field_external_no === '1' && html`<label class="f">Внешний номер заказа<input value=${f.external_no} onInput=${(e) => set({ ...f, external_no: e.target.value })} /></label>`}
-    </div>
-    <div class="grid g2" style="margin-top:12px">
-      <label class="f">Описание от клиента (попадает в печать)<textarea rows="4" value=${f.complaint} onInput=${(e) => set({ ...f, complaint: e.target.value })}></textarea></label>
-      ${on('field_internal') && html`<label class="f">Внутренняя заметка (клиент не видит)<textarea rows="4" value=${f.internal_note} onInput=${(e) => set({ ...f, internal_note: e.target.value })}></textarea></label>`}
-      ${on('field_faults') && html`<label class="f">Обнаруженные неисправности<textarea rows="3" value=${f.faults} onInput=${(e) => set({ ...f, faults: e.target.value })}></textarea></label>`}
-      ${on('field_after') && html`<label class="f">Замечания после выполнения<textarea rows="3" value=${f.after_notes} onInput=${(e) => set({ ...f, after_notes: e.target.value })}></textarea></label>`}
-    </div>
-    <div class="row" style="margin-top:12px;gap:18px">${FLAGS.map(([k, l]) => html`<label class="check"><input type="checkbox" checked=${!!f.flags[k]} onChange=${(e) => set({ ...f, flags: { ...f.flags, [k]: e.target.checked } })} />${l}</label>`)}</div>
-    <div class="row" style="margin-top:14px"><button class="btn primary" onClick=${save}>Сохранить</button></div></div>`;
-}
+const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', proforma: 'Выставлена Pro forma', to_order: 'Создан заказ из выцены', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
 
 // ── Оплата, баллы, фактура ─────────────────────────────────────────────────
 function Payments({ o, reload }) {
@@ -421,21 +286,21 @@ function Contact({ o, reload }) {
   return html`<div class="card">
     <h2>Связь с клиентом</h2>
     <div class="row">
-      <button class="btn" onClick=${async () => { const u = link || await getLink(); navigator.clipboard?.writeText(u).then(() => toast('Ссылка скопирована')).catch(() => {}); }}><${Icon} n="file" />${isQuote ? 'Ссылка на смету' : 'Электронная карта заказа'}</button>
+      <button class="btn" onClick=${async () => { const u = link || await getLink(); navigator.clipboard?.writeText(u).then(() => toast('Ссылка скопирована')).catch(() => {}); }}><${Icon} n="file" />${isQuote ? 'Ссылка на выцену' : 'Электронная карта заказа'}</button>
       ${link && html`<a class="btn ghost" href=${link} target="_blank" rel="noopener"><${Icon} n="external" />Открыть</a>`}
-      ${o.customer?.phone && html`<button class="btn" onClick=${() => smsTpl(isQuote ? 'quote' : 'card')}>SMS ${isQuote ? 'со сметой' : 'с картой заказа'}</button>`}
+      ${o.customer?.phone && html`<button class="btn" onClick=${() => smsTpl(isQuote ? 'quote' : 'card')}>SMS ${isQuote ? 'со выценой' : 'с картой заказа'}</button>`}
       ${o.customer?.phone && html`<button class="btn ghost" onClick=${() => setSms('')}>SMS клиенту</button>`}
       ${f.tpay && due > 0 && !isQuote && html`<button class="btn" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/paylink`, { body: { sms: f.sms } }), f.sms ? 'Ссылка на оплату отправлена SMS' : 'Ссылка создана'); reload(); if (r?.url) navigator.clipboard?.writeText(r.url).catch(() => {}); }}>Ссылка на оплату ${zl(due)}</button>`}
       ${o.pay_link && html`<button class="btn ghost" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/paylink/check`, { body: {} })); toast(r.status === 'paid' ? 'Оплачено онлайн' : 'Пока не оплачено'); reload(); }}>Проверить оплату</button>`}
       ${f.email && html`<button class="btn" onClick=${mailTpl}>E-mail клиенту</button>`}
     </div>
-    ${o.accepted_at ? html`<div class="small" style="margin-top:8px">✓ Подтверждено клиентом ${fdt(o.accepted_at)} · <a href="#" onClick=${async (e) => { e.preventDefault(); await act(() => api(`orders/${o.id}/accept-reset`, { body: {} }), 'Подтверждение сброшено'); reload(); }}>сбросить (если смета изменилась)</a></div>`
+    ${o.accepted_at ? html`<div class="small" style="margin-top:8px">✓ Подтверждено клиентом ${fdt(o.accepted_at)} · <a href="#" onClick=${async (e) => { e.preventDefault(); await act(() => api(`orders/${o.id}/accept-reset`, { body: {} }), 'Подтверждение сброшено'); reload(); }}>сбросить (если выцена изменилась)</a></div>`
       : html`<div class="muted small" style="margin-top:8px">Клиент открывает карту по ссылке, видит работы и цены и нажимает «Akceptuję».</div>`}
     ${o.pay_link && html`<div class="small muted" style="margin-top:8px">Ссылка на оплату: <code style="user-select:all;word-break:break-all">${o.pay_link}</code></div>`}
     ${!f.sms && html`<div class="muted small" style="margin-top:6px">SMS-шлюз не подключён: сообщения попадут только в журнал. <a href="#/settings/integrations">Подключить</a></div>`}
     ${sms !== null && html`<${Modal} title="SMS клиенту" onClose=${() => setSms(null)} foot=${html`<button class="btn primary" disabled=${!sms.trim()} onClick=${async () => { await act(() => api(`orders/${o.id}/sms`, { body: { text: sms } }), 'SMS отправлено'); setSms(null); reload(); }}>Отправить на ${o.customer.phone}</button>`}>
       <div class="row" style="margin-bottom:6px"><span class="muted small">Шаблон:</span>
-        ${[['card', 'Карта заказа'], ['quote', 'Смета'], ...(o.pay_link ? [['paylink', 'Оплата']] : []), ['review', 'Отзыв']].map(([k, l]) => html`<button class="btn ghost sm" onClick=${() => smsTpl(k)}>${l}</button>`)}
+        ${[['card', 'Карта заказа'], ['quote', 'Выцена'], ...(o.pay_link ? [['paylink', 'Оплата']] : []), ['review', 'Отзыв']].map(([k, l]) => html`<button class="btn ghost sm" onClick=${() => smsTpl(k)}>${l}</button>`)}
         ${app.statuses.filter((st) => st.sms_template).map((st) => html`<button class="btn ghost sm" onClick=${() => smsTpl('status:' + st.id)}>${st.name}</button>`)}</div>
       <textarea rows="6" value=${sms} onInput=${(e) => setSms(e.target.value)}></textarea><${SmsCounter} text=${sms} /></${Modal}>`}
     ${mail && html`<${Modal} title="E-mail клиенту" onClose=${() => setMail(null)} foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api(`orders/${o.id}/email`, { body: mail }), 'Письмо отправлено'); setMail(null); }}>Отправить</button>`}>

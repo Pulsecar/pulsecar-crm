@@ -413,10 +413,39 @@ addColumn('staff', 'phone', 'TEXT');
 addColumn('staff', 'email', 'TEXT');
 addColumn('staff', 'last_login', 'TEXT');
 addColumn('staff', 'ext_token', 'TEXT');          // sha256 ключа для расширения Chrome
+addColumn('staff', 'parts_pct', 'REAL NOT NULL DEFAULT 0');   // % от маржи на запчастях к его работам
+addColumn('staff', 'pay_mode', "TEXT NOT NULL DEFAULT 'pct'");   // pct | hourly | both
+addColumn('staff', 'pay_base', "TEXT NOT NULL DEFAULT 'net'");   // % считается от нетто или брутто
 addColumn('orders', 'external_no', 'TEXT');
 addColumn('orders', 'faults', 'TEXT');              // wykryte usterki
 addColumn('orders', 'after_notes', 'TEXT');         // uwagi po wykonaniu zlecenia
 addColumn('orders', 'damages', 'TEXT');             // JSON: отметки повреждений на схеме {x,y,type,note}
+addColumn('orders', 'damages_note', 'TEXT');        // Ogólny opis uszkodzeń pojazdu
+addColumn('orders', 'contact_person', 'TEXT');      // Osoba kontaktowa
+addColumn('orders', 'contact_phone', 'TEXT');
+addColumn('orders', 'notes', 'TEXT');               // Uwagi (видит клиент, для выцен)
+addColumn('order_items', 'task_id', 'INTEGER');     // запчасть к работе (Nazwa zadania в Motowarsztat)
+// ── Несколько касс (Kasy): наличные, терминал, счёт; перенос денег между ними ──
+db.exec(`CREATE TABLE IF NOT EXISTS cash_registers (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'cash', -- cash | card | bank
+  opening REAL NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, pos INTEGER NOT NULL DEFAULT 0
+)`);
+addColumn('payments', 'register_id', 'INTEGER');
+addColumn('payments', 'transfer_id', 'INTEGER');    // пара KW/KP при переносе между кассами (не выручка)
+// чеки (paragony) с фискального кассового аппарата
+db.exec(`CREATE TABLE IF NOT EXISTS receipts (
+  id INTEGER PRIMARY KEY, order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL, number TEXT, nip TEXT,
+  total REAL NOT NULL DEFAULT 0, payment_method TEXT, items TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending', -- pending | printed | error | manual
+  printer TEXT, error TEXT, staff TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')), printed_at TEXT
+)`);
+if (!one('SELECT 1 FROM cash_registers')) {
+  run(`INSERT INTO cash_registers (name, kind, opening, is_default, pos) VALUES ('Kasa główna', 'cash', ?, 1, 1), ('Terminal płatniczy', 'card', 0, 1, 2), ('Rachunek bankowy', 'bank', 0, 1, 3)`,
+    Number(one(`SELECT value FROM settings WHERE key = 'cash_opening'`)?.value || 0) || 0);
+  run(`UPDATE payments SET register_id = (SELECT id FROM cash_registers WHERE kind = CASE payments.method WHEN 'cash' THEN 'cash' WHEN 'card' THEN 'card' WHEN 'transfer' THEN 'bank' END ORDER BY is_default DESC, pos LIMIT 1) WHERE register_id IS NULL`);
+}
+db.exec(`CREATE TRIGGER IF NOT EXISTS payments_register AFTER INSERT ON payments WHEN NEW.register_id IS NULL AND NEW.method <> 'points' BEGIN
+  UPDATE payments SET register_id = (SELECT id FROM cash_registers WHERE active = 1 AND kind = CASE NEW.method WHEN 'cash' THEN 'cash' WHEN 'card' THEN 'card' WHEN 'transfer' THEN 'bank' END ORDER BY is_default DESC, pos LIMIT 1) WHERE id = NEW.id;
+END`);
 // ── Документы продажи, подписи клиента, файлы заказа ─────────────────────────
 db.exec(`
 CREATE TABLE IF NOT EXISTS sales_docs (
@@ -561,13 +590,14 @@ seedMotowarsztat();
 // Нумерация, прайс работ, статьи расходов, шаблоны — как настроено в Motowarsztat
 function seedMotowarsztat() {
   if (!one('SELECT 1 FROM doc_numbering')) {
-    [['ZL', 'Заказ (zlecenie naprawy)', 'ZL [numer]/[miesiac]/[rok]', 'month'], ['WY', 'Смета (wycena)', 'WYC [numer]/[miesiac]/[rok]', 'month'],
+    [['ZL', 'Заказ (zlecenie naprawy)', 'ZL [numer]/[miesiac]/[rok]', 'month'], ['WY', 'Выцена (wycena)', 'WYC [numer]/[miesiac]/[rok]', 'month'],
       ['PZ', 'Приход от поставщика (PZ)', 'PZ [numer]/[miesiac]/[rok]', 'month'], ['WZ', 'Выдача в заказ (WZ)', 'WZ [numer]/[miesiac]/[rok]', 'month'],
       ['RW', 'Списание (RW)', 'RW [numer]/[miesiac]/[rok]', 'month'], ['PW', 'Внутренний приход (PW)', 'PW [numer]/[miesiac]/[rok]', 'month'],
       ['KP', 'Касса: приход (KP)', 'KP [numer]/[miesiac]/[rok]', 'month'], ['KW', 'Касса: расход (KW)', 'KW [numer]/[miesiac]/[rok]', 'month'],
       ['PR', 'Хранение шин (przechowalnia)', 'P [numer]/[rok]', 'year']]
       .forEach(([k, l, p, r], i) => run('INSERT INTO doc_numbering (key, label, pattern, reset, pos) VALUES (?, ?, ?, ?, ?)', k, l, p, r, i));
   }
+  run(`UPDATE doc_numbering SET label = 'Выцена (wycena)' WHERE key = 'WY' AND label LIKE 'Смета%'`);
   [['FV', 'Фактура VAT', 'FV [numer]/[miesiac]/[rok]', 'month', 20], ['PRO', 'Фактура Pro forma', 'PRO [numer]/[miesiac]/[rok]', 'month', 21], ['FK', 'Фактура корректирующая', 'FK [numer]/[miesiac]/[rok]', 'month', 22]]
     .forEach(([k, l, p, r, i]) => run('INSERT OR IGNORE INTO doc_numbering (key, label, pattern, reset, pos) VALUES (?, ?, ?, ?, ?)', k, l, p, r, i));
   if (!getSetting('mw_services_seeded')) {

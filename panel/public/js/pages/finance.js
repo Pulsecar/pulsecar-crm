@@ -119,7 +119,7 @@ function Overview({ q, setDrill }) {
         <tbody>${d.topParts.map((r) => html`<tr><td>${r.label}</td><td class="r">${num(r.qty, 1)}</td><td class="r">${zl(r.parts)}</td><td class="r">${zl(r.partsMargin)}</td></tr>`)}</tbody></table>` : html`<div class="muted">Нет данных</div>`}</div>
     </div>
     <div class="grid g4">
-      <div class="stat"><b>${pctf(d.extras.quotes.rate)}</b><span>Сметы → заказы: ${d.extras.quotes.converted} из ${d.extras.quotes.n} (${zl(d.extras.quotes.convertedSum)})</span></div>
+      <div class="stat"><b>${pctf(d.extras.quotes.rate)}</b><span>Выцены → заказы: ${d.extras.quotes.converted} из ${d.extras.quotes.n} (${zl(d.extras.quotes.convertedSum)})</span></div>
       <div class="stat"><b>${zl(d.extras.stock.cost)}</b><span>Склад по закупке сейчас · в продаже ${zl(d.extras.stock.retail)}</span></div>
       <div class="stat"><b>${zl(d.cash.receivables.total)}</b><span>Клиенты должны (все завершённые заказы)</span></div>
       <div class="stat"><b>${num(d.extras.points.earned)} / ${num(d.extras.points.redeemed)}</b><span>Pulse Points начислено / списано</span></div>

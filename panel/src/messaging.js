@@ -11,14 +11,14 @@ export const FIELDS = [
   ['zlecenie.numer', 'Номер заказа'], ['zlecenie.dataPrzyjecia', 'Дата приёма / визита'], ['zlecenie.godzinaPrzyjecia', 'Время приёма / визита'],
   ['zlecenie.dataOdbioru', 'Дата выдачи'], ['zlecenie.przebieg', 'Пробег'], ['zlecenie.status', 'Статус (для клиента)'],
   ['zlecenie.kwota', 'Сумма брутто'], ['zlecenie.doZaplaty', 'К оплате'], ['zlecenie.kartaZlecenia', 'Ссылка на электронную карту заказа'],
-  ['wycena.link', 'Ссылка на смету'], ['link.platnosc', 'Ссылка на онлайн-оплату'], ['link.opinia', 'Ссылка на отзыв Google'],
+  ['wycena.link', 'Ссылка на выцену'], ['link.platnosc', 'Ссылка на онлайн-оплату'], ['link.opinia', 'Ссылка на отзыв Google'],
   ['firma.nazwa', 'Название сервиса'], ['firma.telefon', 'Телефон сервиса'], ['firma.adres', 'Адрес сервиса'],
 ];
 
 const zl = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',');
 const S = () => Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value]));
 
-/** Постоянная ссылка на электронную карту заказа / сметы */
+/** Постоянная ссылка на электронную карту заказа / выцены */
 export function cardToken(orderId) {
   const o = one('SELECT card_token FROM orders WHERE id = ?', orderId);
   if (!o) throw new HttpError(404, 'Заказ не найден');

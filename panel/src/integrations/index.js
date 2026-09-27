@@ -74,7 +74,7 @@ export const DEFS = [
   },
   {
     key: 'smsgate', group: 'SMS клиентам', title: 'Свой телефон с SIM — SMS Gateway for Android',
-    about: 'SMS уходят с вашего номера через Android-телефон в сервисе (обычный тариф оператора, клиенты видят ваш номер и могут ответить). Все SMS CRM: коды входа, статусы, напоминания, карта заказа, смета.',
+    about: 'SMS уходят с вашего номера через Android-телефон в сервисе (обычный тариф оператора, клиенты видят ваш номер и могут ответить). Все SMS CRM: коды входа, статусы, напоминания, карта заказа, выцена.',
     howto: 'Установите на телефон приложение «SMS Gateway for Android» (sms-gate.app), включите «Cloud server» — приложение покажет логин и пароль. Адрес оставьте как есть. Для работы в локальной сети впишите http://IP-телефона:8080.',
     fields: [
       { k: 'user', label: 'Логин (Username)', required: true },
@@ -134,7 +134,7 @@ export const DEFS = [
   },
   {
     key: 'email', group: 'Связь с клиентами', title: 'Почта (SMTP)',
-    about: 'Отправка клиенту карты заказа, сметы и фактуры PDF по e-mail прямо из заказа. Подходит Gmail, WP, o2, Interia, домашняя почта Hostinger.',
+    about: 'Отправка клиенту карты заказа, выцены и фактуры PDF по e-mail прямо из заказа. Подходит Gmail, WP, o2, Interia, домашняя почта Hostinger.',
     howto: 'Hostinger: host smtp.hostinger.com, порт 465, логин — адрес ящика. Gmail: smtp.gmail.com, 465, пароль приложения (не обычный пароль).',
     fields: [
       { k: 'host', label: 'SMTP сервер', required: true, def: 'smtp.hostinger.com' },

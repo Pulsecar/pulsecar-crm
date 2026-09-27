@@ -25,6 +25,7 @@ import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
 import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
 import * as FIN from './finance.js';
 import * as DOC from './documents.js';
+import * as RPT from './reports.js';
 import * as KSEF from './integrations/ksef.js';
 import { lookupNip } from './integrations/nip.js';
 import path from 'node:path';
@@ -127,8 +128,8 @@ crm.get('/dashboard', (req, res) => {
     requests: all(`SELECT a.*, c.name customer_name FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id
       WHERE a.status = 'request' ORDER BY a.id DESC LIMIT 20`),
     revenue: {
-      today: one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='in' AND method <> 'points' AND substr(created_at,1,10) = ?`, d).s,
-      month: one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='in' AND method <> 'points' AND substr(created_at,1,7) = ?`, month).s,
+      today: one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='in' AND method <> 'points' AND transfer_id IS NULL AND substr(created_at,1,10) = ?`, d).s,
+      month: one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='in' AND method <> 'points' AND transfer_id IS NULL AND substr(created_at,1,7) = ?`, month).s,
       closedMonth: one(`SELECT COUNT(*) n, COALESCE(SUM(total),0) s FROM orders WHERE kind='order' AND substr(closed_at,1,7) = ?`, month),
     },
     unpaid: all(`SELECT o.id, o.number, o.total, o.paid, c.name customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
@@ -279,7 +280,7 @@ crm.put('/cars/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── Заказы и сметы ─────────────────────────────────────────────────────────
+// ── Заказы и выцены ─────────────────────────────────────────────────────────
 crm.get('/orders', (req, res) => {
   const me = who(req, req.query.kind === 'quote' ? 'quotes.manage' : 'orders.view');
   const P = permsOf(me);
@@ -310,7 +311,12 @@ crm.get('/orders', (req, res) => {
 });
 
 /** Скрываем цены и контакты, если у сотрудника нет таких прав */
-function hideFor(P, o) {
+function hideFor(P, o, me) {
+  if (P['orders.only_my_jobs'] && me && o.items) {
+    const mine = new Set(o.items.filter((i) => i.kind === 'labor' && i.mechanic_id === me.id).map((i) => i.id));
+    o.items = o.items.filter((i) => mine.has(i.id) || (i.kind === 'part' && mine.has(i.task_id)));
+    o.only_my_jobs = true;
+  }
   if (!P['orders.prices']) for (const k of ['total', 'total_net', 'paid', 'cost']) o[k] = null;
   if (!P['clients.contact']) { o.customer_phone = null; if (o.customer) o.customer = { ...o.customer, phone: null, email: null }; }
   if (!P['orders.prices'] && o.items) o.items = o.items.map((i) => ({ ...i, price: null, cost: null, discount: null }));
@@ -343,7 +349,7 @@ crm.get('/orders/:id', (req, res) => {
   const me = who(req, 'orders.view');
   const o = orderFull(Number(req.params.id));
   assertAssigned(me, o);
-  hideFor(permsOf(me), o);
+  hideFor(permsOf(me), o, me);
   o.damages = (() => { try { return JSON.parse(o.damages || '[]'); } catch { return []; } })();
   o.sales_docs = all('SELECT id, kind, number, issue_date, total_gross, paid, ksef, ext_url, corrects_id, created_by, ksef_status, ksef_number, ksef_error FROM sales_docs WHERE order_id = ? ORDER BY id', o.id);
   o.signatures = all('SELECT id, doc, method, signer_name, phone, signed_at, ip FROM order_signatures WHERE order_id = ? ORDER BY id', o.id);
@@ -352,7 +358,7 @@ crm.get('/orders/:id', (req, res) => {
   res.json(o);
 });
 
-const ORDER_FIELDS = ['customer_id', 'car_id', 'type_id', 'mechanic_id', 'mileage', 'fuel_level', 'complaint', 'internal_note', 'mechanic_note', 'pickup_at', 'receipt_no', 'external_no', 'faults', 'after_notes'];
+const ORDER_FIELDS = ['customer_id', 'car_id', 'type_id', 'mechanic_id', 'mileage', 'fuel_level', 'complaint', 'internal_note', 'mechanic_note', 'pickup_at', 'receipt_no', 'external_no', 'faults', 'after_notes', 'damages_note', 'contact_person', 'contact_phone', 'notes'];
 function assertEditable(o, s) {
   const st = one('SELECT lock_edit FROM order_statuses WHERE id = ?', o.status_id);
   if (st?.lock_edit && s.role !== 'admin') throw new HttpError(423, 'Заказ завершён и закрыт для изменений. Смените статус или обратитесь к администратору.');
@@ -752,22 +758,25 @@ crm.post('/storage/:id/release', (req, res) => {
 });
 
 // ── Касса ──────────────────────────────────────────────────────────────────
+const registers = () => all(`SELECT r.*, ROUND(r.opening + COALESCE((SELECT SUM(CASE WHEN direction='in' THEN amount ELSE -amount END) FROM payments p WHERE p.register_id = r.id),0),2) balance
+  FROM cash_registers r ORDER BY r.active DESC, r.pos, r.id`);
 crm.get('/cash', (req, res) => {
   who(req, 'cash.view');
   const from = String(req.query.from || today().slice(0, 8) + '01');
   const to = String(req.query.to || today());
-  const rows = all(`SELECT p.*, o.number order_number, c.name customer_name FROM payments p LEFT JOIN orders o ON o.id = p.order_id
-    LEFT JOIN customers c ON c.id = p.customer_id WHERE substr(p.created_at,1,10) BETWEEN ? AND ? ORDER BY p.id DESC LIMIT 1000`, from, to);
-  const sum = (dir, method) => one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction = ? ${method ? 'AND method = ?' : ''} AND substr(created_at,1,10) BETWEEN ? AND ?`,
+  const reg = Number(req.query.register) || null;
+  const rows = all(`SELECT p.*, o.number order_number, c.name customer_name, r.name register_name FROM payments p LEFT JOIN orders o ON o.id = p.order_id
+    LEFT JOIN customers c ON c.id = p.customer_id LEFT JOIN cash_registers r ON r.id = p.register_id
+    WHERE substr(p.created_at,1,10) BETWEEN ? AND ? ${reg ? 'AND p.register_id = ?' : ''} ORDER BY p.id DESC LIMIT 2000`, ...[from, to, ...(reg ? [reg] : [])]);
+  const sum = (dir, method) => one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction = ? AND transfer_id IS NULL ${method ? 'AND method = ?' : ''} AND substr(created_at,1,10) BETWEEN ? AND ?`,
     ...[dir, ...(method ? [method] : []), from, to]).s;
+  const regs = registers();
   res.json({
-    rows,
-    cashBalance: round2(one(`SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE -amount END),0) s FROM payments WHERE method = 'cash'`).s
-      + Number(getSetting('cash_opening', '0'))),
+    rows, registers: regs,
+    cashBalance: round2(regs.filter((r) => r.kind === 'cash').reduce((a, r) => a + r.balance, 0)),
     period: { cashIn: sum('in', 'cash'), cashOut: sum('out', 'cash'), card: sum('in', 'card'), transfer: sum('in', 'transfer'), points: sum('in', 'points') },
   });
 });
-// ручные KP (приход) / KW (расход) наличных
 crm.post('/cash', (req, res) => {
   const s = who(req, 'cash.edit');
   const direction = req.body?.direction === 'out' ? 'out' : 'in';
@@ -775,8 +784,63 @@ crm.post('/cash', (req, res) => {
   if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
   const note = String(req.body?.note || '').trim();
   if (!note) throw new HttpError(400, 'Укажите назначение');
-  insert('payments', { number: nextNumber(direction === 'in' ? 'KP' : 'KW'), direction, method: 'cash', amount, note, staff: s.name, customer_id: req.body?.customer_id || null });
+  const r = req.body?.register_id ? one('SELECT * FROM cash_registers WHERE id = ? AND active = 1', Number(req.body.register_id)) : one(`SELECT * FROM cash_registers WHERE kind = 'cash' AND active = 1 ORDER BY is_default DESC, pos LIMIT 1`);
+  if (!r) throw new HttpError(400, 'Касса не найдена');
+  const method = r.kind === 'cash' ? 'cash' : r.kind === 'card' ? 'card' : 'transfer';
+  insert('payments', { number: nextNumber(direction === 'in' ? 'KP' : 'KW'), direction, method, amount, note, staff: s.name, customer_id: req.body?.customer_id || null, register_id: r.id });
   res.json({ ok: true });
+});
+/** Перенос денег между кассами: KW в одной, KP в другой (не выручка и не расход) */
+crm.post('/cash/transfer', (req, res) => {
+  const s = who(req, 'cash.edit');
+  const b = req.body || {};
+  const amount = round2(b.amount);
+  const from = one('SELECT * FROM cash_registers WHERE id = ? AND active = 1', Number(b.from));
+  const to = one('SELECT * FROM cash_registers WHERE id = ? AND active = 1', Number(b.to));
+  if (!from || !to || from.id === to.id) throw new HttpError(400, 'Выберите две разные кассы');
+  if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
+  const m = (r) => (r.kind === 'cash' ? 'cash' : r.kind === 'card' ? 'card' : 'transfer');
+  const note = String(b.note || '').trim() || `Перенос: ${from.name} → ${to.name}`;
+  const out = tx(() => {
+    const idOut = insert('payments', { number: nextNumber('KW'), direction: 'out', method: m(from), amount, note, staff: s.name, register_id: from.id });
+    const idIn = insert('payments', { number: nextNumber('KP'), direction: 'in', method: m(to), amount, note, staff: s.name, register_id: to.id, transfer_id: idOut });
+    run('UPDATE payments SET transfer_id = ? WHERE id = ?', idIn, idOut);
+    return { out: idOut, in: idIn };
+  });
+  res.json({ ok: true, ...out });
+});
+crm.get('/cash/registers', (req, res) => { who(req, 'cash.view'); res.json(registers()); });
+crm.post('/cash/registers', (req, res) => {
+  who(req, 'settings.manage');
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  if (!name) throw new HttpError(400, 'Название кассы обязательно');
+  const kind = ['cash', 'card', 'bank'].includes(b.kind) ? b.kind : 'cash';
+  const row = { name, kind, opening: round2(b.opening || 0), active: b.active === false || b.active === 0 ? 0 : 1, pos: Number(b.pos) || 0 };
+  let id = Number(b.id) || null;
+  if (id) update('cash_registers', id, row); else id = insert('cash_registers', row);
+  if (b.is_default) { run('UPDATE cash_registers SET is_default = 0 WHERE kind = ?', kind); run('UPDATE cash_registers SET is_default = 1 WHERE id = ?', id); }
+  res.json({ ok: true, id });
+});
+
+// ── Рапорты (как Raporty в Motowarsztat) ─────────────────────────────────────
+crm.get('/reports/list', (req, res) => { who(req, 'reports.view'); res.json({ reports: RPT.reportList() }); });
+crm.get('/reports/run/:id', (req, res) => {
+  who(req, 'reports.view');
+  const rep = RPT.runReport(req.params.id, req.query);
+  const fname = `raport-${req.params.id}-${req.query.from || ''}_${req.query.to || ''}`.replace(/[^\w.-]+/g, '_').replace(/_+$/, '');
+  if (req.query.format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}.csv"`);
+    return res.send(RPT.toCsv(rep));
+  }
+  if (req.query.format === 'xlsx') {
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}.xlsx"`);
+    return res.send(RPT.toXlsx(rep));
+  }
+  if (req.query.format === 'print') return res.type('html').send(RPT.toHtml(rep, DOC.settingsMap(), req.query));
+  res.json(rep);
 });
 
 // ── Отчёты ─────────────────────────────────────────────────────────────────
@@ -838,7 +902,7 @@ crm.get('/ext/hello', (req, res) => {
     markup: Number(getSetting('default_markup', '40')) || 0,
   });
 });
-/** Открытые заказы и сметы для выпадающих списков расширения */
+/** Открытые заказы и выцены для выпадающих списков расширения */
 crm.get('/ext/orders', (req, res) => {
   const s = who(req, 'orders.view');
   const P = permsOf(s);
@@ -866,7 +930,7 @@ crm.post('/ext/prepare', async (req, res) => {
   }
   res.json({ items: out });
 });
-/** «Pobierz do Pulsecar»: товар в картотеку, приход на склад, в заказ, в смету — одной кнопкой */
+/** «Pobierz do Pulsecar»: товар в картотеку, приход на склад, в заказ, в выцену — одной кнопкой */
 crm.post('/ext/pick', (req, res) => {
   const s = who(req, 'products.view');
   const P = permsOf(s);
@@ -877,10 +941,10 @@ crm.post('/ext/pick', (req, res) => {
     sku: i.sku || null, ean: i.ean || null, qty: Math.max(0.01, Number(i.qty) || 1), price_net: round2(Number(i.price_net) || 0), sell_gross: round2(Number(i.sell_gross) || 0), vat: Number(i.vat ?? 23),
   })).filter((i) => i.name);
   if (!items.length) throw new HttpError(400, 'Нет товаров');
-  if (!b.product && !b.stock && !b.order_id && !b.quote_id) throw new HttpError(400, 'Выберите, куда добавить: склад, заказ или смета');
+  if (!b.product && !b.stock && !b.order_id && !b.quote_id) throw new HttpError(400, 'Выберите, куда добавить: склад, заказ или выцена');
   if (b.stock && !(P['stock.docs'] || P['suppliers.receive'])) throw new HttpError(403, 'Нет права на приход на склад');
   if (b.order_id && !P['orders.jobs']) throw new HttpError(403, 'Нет права добавлять запчасти в заказ');
-  if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять сметы');
+  if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять выцены');
   const bad = items.filter((i) => (b.stock || b.product) && i.price_net <= 0);
   if (bad.length && b.stock) throw new HttpError(400, `Цена закупки должна быть больше 0: ${bad.map((i) => i.code || i.name).join(', ')}`);
   const done = { products: 0, stock: null, order: null, quote: null };
@@ -914,7 +978,7 @@ crm.post('/ext/pick', (req, res) => {
   res.json({ ok: true, ...done });
 });
 
-/** Документ со страницы поставщика (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/смету */
+/** Документ со страницы поставщика (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/выцену */
 crm.post('/ext/doc', (req, res) => {
   const s = who(req, 'products.view');
   const P = permsOf(s);
@@ -924,7 +988,7 @@ crm.post('/ext/doc', (req, res) => {
   if (!(P['suppliers.receive'] || P['stock.docs'])) throw new HttpError(403, 'Нет права принимать документы поставщиков');
   if (b.receive && !P['suppliers.receive']) throw new HttpError(403, 'Нет права на приход на склад');
   if (b.order_id && !P['orders.jobs']) throw new HttpError(403, 'Нет права добавлять запчасти в заказ');
-  if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять сметы');
+  if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять выцены');
   const lines = (b.lines || b.items || []).map((l) => ({
     code: l.code ? String(l.code).trim().slice(0, 60) : null, name: String(l.name || l.code || '').trim().slice(0, 250), brand: l.brand ? String(l.brand).slice(0, 80) : null,
     sku: l.sku || null, ean: l.ean || null, qty: Number(l.qty) || 0, price_net: round2(Number(l.price_net) || 0), vat: Number(l.vat ?? 23),
@@ -1095,7 +1159,7 @@ crm.delete('/dict/:name/:id', (req, res) => {
 crm.get('/staff', (req, res) => {
   who(req, 'settings.manage');
   res.json({
-    rows: all('SELECT id, login, name, role, color, hourly_rate, commission_pct, is_mechanic, active, phone, email, last_login, permissions, stations, (pass_hash IS NOT NULL) has_password FROM staff ORDER BY active DESC, name')
+    rows: all('SELECT id, login, name, role, color, hourly_rate, commission_pct, parts_pct, pay_mode, pay_base, is_mechanic, active, phone, email, last_login, permissions, stations, (pass_hash IS NOT NULL) has_password FROM staff ORDER BY active DESC, name')
       .map((r) => ({ ...r, permissions: r.permissions ? JSON.parse(r.permissions) : {}, stations: r.stations ? JSON.parse(r.stations) : [], effective: permsOf(r) })),
     groups: PERM_GROUPS, presets: PRESETS,
   });
@@ -1106,7 +1170,8 @@ crm.post('/staff', (req, res) => {
   if (!b.name) throw new HttpError(400, 'Имя обязательно');
   const d = {
     name: b.name, role: ['admin', 'staff', 'mechanic'].includes(b.role) ? b.role : 'mechanic', color: b.color || null,
-    hourly_rate: Number(b.hourly_rate) || 0, commission_pct: Number(b.commission_pct) || 0, is_mechanic: b.is_mechanic ? 1 : 0,
+    hourly_rate: Number(b.hourly_rate) || 0, commission_pct: Number(b.commission_pct) || 0,
+    parts_pct: Number(b.parts_pct) || 0, pay_mode: ['pct', 'hourly', 'both'].includes(b.pay_mode) ? b.pay_mode : 'pct', pay_base: b.pay_base === 'gross' ? 'gross' : 'net', is_mechanic: b.is_mechanic ? 1 : 0,
     active: b.active === undefined ? 1 : (b.active ? 1 : 0), login: b.login || null,
     phone: b.phone ?? undefined, email: b.email ?? undefined,
     permissions: b.permissions !== undefined ? JSON.stringify(b.permissions || {}) : undefined,
@@ -1581,6 +1646,53 @@ crm.post('/sales-docs/:id/correct', async (req, res) => {
   if (orig.ksef_status && KSEF.ksefEnabled() && (cfg('ksef')?.autoSend ?? true)) {
     try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
     if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил корректу: ' + ks.ksef_error;
+  }
+  res.json({ ...d, ...(ks || {}), warning });
+});
+/** Продажи: все фактуры, Pro forma, корректы и чеки за период (как Sprzedaż в Motowarsztat) */
+crm.get('/sales', (req, res) => {
+  const me = who(req, 'invoices.create');
+  const from = String(req.query.from || today().slice(0, 8) + '01'), to = String(req.query.to || today());
+  const type = String(req.query.type || '');
+  const q = `%${String(req.query.q || '').trim()}%`;
+  const docs = type && type !== 'doc' && !['vat', 'proforma', 'correction'].includes(type) ? [] : all(`SELECT d.id, d.kind type, d.number, d.issue_date date,
+      CASE WHEN d.kind = 'correction' THEN ROUND(d.total_net - COALESCE((SELECT x.total_net FROM sales_docs x WHERE x.id = d.corrects_id),0),2) ELSE d.total_net END net,
+      CASE WHEN d.kind = 'correction' THEN ROUND(d.total_gross - COALESCE((SELECT x.total_gross FROM sales_docs x WHERE x.id = d.corrects_id),0),2) ELSE d.total_gross END gross, d.paid, d.payment_method,
+      d.ksef_status, d.ksef_number, d.ksef_error, d.ext_url, d.order_id, o.number order_no, json_extract(d.buyer, '$.name') buyer, json_extract(d.buyer, '$.nip') nip, d.created_by staff
+    FROM sales_docs d LEFT JOIN orders o ON o.id = d.order_id
+    WHERE d.issue_date BETWEEN ? AND ? ${['vat', 'proforma', 'correction'].includes(type) ? 'AND d.kind = ?' : ''} AND (d.number LIKE ? OR COALESCE(json_extract(d.buyer, '$.name'),'') LIKE ? OR COALESCE(o.number,'') LIKE ?)
+    ORDER BY d.issue_date DESC, d.id DESC LIMIT 2000`, ...[from, to, ...(['vat', 'proforma', 'correction'].includes(type) ? [type] : []), q, q, q]);
+  const recs = type && type !== 'receipt' ? [] : [
+    ...all(`SELECT r.id, 'receipt' type, r.number, substr(r.created_at,1,10) date, NULL net, r.total gross, r.total paid, r.payment_method, r.status receipt_status, r.error ksef_error,
+        r.order_id, o.number order_no, COALESCE(c.company, c.name) buyer, r.nip, r.staff FROM receipts r LEFT JOIN orders o ON o.id = r.order_id LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE substr(r.created_at,1,10) BETWEEN ? AND ? AND (COALESCE(r.number,'') LIKE ? OR COALESCE(o.number,'') LIKE ? OR COALESCE(c.name,'') LIKE ?)`, from, to, q, q, q),
+    ...all(`SELECT o.id, 'receipt' type, o.receipt_no number, substr(COALESCE(o.closed_at, o.created_at),1,10) date, o.total_net net, o.total gross, o.paid, NULL payment_method, 'manual' receipt_status,
+        o.id order_id, o.number order_no, COALESCE(c.company, c.name) buyer, c.nip, NULL staff FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+      WHERE COALESCE(o.receipt_no,'') <> '' AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.order_id = o.id) AND substr(COALESCE(o.closed_at, o.created_at),1,10) BETWEEN ? AND ?
+        AND (o.receipt_no LIKE ? OR o.number LIKE ? OR COALESCE(c.name,'') LIKE ?)`, from, to, q, q, q),
+  ];
+  const rows = [...docs, ...recs].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const sum = (t) => round2(rows.filter((r) => (t ? r.type === t : r.type !== 'proforma')).reduce((a, r) => a + (Number(r.gross) || 0), 0));
+  res.json({ rows, totals: { all: sum(), vat: sum('vat'), correction: sum('correction'), receipt: sum('receipt'), proforma: sum('proforma') }, ksefPending: rows.filter((r) => r.type !== 'proforma' && r.type !== 'receipt' && r.ksef_status && r.ksef_status !== 'accepted').length });
+});
+/** Фактура без заказа (продажа запчастей, услуга): покупатель + свои позиции */
+crm.post('/sales-docs', async (req, res) => {
+  const s = who(req, 'invoices.create');
+  const b = req.body || {};
+  const kind = b.kind === 'proforma' ? 'proforma' : 'vat';
+  const lines = (b.lines || []).map((l) => {
+    const qty = Number(l.qty) || 0, vat = Number(l.vat ?? 23), gross = round2(qty * (Number(l.unit_gross) || 0));
+    const net = round2(gross / (1 + vat / 100));
+    return { name: String(l.name || '').trim().slice(0, 250), code: l.code || null, kind: 'part', qty, unit: l.unit || 'szt.', unit_net: qty ? round2(net / qty) : 0, discount: 0, vat, net, vat_amt: round2(gross - net), gross, gtu: null };
+  }).filter((l) => l.name && l.qty > 0);
+  if (!lines.length) throw new HttpError(400, 'Добавьте хотя бы одну позицию');
+  if (!String(b.buyer?.name || '').trim()) throw new HttpError(400, 'Укажите покупателя');
+  const viaKsef = kind === 'vat' && getSetting('invoice_mode', 'auto') === 'auto' && KSEF.ksefEnabled();
+  const d = DOC.createSaleDoc({ kind, buyer: b.buyer, lines, issue_date: viaKsef ? today() : b.issue_date, sale_date: b.sale_date, payment_method: b.payment_method, due_days: b.due_days, notes: b.notes, paid: b.paid ? lines.reduce((a, l) => a + l.gross, 0) : 0 }, s.name);
+  let ks = null, warning = null;
+  if (viaKsef && (cfg('ksef')?.autoSend ?? true)) {
+    try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
+    if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил фактуру: ' + ks.ksef_error;
   }
   res.json({ ...d, ...(ks || {}), warning });
 });

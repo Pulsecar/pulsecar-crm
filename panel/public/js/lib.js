@@ -95,6 +95,8 @@ const P = {
   x: 'M6 6l12 12M18 6L6 18',
   trash: 'M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3',
   print: 'M6 9V3h12v6M6 18H4v-7h16v7h-2M8 14h8v7H8z',
+  arrows: 'M7 7h13l-4-4M17 17H4l4 4',
+  download: 'M12 3v12m0 0l-5-5m5 5l5-5M4 21h16',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5',
   menu: 'M3 6h18M3 12h18M3 18h18',
   left: 'M15 18l-6-6 6-6',

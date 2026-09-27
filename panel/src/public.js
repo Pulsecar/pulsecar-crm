@@ -1,4 +1,4 @@
-// Публичные страницы для клиентов: электронная карта заказа / сметы (/k/<токен>) и онлайн-запись (/rezerwacja)
+// Публичные страницы для клиентов: электронная карта заказа / выцены (/k/<токен>) и онлайн-запись (/rezerwacja)
 import express from 'express';
 import crypto from 'node:crypto';
 import { all, one, run, insert, log, getSetting } from './db.js';

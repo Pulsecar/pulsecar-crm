@@ -93,10 +93,10 @@ export function CustomerPage({ id }) {
     </div>
 
     <div class="card tight" style="margin-top:14px">
-      <div class="row" style="padding:12px 14px"><h2 style="margin:0">Заказы и сметы</h2></div>
+      <div class="row" style="padding:12px 14px"><h2 style="margin:0">Заказы и выцены</h2></div>
       ${c.orders.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Номер</th><th>Дата</th><th>Статус</th><th>Авто</th><th class="r">Сумма</th><th class="r">Оплачено</th></tr></thead>
         <tbody>${c.orders.map((o) => html`<tr class="click" onClick=${() => go((o.kind === 'quote' ? '/quotes/' : '/orders/') + o.id)}>
-          <td><b>${o.number}</b>${o.kind === 'quote' ? html` <span class="chip">смета</span>` : ''}</td><td class="nowrap">${fdate(o.created_at)}</td>
+          <td><b>${o.number}</b>${o.kind === 'quote' ? html` <span class="chip">выцена</span>` : ''}</td><td class="nowrap">${fdate(o.created_at)}</td>
           <td><${Badge} color=${o.status_color}>${o.status_name}</${Badge}></td><td>${carName(o)} ${o.plate ? html`<span class="plate">${o.plate}</span>` : ''}</td>
           <td class="r nowrap">${zl(o.total)}</td><td class="r nowrap">${o.paid ? zl(o.paid) : '—'}</td></tr>`)}</tbody></table></div>`
         : html`<div class="empty">Заказов нет</div>`}

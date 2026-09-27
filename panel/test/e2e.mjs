@@ -186,6 +186,23 @@ try {
   assert.equal(co2.items[0].done, 1); assert.equal(co2.items[0].price, 1000);
   console.log('✓ механик: видит заказы, отмечает работы, но не меняет цены и не видит отчёты');
 
+  // 9b. рапорты
+  const rl = ok(await req('/crm-api/reports/list'), 'reports list');
+  assert.ok(rl.reports.length >= 15);
+  const td = '2030-12-31';
+  for (const r of rl.reports) {
+    const q = `from=2020-01-01&to=${td}&car=${co.car_id}&customer=${co.customer_id}`;
+    const rep = ok(await req(`/crm-api/reports/run/${r.id}?${q}`), 'report ' + r.id);
+    assert.ok(Array.isArray(rep.columns) && Array.isArray(rep.rows), r.id);
+  }
+  const pay = ok(await req(`/crm-api/reports/run/staff_pay?from=2020-01-01&to=${td}&pct=40`), 'staff pay');
+  assert.equal(pay.rows[0]?.pay, 39.02);
+  for (const f of ['csv', 'xlsx', 'print']) {
+    const r = await fetch(`${BASE}/crm-api/reports/run/orders_detail?from=2020-01-01&to=${td}&format=${f}`, { headers: { Cookie: jars.admin } });
+    assert.equal(r.status, 200, f); assert.ok((await r.arrayBuffer()).byteLength > 50, f);
+  }
+  console.log('✓ рапорты: все считаются, зарплата 40%, CSV/XLSX/печать');
+
   // 10. удаление аккаунта в приложении
   ok(await req('/api/me/delete', { body: {}, token: sess.token }), 'delete');
   assert.equal((await req('/api/me', { token: sess.token })).status, 401);

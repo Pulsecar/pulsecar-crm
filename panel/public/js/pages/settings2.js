@@ -46,7 +46,7 @@ export function Numbering() {
   const RESET = { month: 'Каждый месяц', year: 'Каждый год', never: 'Никогда' };
   const preview = (p, n) => p.replace(/\[numer\]/gi, n).replace(/\[miesiac\]/gi, String(new Date().getMonth() + 1).padStart(2, '0')).replace(/\[rok\]/gi, new Date().getFullYear());
   return html`<div class="card tight">
-    <div class="small muted" style="padding:12px 14px">Как в Motowarsztat: шаблон из полей [numer], [miesiac], [rok]. Чтобы продолжить нумерацию Motowarsztat, впишите «Текущий номер» — например, для заказов 298, для смет 132 (сентябрь 2026). Следующий документ получит номер +1; номера, которые уже есть в базе после импорта, пропускаются.</div>
+    <div class="small muted" style="padding:12px 14px">Как в Motowarsztat: шаблон из полей [numer], [miesiac], [rok]. Чтобы продолжить нумерацию Motowarsztat, впишите «Текущий номер» — например, для заказов 298, для выцен 132 (сентябрь 2026). Следующий документ получит номер +1; номера, которые уже есть в базе после импорта, пропускаются.</div>
     <table class="tbl"><thead><tr><th>Документ</th><th>Шаблон</th><th>Сброс</th><th class="r">Текущий номер</th><th>Следующий</th></tr></thead>
       <tbody>${data.map((r) => html`<tr class="click" onClick=${() => setEdit({ ...r, current: r.current })}><td><b>${r.label}</b></td><td><code>${r.pattern}</code></td><td>${RESET[r.reset]}</td>
         <td class="r">${r.current}</td><td class="pos">${preview(r.pattern, r.current + 1)}</td></tr>`)}</tbody></table>
@@ -75,7 +75,7 @@ export function StaffAccess() {
     await act(() => api('staff', { body }), 'Сохранено');
     setEdit(null); reload(); app.reload();
   };
-  const newStaff = () => setEdit({ role: 'mechanic', is_mechanic: 1, commission_pct: 40, hourly_rate: 250, active: 1, permissions: {}, stations: [], password: '' });
+  const newStaff = () => setEdit({ role: 'mechanic', is_mechanic: 1, commission_pct: 40, hourly_rate: 250, pay_mode: 'pct', pay_base: 'net', parts_pct: 0, active: 1, permissions: {}, stations: [], password: '' });
   return html`<div class="card tight">
     <div class="row" style="padding:12px 14px"><span class="muted small">Выдайте каждому сотруднику свой логин и пароль. Права задаются ролью и уточняются галочками — как в Motowarsztat.</span>
       <button class="btn primary sm" style="margin-left:auto" onClick=${newStaff}><${Icon} n="plus" />Сотрудник</button></div>
@@ -100,6 +100,11 @@ export function StaffAccess() {
         <label class="f">% от работ<input type="number" value=${edit.commission_pct} onInput=${(e) => setEdit({ ...edit, commission_pct: e.target.value })} /></label>
         <div class="stack" style="gap:4px;justify-content:end"><label class="check"><input type="checkbox" checked=${!!edit.is_mechanic} onChange=${(e) => setEdit({ ...edit, is_mechanic: e.target.checked ? 1 : 0 })} />Механик (выбирается в работах)</label>
           <label class="check"><input type="checkbox" checked=${!!edit.active} onChange=${(e) => setEdit({ ...edit, active: e.target.checked ? 1 : 0 })} />Работает</label></div></div>
+      <div class="grid g4" style="margin-top:6px"><label class="f">Как платим<select value=${edit.pay_mode || 'pct'} onChange=${(e) => setEdit({ ...edit, pay_mode: e.target.value })}>
+          <option value="pct">% от работ</option><option value="hourly">ставка × нормо-часы</option><option value="both">% от работ + ставка</option></select></label>
+        <label class="f">% считать от<select value=${edit.pay_base || 'net'} onChange=${(e) => setEdit({ ...edit, pay_base: e.target.value })}><option value="net">нетто</option><option value="gross">брутто</option></select></label>
+        <label class="f">% от маржи запчастей к его работам<input type="number" value=${edit.parts_pct || 0} onInput=${(e) => setEdit({ ...edit, parts_pct: e.target.value })} /></label>
+        <div class="muted small" style="align-self:end">Эти условия считает рапорт «Расчёт сотрудников».</div></div>
       ${edit.role === 'admin' ? html`<div class="muted small" style="margin-top:10px">Администратор может всё.</div>` : html`
         <div class="row" style="margin-top:12px"><b>Права</b><span class="muted small">Галочки по умолчанию — от роли «${ROLE[edit.role]}».</span>
           <button class="btn ghost sm" style="margin-left:auto" onClick=${() => setEdit({ ...edit, permissions: {} })}>Сбросить к роли</button></div>
