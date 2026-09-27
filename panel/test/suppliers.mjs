@@ -1,4 +1,4 @@
-// Хуртовни (Hart API, вставка с сайта, документ → склад / заказ), нумерация, сметы, прайс из Motowarsztat,
+// Поставщики (Hart API, вставка с сайта, документ → склад / заказ), нумерация, сметы, прайс из Motowarsztat,
 // настройки мастерской, шаблоны, чек-листы, права сотрудников.
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -93,7 +93,7 @@ try {
   assert.equal(q.number, `WYC 133/${mm}/${yy}`);
   console.log(`✓ нумерация продолжает Motowarsztat: ${o.number}, смета ${q.number}`);
 
-  // ── 3. смета: работы из шаблона, запчасти из хуртовни, превращение в заказ ──
+  // ── 3. смета: работы из шаблона, запчасти от поставщика, превращение в заказ ──
   const tpl = me.templates.find((t) => t.name === 'Wymiana oleju');
   r = ok(await req(`/crm-api/orders/${q.id}/apply-template/${tpl.id}`, { body: {} }), 'tpl');
   assert.equal(r.added, tpl.items.length);
@@ -114,7 +114,7 @@ try {
   assert.equal(s1.rows[0].supplier, 'hart'); assert.equal(s1.rows[0].availability, 5); assert.equal(s1.rows[0].sellSuggested, Math.round(79.5 * 1.23 * 1.4 * 100) / 100);
   r = ok(await req('/crm-api/suppliers/order', { body: { supplier: 'hart', order_id: o.id, lines: [{ sku: '123456', qty: 1 }] } }), 'hart order');
   assert.deepEqual(r.orders, ['H-1']);
-  console.log('✓ Hart API: фактуры сами приходят в «Хуртовни», поиск цены и наличия, заказ в Hart (корзина → заказ)');
+  console.log('✓ Hart API: фактуры сами приходят в «Поставщики», поиск цены и наличия, заказ в Hart (корзина → заказ)');
 
   // ── 5. документ → сразу в заказ клиента (с приходом на склад) ──
   r = ok(await req(`/crm-api/suppliers/docs/${hdoc.id}/to-order`, { body: { order_id: o.id, pick: [0], toStock: true } }), 'to order');
@@ -128,7 +128,7 @@ try {
   assert.equal((await req(`/crm-api/suppliers/docs/${hdoc.id}/receive`, { body: {} })).status, 409, 'второй раз на склад не принимается');
   console.log('✓ поставка Hart → одной кнопкой в заказ клиента: приход PZ, запчасть со склада, наценка 40%');
 
-  // ── 6. любая хуртовня: вставка таблицы с сайта (кнопка «В Pulsecar» / Ctrl+C) ──
+  // ── 6. любой поставщик: вставка таблицы с сайта (кнопка «В Pulsecar» / Ctrl+C) ──
   const pasted = 'Indeks\tNazwa\tProducent\tIlość\tCena netto\tWartość netto\nOC 90\tFiltr oleju\tKNECHT\t2\t18,50\t37,00\nLX 1566\tFiltr powietrza\tMAHLE\t1\t42,10\t42,10';
   const p1 = ok(await req('/crm-api/suppliers/parse', { body: { text: pasted } }), 'parse');
   assert.deepEqual(p1.lines.map((l) => [l.code, l.qty, l.price_net, l.brand]), [['OC 90', 2, 18.5, 'KNECHT'], ['LX 1566', 1, 42.1, 'MAHLE']]);
@@ -143,7 +143,7 @@ try {
   ok(await req(`/crm-api/suppliers/docs/${ap.id}/to-order`, { body: { order_id: q.id, pick: [0] } }), 'ap to quote');
   const qq = ok(await req('/crm-api/orders/' + q.id), 'qq');
   assert.ok(qq.items.some((i) => i.code === 'OC 90' && !i.product_id));
-  console.log('✓ Auto Partner и любые хуртовни: таблица с сайта разобрана (с заголовками и без), приход частично, запчасти в смету');
+  console.log('✓ Auto Partner и любые поставщики: таблица с сайта разобрана (с заголовками и без), приход частично, запчасти в смету');
 
   // ── 7. настройки мастерской работают ──
   ok(await req('/crm-api/settings', { method: 'PUT', body: { block_finish_open_jobs: '1', rbh_rate: '200', status_on_all_jobs: String(me.statuses.find((s) => s.pos === 5).id) } }), 'settings');
@@ -218,7 +218,7 @@ try {
   assert.equal(prod.sell_price, 75.62); assert.equal(prod.purchase_price, 31.29); assert.equal(prod.stock, 1); assert.equal(prod.supplier_sku, 'G0XEXU');
   const pre = ok(await ext('ext/prepare', { items: [item] }), 'prepare');
   assert.equal(pre.items[0].product.id, prod.id);
-  // фактура со страницы хуртовни: документ поставщика, сразу приход и в заказ; повтор по номеру не создаёт дубль
+  // фактура со страницы поставщика: документ поставщика, сразу приход и в заказ; повтор по номеру не создаёт дубль
   const vr = await (await fetch(BASE + '/crm-api/ext/version')).json();
   assert.match(vr.version, /^\d+\.\d+\.\d+$/, 'версия расширения доступна без входа');
   assert.equal(ok(await ext('ext/hello'), 'hello2').latest, vr.version);
@@ -232,12 +232,12 @@ try {
   assert.equal(sd.doc?.ext_id ?? sd.ext_id, 'FV/2026/09/777');
   const spark = ok(await req('/crm-api/products?q=BOS-0986'), 'spark').rows[0];
   assert.equal(spark.stock, 4 - (ok(await req('/crm-api/orders/' + o2.id), 'o2d').items.filter((i) => i.code === 'BOS-0986').reduce((a, i) => a + (i.stock_taken ? i.qty : 0), 0)));
-  assert.equal(spark.sell_price, 39.9, 'цена продажи = розничная хуртовни');
+  assert.equal(spark.sell_price, 39.9, 'цена продажи = розничная цена поставщика');
   r = ok(await ext('ext/doc', { ...inv, kind: 'cart', number: '', quote_id: q.id }), 'cart → quote');
   assert.ok(r.quote && !r.stock);
   ok(await req('/crm-api/me/ext-token', { method: 'DELETE' }), 'revoke token');
   assert.equal((await ext('ext/hello')).status, 401);
-  console.log('✓ расширение: фактура / WZ / корзина со страницы хуртовни → документ поставщика без дублей, приход PZ, в заказ и смету');
+  console.log('✓ расширение: фактура / WZ / корзина со страницы поставщика → документ поставщика без дублей, приход PZ, в заказ и смету');
   console.log('✓ расширение Chrome: кнопка в Inter Cars → товар в картотеке, приход на склад, в заказ и смету; цена продажи = рекомендованная');
 
   // ── 10. финансы ──
@@ -255,7 +255,7 @@ try {
   assert.equal((await req('/crm-api/finance/overview?from=x&to=y')).status, 400);
   console.log('✓ финансы: обзор с сравнением, валовая прибыль, конструктор по 15 разрезам, CSV, деньги и долги, детализация до заказов');
 
-  console.log('\nВСЕ ПРОВЕРКИ ХУРТОВЕН, НАСТРОЕК И ДОСТУПОВ ПРОЙДЕНЫ');
+  console.log('\nВСЕ ПРОВЕРКИ ПОСТАВЩИКОВ, НАСТРОЕК И ДОСТУПОВ ПРОЙДЕНЫ');
 } catch (e) {
   console.error('✗', e.message);
   console.error(e.stack?.split('\n').slice(1, 3).join('\n'));

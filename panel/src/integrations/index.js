@@ -39,16 +39,16 @@ export const DEFS = [
     ],
   },
   {
-    key: 'mailbox', group: 'Поставщики', title: 'Почтовый ящик для документов хуртовен',
-    about: 'Любая хуртовня (Auto Partner, Inter-Team, Moto-Profil, Gordon…) может присылать фактуры и WZ файлом CSV/XLSX на отдельный ящик — CRM сама забирает их каждые 30 минут и кладёт в Склад → Хуртовни.',
-    howto: 'Создайте ящик, например dostawy@pulsecar.pl (Hostinger → Почта). В B2B каждой хуртовни включите отправку документов в CSV/XLSX на этот адрес. IMAP Hostinger: imap.hostinger.com, порт 993.',
+    key: 'mailbox', group: 'Поставщики', title: 'Почтовый ящик для документов поставщиков',
+    about: 'Любой поставщик (Auto Partner, Inter-Team, Moto-Profil, Gordon…) может присылать фактуры и WZ файлом CSV/XLSX на отдельный ящик — CRM сама забирает их каждые 30 минут и кладёт в Склад → Поставщики.',
+    howto: 'Создайте ящик, например dostawy@pulsecar.pl (Hostinger → Почта). В B2B каждого поставщика включите отправку документов в CSV/XLSX на этот адрес. IMAP Hostinger: imap.hostinger.com, порт 993.',
     fields: [
       { k: 'host', label: 'IMAP сервер', required: true, def: 'imap.hostinger.com' },
       { k: 'port', label: 'Порт', type: 'number', def: 993 },
       { k: 'user', label: 'Логин (адрес ящика)', required: true },
       { k: 'pass', label: 'Пароль', secret: true, required: true },
       { k: 'folder', label: 'Папка', def: 'INBOX', advanced: true },
-      { k: 'rules', label: 'Какой адрес = какая хуртовня (строки вида «autopartner.pl = autopartner»)', advanced: true },
+      { k: 'rules', label: 'Какой адрес = какой поставщик (строки вида «autopartner.pl = autopartner»)', advanced: true },
     ],
   },
   {

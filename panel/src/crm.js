@@ -796,7 +796,7 @@ crm.get('/reports', (req, res) => {
   });
 });
 
-// ── Расширение Chrome «Pulsecar для хуртовен» ──────────────────────────────
+// ── Расширение Chrome «Pulsecar для поставщиков» ──────────────────────────────
 crm.post('/me/ext-token', (req, res) => {
   const s = who(req);
   const token = 'pcx_' + crypto.randomBytes(24).toString('base64url');
@@ -833,7 +833,7 @@ crm.get('/ext/orders', (req, res) => {
     LEFT JOIN cars k ON k.id = o.car_id LEFT JOIN order_statuses st ON st.id = o.status_id WHERE COALESCE(st.is_final,0) = 0 ORDER BY o.id DESC LIMIT 300`);
   res.json({ orders: rows.filter((r) => r.kind === 'order'), quotes: P['quotes.manage'] ? rows.filter((r) => r.kind === 'quote') : [] });
 });
-/** Уточнить цены через API хуртовни (Inter Cars: ваша цена и рекомендованная розничная) и найти товар на складе */
+/** Уточнить цены через API поставщика (Inter Cars: ваша цена и рекомендованная розничная) и найти товар на складе */
 crm.post('/ext/prepare', async (req, res) => {
   who(req, 'products.view');
   const items = (req.body?.items || []).slice(0, 100);
@@ -875,14 +875,14 @@ crm.post('/ext/pick', (req, res) => {
     const pids = items.map((i) => {
       if (!(b.product || b.stock || b.order_id)) return null;
       const pid = findOrCreateProduct({ name: i.name, code: i.code, manufacturer: i.brand, supplier_sku: i.sku, ean: i.ean, supplier: sup.name, sell_price: i.sell_gross, price_net: i.price_net });
-      // цена продажи = рекомендованная хуртовней, закупка = цена для сервиса
+      // цена продажи = рекомендованная поставщиком, закупка = цена для сервиса
       if (i.sell_gross > 0) run('UPDATE products SET sell_price = ? WHERE id = ?', i.sell_gross, pid);
       if (i.price_net > 0) run('UPDATE products SET purchase_price = ? WHERE id = ?', i.price_net, pid);
       done.products++;
       return pid;
     });
     if (b.stock) {
-      const docId = createStockDoc({ type: 'PZ', counterparty: sup.name, ext_number: b.ext_number || null, note: `${sup.name}: кнопка в хуртовне`,
+      const docId = createStockDoc({ type: 'PZ', counterparty: sup.name, ext_number: b.ext_number || null, note: `${sup.name}: кнопка на сайте поставщика`,
         items: items.map((i, n) => ({ product_id: pids[n], qty: i.qty, price_net: i.price_net })) }, s.name);
       done.stock = one('SELECT number FROM stock_docs WHERE id = ?', docId).number;
     }
@@ -901,7 +901,7 @@ crm.post('/ext/pick', (req, res) => {
   res.json({ ok: true, ...done });
 });
 
-/** Документ со страницы хуртовни (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/смету */
+/** Документ со страницы поставщика (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/смету */
 crm.post('/ext/doc', (req, res) => {
   const s = who(req, 'products.view');
   const P = permsOf(s);
@@ -929,7 +929,7 @@ crm.post('/ext/doc', (req, res) => {
   tx(() => {
     const r = SUP.saveDoc({ supplier: sup.key || 'other', kind, ext_id: number || `${KINDS[kind]} ${s.name} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, doc_date: date, lines, meta: { url: b.url || null, by: s.name } });
     out.id = r.id; out.duplicate = r.duplicate;
-    if (r.duplicate && !b.force) throw new HttpError(409, `Документ ${number} уже загружен в CRM (Склад → Хуртовни). Повторно не добавляю.`);
+    if (r.duplicate && !b.force) throw new HttpError(409, `Документ ${number} уже загружен в CRM (Склад → Поставщики). Повторно не добавляю.`);
     const d = one('SELECT stock_doc_id FROM supplier_docs WHERE id = ?', r.id);
     if (b.receive && !d.stock_doc_id) {
       const rr = SUP.receiveGeneric(r.id, s.name);
@@ -1163,7 +1163,7 @@ crm.post('/integrations/:key/test', async (req, res) => {
   }
 });
 
-// ── Хуртовни: документы от любых поставщиков → склад или заказ ─────────────
+// ── Поставщики: документы от любых поставщиков → склад или заказ ─────────────
 crm.get('/suppliers', (req, res) => {
   who(req, 'products.view');
   const q = String(req.query.q || '').trim();
@@ -1243,7 +1243,7 @@ crm.post('/suppliers/sync', async (req, res) => {
   if (cfg('mailbox')) try { out.mailbox = await SUP.checkMailbox(); } catch (e) { out.mailbox = { error: e.message }; }
   res.json(out);
 });
-/** Поиск детали у всех хуртовен с API (Inter Cars — по индексу, Hart — по коду Hart) */
+/** Поиск детали у всех поставщиков с API (Inter Cars — по индексу, Hart — по коду Hart) */
 crm.get('/suppliers/search', async (req, res) => {
   who(req, 'products.view');
   const q = String(req.query.q || '').trim();

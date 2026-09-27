@@ -1,7 +1,7 @@
-// Хуртовни: документы от всех поставщиков → склад или заказ одной кнопкой; поиск деталей; кнопка «В Pulsecar» для сайтов хуртовен
+// Поставщики: документы от всех поставщиков → склад или заказ одной кнопкой; поиск деталей; кнопка «В Pulsecar» для сайтов поставщиков
 import { html, useState, useEffect, useRef, useData, api, act, go, qs, useApp, Loading, ErrorBox, Icon, Modal, Picker, ConfirmButton, zl, num, fdate, fdt, toast } from '../lib.js';
 
-// ── Кнопка-закладка для сайтов хуртовен (как wtyczka Motowarsztat, но без установки) ──
+// ── Кнопка-закладка для сайтов поставщиков (как wtyczka Motowarsztat, но без установки) ──
 export function bookmarklet(base) {
   const code = `(function(){var P=${JSON.stringify(base)};function t(e){return(e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim()}
 var best=null,sc=0;document.querySelectorAll('table').forEach(function(tb){var rs=tb.querySelectorAll('tr');if(rs.length<2||!tb.offsetParent)return;var h=t(tb.querySelector('thead')||rs[0]).toLowerCase();var s=rs.length+(/indeks|kod|nazwa|ilo|cena|netto|symbol|numer|artyku/.test(h)?100:0);if(s>sc){sc=s;best=tb}});
@@ -42,7 +42,7 @@ function OrderPick({ value, onPick }) {
         onPick=${onPick} />`;
 }
 
-// ── Склад → Хуртовни ────────────────────────────────────────────────────────
+// ── Склад → Поставщики ────────────────────────────────────────────────────────
 export function SuppliersPage() {
   const app = useApp();
   const [supplier, setSupplier] = useState('');
@@ -58,32 +58,32 @@ export function SuppliersPage() {
     try {
       const r = await act(() => api('suppliers/sync', { body: { days: 7 } }));
       const parts = Object.entries(r).map(([k, v]) => `${k === 'intercars' ? 'Inter Cars' : k === 'hart' ? 'Hart' : 'Почта'}: ${v.error ? 'ошибка — ' + v.error : `новых ${v.created}`}`);
-      toast(parts.join(' · ') || 'Нет подключённых хуртовен с API или почты', parts.some((p) => p.includes('ошибка')) ? 'error' : 'ok');
+      toast(parts.join(' · ') || 'Нет подключённых поставщиков с API или почты', parts.some((p) => p.includes('ошибка')) ? 'error' : 'ok');
       reload();
     } finally { setBusy(false); }
   };
   const anyAuto = data.api.intercars || data.api.hart || data.api.mailbox;
   return html`<div class="stack">
     <div class="card row">
-      <select style="width:230px" value=${supplier} onChange=${(e) => setSupplier(e.target.value)}><option value="">Все хуртовни</option>
+      <select style="width:230px" value=${supplier} onChange=${(e) => setSupplier(e.target.value)}><option value="">Все поставщики</option>
         ${data.wholesalers.filter((w) => w.docs || w.connected).map((w) => html`<option value=${w.key}>${w.name}</option>`)}</select>
       <select style="width:200px" value=${state} onChange=${(e) => setState(e.target.value)}><option value="new">Не принятые на склад</option><option value="">Все документы</option></select>
       <div class="row" style="margin-left:auto">
         ${anyAuto && html`<button class="btn" disabled=${busy} onClick=${sync}>${busy ? 'Проверяю…' : 'Проверить новые'}</button>`}
         <button class="btn primary" onClick=${() => setAdding(true)}><${Icon} n="plus" />Добавить документ</button></div>
     </div>
-    <div class="card tight">${data.docs.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Дата</th><th>Хуртовня</th><th>Документ</th><th class="r">Позиций</th><th class="r">Нетто</th><th class="r">Брутто</th><th>Статус</th></tr></thead>
+    <div class="card tight">${data.docs.length ? html`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Дата</th><th>Поставщик</th><th>Документ</th><th class="r">Позиций</th><th class="r">Нетто</th><th class="r">Брутто</th><th>Статус</th></tr></thead>
       <tbody>${data.docs.map((d) => html`<tr class="click" onClick=${() => setOpen(d.id)}><td class="nowrap">${fdate(d.doc_date)}</td><td><b>${d.supplier_name}</b><div class="sub">${KIND[d.kind] || d.kind}</div></td>
         <td>${d.ext_id}</td><td class="r">${d.lines_count}</td><td class="r nowrap">${zl(d.total_net)}</td><td class="r nowrap">${zl(d.total_gross)}</td>
         <td class="small">${d.stock_number ? html`<span class="pos">✓ на складе ${d.stock_number}</span>` : html`<span class="muted">новый</span>`}${d.used_in ? html`<div class="sub">в заказе ${d.used_in}</div>` : ''}</td></tr>`)}</tbody></table></div>`
-      : html`<div class="empty">${state === 'new' ? 'Нет новых документов от хуртовен' : 'Документов пока нет'}</div>`}</div>
+      : html`<div class="empty">${state === 'new' ? 'Нет новых документов от поставщиков' : 'Документов пока нет'}</div>`}</div>
     <${Extension} />
     <${HowTo} data=${data} />
     ${open && html`<${DocModal} id=${open} markup=${data.markup} onClose=${() => { setOpen(null); reload(); }} />`}
     ${adding && html`<${AddDoc} wholesalers=${data.wholesalers} markup=${data.markup} onClose=${() => setAdding(false)} onSaved=${(id) => { setAdding(false); reload(); setOpen(id); }} />`}
   </div>`;
 }
-const KIND = { delivery: 'WZ / поставка', invoice: 'Фактура', email: 'Из почты', clip: 'С сайта хуртовни', paste: 'Вставлено', file: 'Файл', manual: 'Вручную' };
+const KIND = { delivery: 'WZ / поставка', invoice: 'Фактура', email: 'Из почты', clip: 'С сайта поставщика', paste: 'Вставлено', file: 'Файл', manual: 'Вручную' };
 
 /** Связь с расширением Chrome: connect.js на странице CRM отвечает на ping и принимает ключ */
 function useExtension() {
@@ -115,11 +115,11 @@ function Extension() {
     window.postMessage({ source: 'pulsecar-crm', type: 'connect', token: r.token }, location.origin);
   };
   return html`<div class="card stack" style="border-color:rgba(27,243,114,.45)">
-    <div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0">Расширение Chrome «Pulsecar» — кнопка прямо в хуртовне</h2>
+    <div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0">Расширение Chrome «Pulsecar» — кнопка прямо на сайте поставщика</h2>
       <span class="badge" style=${'border-color:' + (ext?.connected ? 'var(--accent)' : ext ? 'var(--warn)' : 'var(--border)') + ';color:' + (ext?.connected ? 'var(--accent)' : ext ? 'var(--warn)' : 'var(--muted)')}>${!ext ? 'не установлено в этом браузере' : ext.connected ? `подключено · ${ext.user} · v${ext.version}` : `установлено v${ext.version} · не подключено`}</span></div>
     <div class="grid g2">
       <div class="stack" style="gap:6px">
-        <div class="small">У каждой детали в каталоге Inter Cars — кнопка <b>Pulsecar</b> рядом с «Do koszyka»: <b>товар в картотеку, приход на склад, в заказ или в смету</b>. Цена закупки — ваша цена, цена продажи — рекомендованная розничная хуртовни. Кнопка в углу на сайтах хуртовен забирает <b>корзину, фактуру или WZ</b> целиком: документ сохраняется в CRM (без дублей по номеру) и сразу приходуется на склад или уходит в заказ. Хуртовни нет в списке — включите кнопку на её сайте из окна расширения.</div>
+        <div class="small">У каждой детали в каталоге Inter Cars — кнопка <b>Pulsecar</b> рядом с «Do koszyka»: <b>товар в картотеку, приход на склад, в заказ или в смету</b>. Цена закупки — ваша цена, цена продажи — рекомендованная розничная цена поставщика. Кнопка в углу на сайтах поставщиков забирает <b>корзину, фактуру или WZ</b> целиком: документ сохраняется в CRM (без дублей по номеру) и сразу приходуется на склад или уходит в заказ. Поставщики нет в списке — включите кнопку на её сайте из окна расширения.</div>
         ${!ext ? html`<ol class="small muted" style="margin:0;padding-left:18px"><li>Скачайте архив и распакуйте.</li><li>Chrome → <code>chrome://extensions</code> → «Режим разработчика» → «Загрузить распакованное» → папка <code>pulsecar-extension</code>.</li><li>Обновите эту страницу и нажмите «Подключить расширение».</li></ol>` : ''}
         ${outdated ? html`<div class="small" style="color:var(--warn)">Есть новая версия ${latest}: скачайте архив, распакуйте поверх старой папки и нажмите ⟳ у расширения в <code>chrome://extensions</code>.</div>` : ''}
         <div class="row"><a class=${'btn ' + (ext && !outdated ? '' : 'primary')} href="/pulsecar-extension.zip" download>Скачать расширение${latest ? ' v' + latest : ''}</a>
@@ -136,19 +136,19 @@ function HowTo({ data }) {
   const base = location.origin;
   const withApi = data.wholesalers.filter((w) => w.api);
   return html`<div class="card stack">
-    <h2>Как получать запчасти от хуртовен</h2>
+    <h2>Как получать запчасти от поставщиков</h2>
     <div class="grid g2">
       <div class="stack" style="gap:6px"><b>1. Прямое подключение (API)</b>
         <div class="small">${withApi.map((w) => html`<div>${w.connected ? '✓' : '○'} ${w.name} ${w.connected ? html`<span class="pos">подключено</span>` : html`— <a href="#/settings/integrations">ввести ключи</a>`}</div>`)}</div>
         <div class="muted small">Поставки и фактуры приходят сами каждые 30 минут. Поиск цены и наличия и заказ — прямо из заказа клиента.</div></div>
-      <div class="stack" style="gap:6px"><b>2. Кнопка «В Pulsecar» — для любой хуртовни</b>
+      <div class="stack" style="gap:6px"><b>2. Кнопка «В Pulsecar» — для любого поставщика</b>
         <div class="row"><a class="btn primary" href=${bookmarklet(base)} onClick=${(e) => { e.preventDefault(); toast('Перетащите кнопку мышкой на панель закладок браузера'); }} draggable="true">⬆ В Pulsecar</a>
           <span class="muted small">Перетащите кнопку на панель закладок Chrome.</span></div>
-        <div class="muted small">Откройте в B2B хуртовни (Auto Partner, Inter-Team, Moto-Profil, Gordon, Motorol…) корзину, заказ, WZ или фактуру и нажмите закладку — позиции откроются в CRM. Если таблицу не видно, выделите строки мышкой и нажмите ещё раз.</div></div>
+        <div class="muted small">Откройте в B2B поставщика (Auto Partner, Inter-Team, Moto-Profil, Gordon, Motorol…) корзину, заказ, WZ или фактуру и нажмите закладку — позиции откроются в CRM. Если таблицу не видно, выделите строки мышкой и нажмите ещё раз.</div></div>
       <div class="stack" style="gap:6px"><b>3. Почтовый ящик</b>
-        <div class="muted small">${data.api.mailbox ? html`<span class="pos">✓ подключён</span> — ` : html`<a href="#/settings/integrations">Подключить ящик</a> — `}хуртовни присылают фактуры и WZ файлом CSV/XLSX на отдельный адрес, CRM забирает их сама.</div></div>
+        <div class="muted small">${data.api.mailbox ? html`<span class="pos">✓ подключён</span> — ` : html`<a href="#/settings/integrations">Подключить ящик</a> — `}поставщики присылают фактуры и WZ файлом CSV/XLSX на отдельный адрес, CRM забирает их сама.</div></div>
       <div class="stack" style="gap:6px"><b>4. Файл или копирование</b>
-        <div class="muted small">«Добавить документ» → скопируйте таблицу с сайта (Ctrl+C) и вставьте, или загрузите CSV/XLSX, скачанный из B2B хуртовни.</div></div>
+        <div class="muted small">«Добавить документ» → скопируйте таблицу с сайта (Ctrl+C) и вставьте, или загрузите CSV/XLSX, скачанный из B2B поставщика.</div></div>
     </div></div>`;
 }
 
@@ -185,7 +185,7 @@ function DocModal({ id, markup, onClose }) {
   </${Modal}>`;
 }
 
-/** Новый документ: вставка из буфера, файл, выбор хуртовни */
+/** Новый документ: вставка из буфера, файл, выбор поставщика */
 function AddDoc({ wholesalers, markup, onClose, onSaved, preset }) {
   const [supplier, setSupplier] = useState(preset?.supplier || 'other');
   const [extId, setExtId] = useState(preset?.ext_id || '');
@@ -203,11 +203,11 @@ function AddDoc({ wholesalers, markup, onClose, onSaved, preset }) {
     const r = await act(() => api('suppliers/docs', { body: { supplier, ext_id: extId || undefined, kind: preset ? 'clip' : 'paste', url: preset?.url, lines: lines.filter((_, i) => pick.includes(i)) } }), 'Документ сохранён');
     onSaved(r.id);
   };
-  return html`<${Modal} wide title="Документ от хуртовни" onClose=${onClose} foot=${lines && html`<button class="btn primary" disabled=${!pick.length} onClick=${save}>Сохранить (${pick.length} поз.) и выбрать: склад или заказ</button>`}>
-    <div class="grid g2"><label class="f">Хуртовня<select value=${supplier} onChange=${(e) => setSupplier(e.target.value)}>${wholesalers.map((w) => html`<option value=${w.key}>${w.name}</option>`)}</select></label>
+  return html`<${Modal} wide title="Документ от поставщика" onClose=${onClose} foot=${lines && html`<button class="btn primary" disabled=${!pick.length} onClick=${save}>Сохранить (${pick.length} поз.) и выбрать: склад или заказ</button>`}>
+    <div class="grid g2"><label class="f">Поставщик<select value=${supplier} onChange=${(e) => setSupplier(e.target.value)}>${wholesalers.map((w) => html`<option value=${w.key}>${w.name}</option>`)}</select></label>
       <label class="f">Номер документа (WZ, фактура, заказ)<input value=${extId} onInput=${(e) => setExtId(e.target.value)} placeholder="необязательно" /></label></div>
     ${!lines ? html`
-      <label class="f" style="margin-top:10px">Скопируйте таблицу на сайте хуртовни (выделить → Ctrl+C) и вставьте сюда<textarea rows="8" value=${text} onInput=${(e) => setText(e.target.value)} placeholder="Indeks	Nazwa	Ilość	Cena netto"></textarea></label>
+      <label class="f" style="margin-top:10px">Скопируйте таблицу на сайте поставщика (выделить → Ctrl+C) и вставьте сюда<textarea rows="8" value=${text} onInput=${(e) => setText(e.target.value)} placeholder="Indeks	Nazwa	Ilość	Cena netto"></textarea></label>
       <div class="row"><button class="btn primary" disabled=${!text.trim()} onClick=${() => parse()}>Разобрать</button>
         <label class="btn"><${Icon} n="upload" />Файл CSV / XLSX<input type="file" accept=".csv,.xlsx,.xls,.txt" hidden onChange=${(e) => e.target.files[0] && file(e.target.files[0])} /></label></div>`
       : html`<div style="margin-top:10px"><div class="row" style="margin-bottom:6px"><span class="muted small">Проверьте позиции — всё можно поправить.</span><button class="btn ghost sm" style="margin-left:auto" onClick=${() => setLines(null)}>Назад</button></div>
@@ -215,7 +215,7 @@ function AddDoc({ wholesalers, markup, onClose, onSaved, preset }) {
   </${Modal}>`;
 }
 
-/** Окно, которое открывает кнопка «В Pulsecar» с сайта хуртовни */
+/** Окно, которое открывает кнопка «В Pulsecar» с сайта поставщика */
 export function ClipPage() {
   const { data } = useData('suppliers?state=new');
   const [msg, setMsg] = useState(null);
@@ -229,7 +229,7 @@ export function ClipPage() {
     addEventListener('message', on);
     return () => removeEventListener('message', on);
   }, []);
-  if (!msg) return html`<div class="card stack"><h2>Жду данные с сайта хуртовни…</h2><div class="muted small">Это окно открывает кнопка-закладка «В Pulsecar» (Склад → Хуртовни). Если ничего не происходит, вернитесь на сайт хуртовни и нажмите закладку ещё раз.</div></div>`;
+  if (!msg) return html`<div class="card stack"><h2>Жду данные с сайта поставщика…</h2><div class="muted small">Это окно открывает кнопка-закладка «В Pulsecar» (Склад → Поставщики). Если ничего не происходит, вернитесь на сайт поставщика и нажмите закладку ещё раз.</div></div>`;
   if (!data) return html`<${Loading} />`;
   if (saved) return html`<${DocModal} id=${saved} markup=${data.markup} onClose=${() => go('/stock/suppliers')} />`;
   return html`<div class="page-head"><h1>С сайта ${msg.host}</h1></div>
@@ -237,11 +237,11 @@ export function ClipPage() {
       onClose=${() => go('/stock/suppliers')} onSaved=${setSaved} />`;
 }
 
-// ── В заказе: «Из хуртовни» ─────────────────────────────────────────────────
+// ── В заказе: «От поставщика» ─────────────────────────────────────────────────
 export function SupplierParts({ o, onClose, onAdd }) {
   const app = useApp();
   const [tab, setTab] = useState('search');
-  return html`<${Modal} wide title="Запчасти от хуртовен" onClose=${onClose}>
+  return html`<${Modal} wide title="Запчасти от поставщиков" onClose=${onClose}>
     <div class="pill-tabs" style="margin-bottom:12px">
       <button class=${tab === 'search' ? 'on' : ''} onClick=${() => setTab('search')}>Поиск цены и наличия</button>
       <button class=${tab === 'docs' ? 'on' : ''} onClick=${() => setTab('docs')}>Из поставки / фактуры</button>
@@ -275,13 +275,13 @@ function Search({ o, onAdd }) {
     toast(`Заказ в ${sup === 'hart' ? 'Hart' : 'Inter Cars'} отправлен${r.requisitionId ? ': ' + r.requisitionId : ''}`);
     setCart(cart.filter((c) => c.supplier !== sup));
   };
-  if (res && !res.connected.intercars && !res.connected.hart) return html`<div class="empty">Поиск работает с хуртовнями с API: Inter Cars и Hart. <a href="#/settings/integrations">Подключить</a>. Для остальных — вкладка «Вставить с сайта».</div>`;
+  if (res && !res.connected.intercars && !res.connected.hart) return html`<div class="empty">Поиск работает с поставщиками, у которых есть API: Inter Cars и Hart. <a href="#/settings/integrations">Подключить</a>. Для остальных — вкладка «Вставить с сайта».</div>`;
   const sups = [...new Set(cart.map((c) => c.supplier))];
   return html`
     <form class="row" onSubmit=${search}><input class="grow" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Индекс детали (OP 520, GDB1330) или код Hart" autofocus />
       <button class="btn primary" disabled=${busy}>${busy ? 'Ищу…' : 'Найти у всех'}</button></form>
     ${res?.errors?.length ? html`<div class="err small" style="margin-top:6px">${res.errors.join(' · ')}</div>` : ''}
-    ${res && (res.rows.length ? html`<table class="tbl" style="margin-top:8px"><thead><tr><th>Хуртовня</th><th>Деталь</th><th class="r">Ваша цена нетто</th><th class="r">Продажа</th><th class="r">Наличие</th><th></th></tr></thead>
+    ${res && (res.rows.length ? html`<table class="tbl" style="margin-top:8px"><thead><tr><th>Поставщик</th><th>Деталь</th><th class="r">Ваша цена нетто</th><th class="r">Продажа</th><th class="r">Наличие</th><th></th></tr></thead>
       <tbody>${res.rows.sort((a, b) => a.priceNet - b.priceNet).map((r) => html`<tr><td><b>${r.supplier === 'hart' ? 'Hart' : 'Inter Cars'}</b></td>
         <td><b>${r.index}</b> ${r.name}<div class="sub">${r.sku}</div></td><td class="r nowrap">${zl(r.priceNet)}</td><td class="r nowrap"><b>${zl(r.sellSuggested)}</b></td>
         <td class="r nowrap ${r.availability ? 'pos' : 'neg'}">${r.availability} шт.<div class="sub">${(r.locations || []).slice(0, 3).join(', ')}</div></td>
@@ -301,7 +301,7 @@ function FromDocs({ o, done }) {
   if (!id) return data.docs.length ? html`<table class="tbl"><tbody>${data.docs.slice(0, 40).map((x) => html`<tr class="click" onClick=${() => { setId(x.id); setPick(null); }}>
       <td class="nowrap">${fdate(x.doc_date)}</td><td><b>${x.supplier_name}</b></td><td>${x.ext_id}</td><td class="r">${x.lines_count} поз.</td><td class="r nowrap">${zl(x.total_net)}</td>
       <td class="small">${x.stock_number ? html`<span class="pos">на складе</span>` : 'новый'}${x.used_in ? html`<div class="sub">в ${x.used_in}</div>` : ''}</td></tr>`)}</tbody></table>`
-    : html`<div class="empty">Документов от хуртовен пока нет. Они появятся из Inter Cars/Hart, почты или кнопки «В Pulsecar».</div>`;
+    : html`<div class="empty">Документов от поставщиков пока нет. Они появятся из Inter Cars/Hart, почты или кнопки «В Pulsecar».</div>`;
   if (!d) return html`<${Loading} />`;
   const sel = pick ?? d.lines.map((_, i) => i);
   return html`<div class="row" style="margin-bottom:6px"><b>${d.supplier_name}: ${d.ext_id}</b><button class="btn ghost sm" style="margin-left:auto" onClick=${() => setId(null)}>Другой документ</button></div>
@@ -326,8 +326,8 @@ function FromPaste({ o, done }) {
     const r = await act(() => api(`suppliers/docs/${saved.id}/to-order`, { body: { order_id: o.id, toStock: false } }));
     toast(`Добавлено: ${r.added} поз.`); done();
   };
-  return html`<div class="grid g2"><label class="f">Хуртовня<select value=${supplier} onChange=${(e) => setSupplier(e.target.value)}>${data.wholesalers.map((w) => html`<option value=${w.key}>${w.name}</option>`)}</select></label></div>
-    ${!lines ? html`<label class="f" style="margin-top:8px">Скопируйте строки корзины или результата поиска на сайте хуртовни и вставьте<textarea rows="7" value=${text} onInput=${(e) => setText(e.target.value)}></textarea></label>
+  return html`<div class="grid g2"><label class="f">Поставщик<select value=${supplier} onChange=${(e) => setSupplier(e.target.value)}>${data.wholesalers.map((w) => html`<option value=${w.key}>${w.name}</option>`)}</select></label></div>
+    ${!lines ? html`<label class="f" style="margin-top:8px">Скопируйте строки корзины или результата поиска на сайте поставщика и вставьте<textarea rows="7" value=${text} onInput=${(e) => setText(e.target.value)}></textarea></label>
       <button class="btn primary" disabled=${!text.trim()} onClick=${async () => { const r = await act(() => api('suppliers/parse', { body: { text } })); setLines(r.lines); setPick(r.lines.map((_, i) => i)); }}>Разобрать</button>`
       : html`<div style="margin-top:8px"><${Lines} lines=${lines} pick=${pick} setPick=${setPick} editable setLines=${setLines} markup=${data.markup} />
         <div class="row" style="margin-top:10px"><button class="btn ghost" onClick=${() => setLines(null)}>Назад</button><button class="btn primary" style="margin-left:auto" disabled=${!pick.length} onClick=${go2}>Добавить ${pick.length} поз. в ${o.number}</button></div></div>`}`;

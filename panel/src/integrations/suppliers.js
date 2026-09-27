@@ -1,5 +1,5 @@
-// Хуртовни запчастей: каталог польских поставщиков, документы от любого из них → склад (PZ) или сразу в заказ / смету.
-// Способы получения: API (Inter Cars, Hart), кнопка «В Pulsecar» на сайте хуртовни, вставка из буфера, файл, почтовый ящик.
+// Поставщики запчастей: каталог польских поставщиков, документы от любого из них → склад (PZ) или сразу в заказ / смету.
+// Способы получения: API (Inter Cars, Hart), кнопка «В Pulsecar» на сайте поставщика, вставка из буфера, файл, почтовый ящик.
 import { all, one, run, insert, tx, ilog, getSetting } from '../db.js';
 import { HttpError, round2, today } from '../util.js';
 import { cfg, getState, setState } from './index.js';
@@ -7,7 +7,7 @@ import { createStockDoc, findOrCreateProduct } from '../stock.js';
 import { addItem, recalc, getOrder } from '../orders.js';
 import { notify } from './notify.js';
 
-/** Польские хуртовни (список как в Motowarsztat + популярные сети). api — есть прямое подключение */
+/** Польские поставщики (список как в Motowarsztat + популярные сети). api — есть прямое подключение */
 export const WHOLESALERS = [
   ['intercars', 'Inter Cars', 'intercars.com.pl', 'intercars'], ['hart', 'Hart', 'hartphp.com.pl', 'hart'], ['autopartner', 'Auto Partner', 'autopartner.com'],
   ['interteam', 'Inter-Team', 'inter-team.com.pl'], ['autoland', 'Auto Land', 'autoland.pl'], ['mekonomen', 'Mekonomen', 'mekonomen.pl'],
@@ -68,10 +68,10 @@ export function rowsToLines(rows) {
   return { lines, columns: col };
 }
 
-/** Текст, скопированный с сайта хуртовни (Ctrl+C из таблицы) → позиции */
+/** Текст, скопированный с сайта поставщика (Ctrl+C из таблицы) → позиции */
 export function parsePasted(text) {
   const raw = String(text || '').replace(/\r/g, '').split('\n').map((l) => l.trimEnd()).filter((l) => l.trim());
-  if (!raw.length) throw new HttpError(400, 'Вставьте строки из таблицы хуртовни');
+  if (!raw.length) throw new HttpError(400, 'Вставьте строки из таблицы поставщика');
   const split = (l) => (l.includes('\t') ? l.split('\t') : l.split(/\s{2,}|;/)).map((c) => c.trim());
   const first = split(raw[0]);
   const hasHeader = first.some((c) => Object.values(COLS).flat().some((n) => lc(c).includes(n))) && !first.some((c) => /\d+[.,]\d{2}/.test(c));
@@ -220,7 +220,7 @@ export async function fetchHartDocs(daysBack = 7) {
     if (docs.length < 50) break;
   }
   setState(HART, { lastSync: new Date().toISOString(), lastError: null });
-  if (created) notify('supplier', `Hart: ${created} новых документов — Склад → Хуртовни`);
+  if (created) notify('supplier', `Hart: ${created} новых документов — Склад → Поставщики`);
   if (created && c.autoReceive) for (const d of all(`SELECT id FROM supplier_docs WHERE supplier = 'hart' AND stock_doc_id IS NULL`)) { try { receiveGeneric(d.id, 'авто'); } catch {} }
   return { created, kind };
 }
@@ -260,7 +260,7 @@ export async function orderHart(lines) {
   return { orders: (r?.value || []).map((v) => v.orderId), positions: ids.length };
 }
 
-// ── Почтовый ящик для документов (IMAP): вложения CSV/XLSX от любых хуртовен ────
+// ── Почтовый ящик для документов (IMAP): вложения CSV/XLSX от любых поставщиков ────
 export async function checkMailbox() {
   const c = cfg('mailbox');
   if (!c) return { created: 0 };
@@ -270,7 +270,7 @@ export async function checkMailbox() {
   const client = new ImapFlow({ host: c.host, port: Number(c.port) || 993, secure: Number(c.port || 993) === 993, auth: { user: c.user, pass: c.pass }, logger: false });
   await client.connect();
   let created = 0;
-  const rules = String(c.rules || '').split('\n').map((l) => l.split('=').map((x) => x.trim())).filter(([a, b]) => a && b); // адрес/домен = ключ хуртовни
+  const rules = String(c.rules || '').split('\n').map((l) => l.split('=').map((x) => x.trim())).filter(([a, b]) => a && b); // адрес/домен = ключ поставщика
   try {
     const lock = await client.getMailboxLock(c.folder || 'INBOX');
     try {
@@ -292,7 +292,7 @@ export async function checkMailbox() {
     } finally { lock.release(); }
   } finally { await client.logout().catch(() => {}); }
   setState('mailbox', { lastSync: new Date().toISOString(), lastError: null });
-  if (created) notify('supplier', `Почта: ${created} новых документов от хуртовен — Склад → Хуртовни`);
+  if (created) notify('supplier', `Почта: ${created} новых документов от поставщиков — Склад → Поставщики`);
   return { created };
 }
 export async function testMailbox() {

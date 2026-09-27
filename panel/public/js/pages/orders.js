@@ -221,7 +221,7 @@ function Items({ o, reload }) {
     </div>
     <div class="card tight">
       <div class="row" style="padding:12px 14px"><h2 style="margin:0">Запчасти</h2>
-        ${!mech && html`<button class="btn sm" style="margin-left:auto" onClick=${() => setIc(true)}><${Icon} n="box" />Из хуртовни</button>`}
+        ${!mech && html`<button class="btn sm" style="margin-left:auto" onClick=${() => setIc(true)}><${Icon} n="box" />От поставщика</button>`}
         ${!mech && html`<div class="grow" style="max-width:520px"><${Picker} placeholder="+ Со склада (название, индекс) или новая позиция…" path=${(q) => 'products?q=' + encodeURIComponent(q)}
           render=${(p) => html`<b>${p.name}</b> <span class="sub">${p.code || ''} · в наличии ${num(p.stock - p.reserved, 2)} ${p.unit} · ${zl(p.sell_price)}</span>`}
           onPick=${(p) => add({ kind: 'part', product_id: p.id, name: p.name, code: p.code, qty: 1, unit: p.unit, price: p.sell_price, vat: p.vat, discount: discP })}

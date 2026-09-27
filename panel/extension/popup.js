@@ -1,4 +1,4 @@
-// Окно расширения: состояние подключения, версия и обновления, хуртовня на текущей вкладке
+// Окно расширения: состояние подключения, версия и обновления, поставщик на текущей вкладке
 const $ = (id) => document.getElementById(id);
 const send = (m) => new Promise((ok) => chrome.runtime.sendMessage(m, ok));
 const BUILTIN = chrome.runtime.getManifest().content_scripts.find((c) => c.js.includes('content.js')).matches;
@@ -20,7 +20,7 @@ function render(st) {
   note.innerHTML = '';
   if (!st?.connected) {
     chip.className = 'bad'; chip.textContent = 'Не подключено';
-    note.innerHTML = `<div class="msg bad">${st?.needSetup ? 'Откройте CRM → Склад → Хуртовни и нажмите «Подключить расширение».' : (st?.error || 'CRM не отвечает.')}</div>`;
+    note.innerHTML = `<div class="msg bad">${st?.needSetup ? 'Откройте CRM → Склад → Поставщики и нажмите «Подключить расширение».' : (st?.error || 'CRM не отвечает.')}</div>`;
   } else if (st.update) {
     chip.className = 'warn'; chip.textContent = 'Есть обновление';
     note.innerHTML = `<div class="msg warn">Вышла версия ${st.latest}. <a class="btn" style="display:inline-block;padding:3px 8px;margin-left:4px" href="${st.panel}/pulsecar-extension.zip" target="_blank">Скачать</a></div>`;
@@ -39,7 +39,7 @@ async function tabInfo() {
   const own = sites.includes(origin);
   const name = (NAMES.find(([re]) => re.test(u.hostname)) || [])[1];
   $('tabdot').className = builtin || own ? 'on' : '';
-  $('tabname').textContent = builtin ? `${name || u.hostname}: кнопка работает` : own ? `${u.hostname}: кнопка включена вами` : `${u.hostname}: хуртовни нет в списке`;
+  $('tabname').textContent = builtin ? `${name || u.hostname}: кнопка работает` : own ? `${u.hostname}: кнопка включена вами` : `${u.hostname}: поставщика нет в списке`;
   $('capture').onclick = async () => {
     $('capture').disabled = true;
     const r = await send({ type: 'capture', tabId: tab.id, mode: 'page' });

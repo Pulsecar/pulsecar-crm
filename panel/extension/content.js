@@ -1,5 +1,5 @@
-// Pulsecar в хуртовне: кнопка у каждой детали (Inter Cars и др.) + сбор таблицы/выделения с любой страницы.
-// Окно «Pobierz do Pulsecar»: товар в картотеку, приход на склад, в заказ или смету — цена продажи = рекомендованная хуртовней.
+// Pulsecar на сайте поставщика: кнопка у каждой детали (Inter Cars и др.) + сбор таблицы/выделения с любой страницы.
+// Окно «Pobierz do Pulsecar»: товар в картотеку, приход на склад, в заказ или смету — цена продажи = рекомендованная поставщиком.
 (() => {
   if (window.__pulsecar) return;
   window.__pulsecar = true;
@@ -212,7 +212,7 @@
           <div class="opt"><label><input type="checkbox" id="asDoc" ${docOn ? 'checked' : ''} ${can.docs ? '' : 'disabled'}>Документ поставщика</label>
             <div class="docf"><select id="dkind">${KIND.map(([k, l]) => `<option value="${k}" ${k === (doc.kind || 'invoice') ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <input class="i" id="dnum" placeholder="номер документа" value="${esc(doc.number)}"><input class="i" id="ddate" type="date" value="${esc(doc.date)}"></div></div>
-          <div class="opt"><label><input type="checkbox" id="product" checked ${can.product || can.stock ? '' : 'disabled'}>Создать товар в картотеке</label><span class="sub">цена продажи = рекомендованная хуртовни</span></div>
+          <div class="opt"><label><input type="checkbox" id="product" checked ${can.product || can.stock ? '' : 'disabled'}>Создать товар в картотеке</label><span class="sub">цена продажи = рекомендованная цена поставщика</span></div>
           <div class="opt"><label><input type="checkbox" id="stock" ${can.stock ? '' : 'disabled'}>Оприходовать на склад (PZ)</label><span class="sub">когда деталь уже приехала</span></div>
           <div class="opt"><label><input type="checkbox" id="toOrder" ${can.order && orders.length ? '' : 'disabled'}>Добавить в заказ</label><select id="order">${optList(orders, last.lastOrder) || '<option value="">нет открытых заказов</option>'}</select></div>
           <div class="opt"><label><input type="checkbox" id="toQuote" ${can.quote && quotes.length ? '' : 'disabled'}>Добавить в смету</label><select id="quote">${optList(quotes, last.lastQuote) || '<option value="">нет открытых смет</option>'}</select></div>
@@ -255,7 +255,7 @@
       chrome.storage.local.set({ lastOrder: body.order_id || last.lastOrder || '', lastQuote: body.quote_id || last.lastQuote || '' });
       const d = r.data;
       const link = (hash, label) => `<a href="${r.panel}/#${hash}" target="_blank">${esc(label)}</a>`;
-      $('msg').innerHTML = `<div class="ok">Готово: ${[d.kind ? `${esc(d.kind)} ${esc(d.number || '')} сохранён(а) — ${link('/stock/suppliers', 'Склад → Хуртовни')}` : '', d.products ? `товаров в картотеке: ${d.products}` : '', d.stock ? `приход ${esc(d.stock)}` : '',
+      $('msg').innerHTML = `<div class="ok">Готово: ${[d.kind ? `${esc(d.kind)} ${esc(d.number || '')} сохранён(а) — ${link('/stock/suppliers', 'Склад → Поставщики')}` : '', d.products ? `товаров в картотеке: ${d.products}` : '', d.stock ? `приход ${esc(d.stock)}` : '',
         d.order ? `в заказе ${link('/orders/' + body.order_id, d.order)}` : '', d.quote ? `в смете ${link('/quotes/' + body.quote_id, d.quote)}` : ''].filter(Boolean).join(' · ')}</div>`;
       $('go').textContent = 'Добавлено ✓';
       $('go').disabled = true;

@@ -1,5 +1,5 @@
 // Pulsecar: фон расширения — запросы к CRM с ключом сотрудника (без CORS), проверка обновлений,
-// сайты хуртовен, включённые пользователем, и меню по правому клику.
+// сайты поставщиков, включённые пользователем, и меню по правому клику.
 const DEF_PANEL = 'https://panel.pulsecar.tech';
 const VERSION = chrome.runtime.getManifest().version;
 
@@ -10,7 +10,7 @@ async function conf() {
 
 async function api(path, { method = 'GET', body, anon = false } = {}) {
   const c = await conf();
-  if (!c.token && !anon) return { error: 'Расширение не подключено к CRM: откройте CRM → Склад → Хуртовни → «Подключить расширение».', needSetup: true };
+  if (!c.token && !anon) return { error: 'Расширение не подключено к CRM: откройте CRM → Склад → Поставщики → «Подключить расширение».', needSetup: true };
   try {
     const r = await fetch(`${c.panel}/crm-api/${path}`, {
       method,
@@ -48,7 +48,7 @@ async function check() {
   return st;
 }
 
-// ── сайты, где пользователь включил кнопку сам (любая хуртовня, которой нет в списке) ──
+// ── сайты, где пользователь включил кнопку сам (любой поставщик, которого нет в списке) ──
 async function syncSites() {
   const { sites = [] } = await chrome.storage.sync.get('sites');
   const reg = await chrome.scripting.getRegisteredContentScripts({ ids: ['pulsecar-sites'] }).catch(() => []);

@@ -8,13 +8,13 @@ export default function Stock({ sub, id }) {
   return html`
     <div class="page-head"><h1>Склад</h1>
       <div class="actions"><a class="btn" href="#/stock/writeoff">Списание</a><a class="btn" href="#/stock/receive"><${Icon} n="plus" />Приход вручную</a>
-        <a class="btn primary" href="#/stock/suppliers"><${Icon} n="upload" />От хуртовен</a></div></div>
+        <a class="btn primary" href="#/stock/suppliers"><${Icon} n="upload" />От поставщиков</a></div></div>
     <div class="pill-tabs" style="margin-bottom:14px">
       <button class=${tab === 'products' ? 'on' : ''} onClick=${() => go('/stock')}>Товары</button>
       <button class=${tab === 'docs' ? 'on' : ''} onClick=${() => go('/stock/docs')}>Документы</button>
       <button class=${tab === 'receive' ? 'on' : ''} onClick=${() => go('/stock/receive')}>Приход (PZ)</button>
       <button class=${tab === 'writeoff' ? 'on' : ''} onClick=${() => go('/stock/writeoff')}>Списание (RW)</button>
-      <button class=${tab === 'suppliers' ? 'on' : ''} onClick=${() => go('/stock/suppliers')}>Хуртовни</button>
+      <button class=${tab === 'suppliers' ? 'on' : ''} onClick=${() => go('/stock/suppliers')}>Поставщики</button>
     </div>
     ${tab === 'products' && html`<${Products} openId=${sub === 'product' ? id : null} />`}
     ${tab === 'docs' && html`<${Docs} openId=${id} />`}

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Pulsecar — запчасти из хуртовни",
+  "name": "Pulsecar — запчасти от поставщика",
   "short_name": "Pulsecar",
   "version": "1.1.0",
-  "description": "Кнопка «Pulsecar» в хуртовнях: запчасть сразу в заказ, смету или на склад, фактуры и WZ — в приход CRM Pulsecar.",
+  "description": "Кнопка «Pulsecar» на сайтах поставщиков: запчасть сразу в заказ, смету или на склад, фактуры и WZ — в приход CRM Pulsecar.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

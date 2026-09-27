@@ -214,7 +214,7 @@ function Expenses({ q }) {
     </div>
     <div class="grid g2">
       <div class="card"><h2>Статьи расходов</h2><${HBars} rows=${e.byCategory} value=${(r) => r.net} label=${(r) => r.category + (r.inventory ? ' (товар)' : '')} sub=${(r) => ` ${r.n} док.`} fmt=${zl} color=${SERIES[1]} /></div>
-      <div class="card"><h2>Приходы от хуртовен (PZ)</h2><${HBars} rows=${e.bySupplier} value=${(r) => r.net} label=${(r) => r.supplier} sub=${(r) => ` ${r.n} док.`} fmt=${zl} color=${SERIES[0]} /></div>
+      <div class="card"><h2>Приходы от поставщиков (PZ)</h2><${HBars} rows=${e.bySupplier} value=${(r) => r.net} label=${(r) => r.supplier} sub=${(r) => ` ${r.n} док.`} fmt=${zl} color=${SERIES[0]} /></div>
     </div>
     <div class="muted small">Статьи — Настройки → Справочники. Статьи со словами «części», «materiały», «towar» считаются закупкой товара и не уменьшают прибыль второй раз (себестоимость запчастей уже учтена в заказах).</div>
   </div>`;
