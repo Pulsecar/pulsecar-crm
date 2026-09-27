@@ -1,0 +1,16 @@
+# Caddy сам получает сертификаты Let's Encrypt. Замените 127.0.0.1:8080 на порт, где сейчас работает панель бота.
+
+panel.pulsecar.tech {
+	reverse_proxy 127.0.0.1:3100
+}
+
+# Панель бота Instagram/TikTok — только для вошедших в CRM (общий вход)
+marketing.pulsecar.tech {
+	forward_auth 127.0.0.1:3100 {
+		uri /crm-api/auth-check?redirect=1
+		copy_headers X-Pulsecar-User
+	}
+	reverse_proxy 127.0.0.1:8080
+	header -X-Frame-Options
+	header Content-Security-Policy "frame-ancestors https://panel.pulsecar.tech"
+}

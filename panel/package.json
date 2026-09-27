@@ -1,0 +1,28 @@
+{
+  "name": "pulsecar-panel",
+  "version": "1.0.0",
+  "description": "Pulsecar Panel: CRM мастерской, кабинет клиента, Pulse Points, API приложения",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js",
+    "test": "node --disable-warning=ExperimentalWarning test/e2e.mjs && node --disable-warning=ExperimentalWarning test/integrations.mjs && node --disable-warning=ExperimentalWarning test/messaging.mjs",
+    "test:integrations": "node --disable-warning=ExperimentalWarning test/integrations.mjs"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "htm": "^3.1.1",
+    "html5-qrcode": "^2.3.8",
+    "multer": "^2.4.0",
+    "nodemailer": "^10.0.11",
+    "preact": "^10.29.8",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "devDependencies": {
+    "js-sha256": "^1.0.0"
+  }
+}

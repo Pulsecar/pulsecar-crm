@@ -1,0 +1,516 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { config } from './config.js';
+
+mkdirSync(dirname(config.dbPath), { recursive: true });
+export const db = new DatabaseSync(config.dbPath);
+
+db.exec(`
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+-- ── Клиенты и авто ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY,
+  phone TEXT UNIQUE,
+  crm_id TEXT UNIQUE,              -- ID во внешней системе (Motowarsztat и т. п.)
+  name TEXT,
+  company TEXT, nip TEXT,
+  email TEXT,
+  street TEXT, postcode TEXT, city TEXT,
+  notes TEXT,
+  discount_labor REAL NOT NULL DEFAULT 0,
+  discount_parts REAL NOT NULL DEFAULT 0,
+  marketing_consent INTEGER NOT NULL DEFAULT 1,
+  card_no TEXT UNIQUE NOT NULL,
+  registered_at TEXT,              -- когда клиент впервые вошёл в приложение
+  welcome_given INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cars (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  car_key TEXT NOT NULL,           -- VIN или номер без пробелов
+  plate TEXT, vin TEXT, make TEXT, model TEXT, year TEXT,
+  engine TEXT, capacity INTEGER, power_kw INTEGER, fuel TEXT, color TEXT,
+  last_mileage INTEGER,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS cars_customer ON cars(customer_id);
+CREATE INDEX IF NOT EXISTS cars_key ON cars(car_key);
+
+-- ── Справочники мастерской ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS staff (
+  id INTEGER PRIMARY KEY,
+  login TEXT UNIQUE,
+  name TEXT NOT NULL,
+  pass_hash TEXT,
+  role TEXT NOT NULL DEFAULT 'staff',   -- admin | staff | mechanic
+  color TEXT,
+  hourly_rate REAL NOT NULL DEFAULT 0,  -- ставка за нормо-час (RH)
+  commission_pct REAL NOT NULL DEFAULT 0, -- % от работ в заказах
+  is_mechanic INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS stations (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT, pos INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS order_statuses (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT, pos INTEGER NOT NULL DEFAULT 0,
+  is_final INTEGER NOT NULL DEFAULT 0,       -- заказ завершён
+  lock_edit INTEGER NOT NULL DEFAULT 0,
+  notify_client INTEGER NOT NULL DEFAULT 0,  -- SMS + push в приложении
+  client_label TEXT                          -- как статус видит клиент в приложении и SMS (по-польски)
+);
+
+CREATE TABLE IF NOT EXISTS order_types (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, pos INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS service_catalog (
+  id INTEGER PRIMARY KEY, category TEXT, name TEXT NOT NULL, unit TEXT NOT NULL DEFAULT 'oper',
+  qty REAL NOT NULL DEFAULT 1, price REAL NOT NULL DEFAULT 0, vat REAL NOT NULL DEFAULT 23
+);
+
+CREATE TABLE IF NOT EXISTS counters (key TEXT PRIMARY KEY, n INTEGER NOT NULL);
+
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+
+-- ── Заказы и сметы ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'order',     -- order | quote
+  number TEXT UNIQUE NOT NULL,            -- ZL 12/09/2026, WY 3/09/2026 или номер из импорта
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  car_id INTEGER REFERENCES cars(id) ON DELETE SET NULL,
+  status_id INTEGER REFERENCES order_statuses(id),
+  type_id INTEGER REFERENCES order_types(id),
+  mechanic_id INTEGER REFERENCES staff(id),
+  mileage INTEGER,
+  fuel_level TEXT,
+  complaint TEXT,                         -- описание от клиента
+  internal_note TEXT,
+  mechanic_note TEXT,
+  flags TEXT,                             -- JSON: return_parts, reg_doc, test_drive ...
+  pickup_at TEXT,
+  total REAL NOT NULL DEFAULT 0,          -- брутто
+  total_net REAL NOT NULL DEFAULT 0,
+  cost REAL NOT NULL DEFAULT 0,           -- себестоимость запчастей
+  paid REAL NOT NULL DEFAULT 0,
+  source TEXT,                            -- crm | app | import
+  quote_id INTEGER REFERENCES orders(id), -- смета, из которой создан заказ
+  invoice_no TEXT, invoice_ext_id TEXT, invoice_url TEXT, receipt_no TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS orders_car ON orders(car_id);
+CREATE INDEX IF NOT EXISTS orders_created ON orders(created_at);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                     -- labor | part
+  name TEXT NOT NULL,
+  code TEXT,
+  product_id INTEGER REFERENCES products(id),
+  mechanic_id INTEGER REFERENCES staff(id),
+  qty REAL NOT NULL DEFAULT 1,
+  unit TEXT,
+  price REAL NOT NULL DEFAULT 0,          -- цена за единицу, брутто
+  cost REAL NOT NULL DEFAULT 0,           -- закупочная, за единицу
+  discount REAL NOT NULL DEFAULT 0,       -- %
+  vat REAL NOT NULL DEFAULT 23,
+  done INTEGER NOT NULL DEFAULT 0,
+  pos INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS items_order ON order_items(order_id);
+
+-- ── Терминарз ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS appointments (
+  id INTEGER PRIMARY KEY,
+  station_id INTEGER REFERENCES stations(id) ON DELETE SET NULL,  -- NULL = не распределено
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  car_id INTEGER REFERENCES cars(id) ON DELETE SET NULL,
+  mechanic_id INTEGER REFERENCES staff(id),
+  title TEXT,
+  note TEXT,
+  start_at TEXT,                          -- 'YYYY-MM-DD HH:MM', NULL для заявок без времени
+  duration_min INTEGER NOT NULL DEFAULT 60,
+  status TEXT NOT NULL DEFAULT 'planned', -- request | planned | arrived | no_show | cancelled
+  source TEXT,                            -- crm | app | site | phone
+  contact_name TEXT, contact_phone TEXT,  -- для заявок от новых людей
+  preferred TEXT,                         -- пожелание по времени из заявки
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS appt_start ON appointments(start_at);
+
+-- ── Склад ──────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  code TEXT,                              -- индекс / артикул
+  manufacturer TEXT,
+  unit TEXT NOT NULL DEFAULT 'szt.',
+  stock REAL NOT NULL DEFAULT 0,
+  min_stock REAL NOT NULL DEFAULT 0,
+  purchase_price REAL NOT NULL DEFAULT 0, -- нетто, последняя закупка
+  sell_price REAL NOT NULL DEFAULT 0,     -- брутто
+  vat REAL NOT NULL DEFAULT 23,
+  location TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS products_code ON products(code);
+
+CREATE TABLE IF NOT EXISTS stock_docs (
+  id INTEGER PRIMARY KEY,
+  type TEXT NOT NULL,                     -- PZ приход | WZ выдача | RW списание | PW оприходование
+  number TEXT UNIQUE NOT NULL,
+  ext_number TEXT,                        -- номер документа поставщика
+  counterparty TEXT,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  doc_date TEXT NOT NULL,
+  note TEXT,
+  total_net REAL NOT NULL DEFAULT 0,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS stock_doc_items (
+  id INTEGER PRIMARY KEY,
+  doc_id INTEGER NOT NULL REFERENCES stock_docs(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  qty REAL NOT NULL,
+  price_net REAL NOT NULL DEFAULT 0
+);
+
+-- ── Закупки (фактуры поставщиков) ──────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS purchases (
+  id INTEGER PRIMARY KEY,
+  supplier TEXT NOT NULL, number TEXT, category TEXT, description TEXT,
+  doc_date TEXT, due_date TEXT,
+  net REAL NOT NULL DEFAULT 0, gross REAL NOT NULL DEFAULT 0, paid REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ── Касса и оплаты ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY,
+  number TEXT,                            -- KP/KW для наличных
+  direction TEXT NOT NULL DEFAULT 'in',   -- in | out
+  method TEXT NOT NULL,                   -- cash | card | transfer | points
+  amount REAL NOT NULL,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  note TEXT,
+  staff TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ── Хранение шин ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS storage (
+  id INTEGER PRIMARY KEY,
+  number TEXT UNIQUE NOT NULL,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  car_id INTEGER REFERENCES cars(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL DEFAULT 'opony',     -- opony | koła
+  description TEXT,                       -- размер, марка, DOT, состояние
+  qty INTEGER NOT NULL DEFAULT 4,
+  location TEXT,
+  date_in TEXT NOT NULL,
+  date_until TEXT,
+  date_out TEXT,
+  price REAL NOT NULL DEFAULT 0,
+  note TEXT
+);
+
+-- ── Приложение и лояльность ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  token_hash TEXT UNIQUE NOT NULL,
+  qr_secret TEXT NOT NULL,
+  device TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen TEXT,
+  revoked INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS otp (
+  phone TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0, sent_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,          -- earn | redeem | bonus | adjust
+  points INTEGER NOT NULL,
+  amount_pln REAL,
+  order_no TEXT,
+  source TEXT,                 -- scan | crm | order | app | admin
+  staff TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tx_earn_order ON transactions(order_no) WHERE type = 'earn' AND order_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS tx_customer ON transactions(customer_id);
+
+CREATE TABLE IF NOT EXISTS used_qr (
+  card_no TEXT NOT NULL, step INTEGER NOT NULL, used_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (card_no, step)
+);
+
+-- ── Служебное ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS imports (
+  id INTEGER PRIMARY KEY, filename TEXT, staff TEXT, stats TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS activity (
+  id INTEGER PRIMARY KEY, entity TEXT, entity_id INTEGER, action TEXT, details TEXT, staff TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS activity_entity ON activity(entity, entity_id);
+`);
+
+/** Выполнить функцию в транзакции (вложенные вызовы — без повторного BEGIN) */
+let depth = 0;
+export function tx(fn) {
+  if (depth > 0) return fn();
+  depth++;
+  db.exec('BEGIN');
+  try {
+    const r = fn();
+    db.exec('COMMIT');
+    return r;
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  } finally {
+    depth--;
+  }
+}
+
+export const one = (sql, ...p) => db.prepare(sql).get(...p);
+export const all = (sql, ...p) => db.prepare(sql).all(...p);
+export const run = (sql, ...p) => db.prepare(sql).run(...p);
+export const insert = (table, obj) => {
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined);
+  const r = run(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`, ...keys.map((k) => obj[k] ?? null));
+  return Number(r.lastInsertRowid);
+};
+export const update = (table, id, obj) => {
+  const keys = Object.keys(obj).filter((k) => obj[k] !== undefined);
+  if (!keys.length) return;
+  run(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, ...keys.map((k) => obj[k] ?? null), id);
+};
+
+export function log(entity, entityId, action, details, staff) {
+  run('INSERT INTO activity (entity, entity_id, action, details, staff) VALUES (?, ?, ?, ?, ?)', entity, entityId, action,
+    typeof details === 'string' ? details : JSON.stringify(details ?? null), staff ?? null);
+}
+
+export const getSetting = (k, d = null) => one('SELECT value FROM settings WHERE key = ?', k)?.value ?? d;
+export const setSetting = (k, v) => run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, v);
+
+
+// ── Интеграции и миграции (безопасно для уже работающей базы) ────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS integrations (
+  key TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  config TEXT NOT NULL DEFAULT '{}',
+  state TEXT NOT NULL DEFAULT '{}',        -- служебное: токены доступа, время последней синхронизации
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS supplier_docs (
+  id INTEGER PRIMARY KEY,
+  supplier TEXT NOT NULL,                  -- intercars | file
+  kind TEXT NOT NULL,                      -- delivery | invoice | order | file
+  ext_id TEXT NOT NULL,
+  doc_date TEXT,
+  total_net REAL, total_gross REAL,
+  lines_count INTEGER,
+  raw TEXT,                                -- JSON документа поставщика
+  stock_doc_id INTEGER REFERENCES stock_docs(id) ON DELETE SET NULL,
+  fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (supplier, kind, ext_id)
+);
+CREATE TABLE IF NOT EXISTS integration_log (
+  id INTEGER PRIMARY KEY, key TEXT, level TEXT, message TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
+function addColumn(table, col, def) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+addColumn('products', 'supplier_sku', 'TEXT');       // SKU Inter Cars (например ADDFFF)
+addColumn('products', 'ean', 'TEXT');
+addColumn('products', 'supplier', 'TEXT');
+addColumn('orders', 'pay_link', 'TEXT');
+addColumn('orders', 'pay_ext_id', 'TEXT');
+addColumn('orders', 'review_sent', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('appointments', 'reminded', 'INTEGER NOT NULL DEFAULT 0');
+// SMS/e-mail по статусам (как в Motowarsztat: при смене статуса — окно с готовой SMS)
+addColumn('order_statuses', 'sms_mode', "TEXT NOT NULL DEFAULT 'off'");   // off | ask | auto
+addColumn('order_statuses', 'sms_template', 'TEXT');
+addColumn('order_statuses', 'email_mode', "TEXT NOT NULL DEFAULT 'off'");
+addColumn('order_statuses', 'email_template', 'TEXT');
+// Электронная карта заказа (ссылка для клиента с кнопкой «Akceptuję»)
+addColumn('orders', 'card_token', 'TEXT');
+addColumn('orders', 'accepted_at', 'TEXT');
+addColumn('orders', 'accepted_via', 'TEXT');
+addColumn('orders', 'accept_code', 'TEXT');
+addColumn('orders', 'accept_code_exp', 'INTEGER');
+// Данные авто из техпаспорта (Aztec) и по номеру
+for (const [c, t] of [['first_reg', 'TEXT'], ['engine_no', 'TEXT'], ['category', 'TEXT'], ['mass_kg', 'INTEGER'], ['seats', 'INTEGER'],
+  ['reg_doc', 'TEXT'], ['inspection_until', 'TEXT'], ['insurance_until', 'TEXT'], ['key_no', 'TEXT'], ['paint_code', 'TEXT'], ['vehicle_type', 'TEXT']]) addColumn('cars', c, t);
+db.exec(`CREATE TABLE IF NOT EXISTS sms_log (
+  id INTEGER PRIMARY KEY, phone TEXT NOT NULL, customer_id INTEGER, order_id INTEGER,
+  kind TEXT, text TEXT NOT NULL, provider TEXT, status TEXT NOT NULL,   -- sent | failed | logged (нет провайдера)
+  ext_id TEXT, error TEXT, staff TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS sms_log_created ON sms_log(created_at)');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS orders_card_token ON orders(card_token)');
+db.exec('CREATE INDEX IF NOT EXISTS products_sku ON products(supplier_sku)');
+db.exec('CREATE INDEX IF NOT EXISTS products_ean ON products(ean)');
+
+export function ilog(key, level, message) {
+  run('INSERT INTO integration_log (key, level, message) VALUES (?, ?, ?)', key, level, String(message).slice(0, 1000));
+  run(`DELETE FROM integration_log WHERE id < (SELECT MAX(id) - 500 FROM integration_log)`);
+}
+
+// ── Начальные данные (как настроено сейчас в мастерской) ───────────────────
+function seed() {
+  if (!one('SELECT 1 FROM order_statuses')) {
+    const st = [
+      ['Новый заказ', '#9A9CA3', 0, 0, 0, 'Przyjęte'],
+      ['Согласование с клиентом', '#F5C451', 0, 0, 1, 'Czekamy na Twoją akceptację'],
+      ['Готов к приёму', '#1BF372', 0, 0, 0, 'Czekamy na Ciebie'],
+      ['В ремонте', '#FF9F43', 0, 0, 1, 'W naprawie'],
+      ['Работы выполнены', '#7BD88F', 0, 0, 0, 'Prace wykonane'],
+      ['Ожидает оценки', '#E8C547', 0, 0, 0, 'Przygotowujemy wycenę'],
+      ['Готов к выдаче', '#5BA8FF', 0, 0, 1, 'Gotowe do odbioru'],
+      ['Завершён', '#8A8D94', 1, 1, 0, 'Zakończone'],
+      ['Клиент не приехал', '#FF5A5A', 1, 0, 0, 'Anulowane'],
+    ];
+    st.forEach(([name, color, fin, lock, notify, label], i) =>
+      run('INSERT INTO order_statuses (name, color, pos, is_final, lock_edit, notify_client, client_label) VALUES (?, ?, ?, ?, ?, ?, ?)', name, color, i + 1, fin, lock, notify, label));
+  }
+  if (!one('SELECT 1 FROM order_types')) {
+    ['Sarafanka', 'Facebook', 'Lid site', 'Telegram', 'Instagram', 'Stały', 'Lid', 'Приложение'].forEach((n, i) => run('INSERT INTO order_types (name, pos) VALUES (?, ?)', n, i + 1));
+  }
+  if (!one('SELECT 1 FROM staff WHERE is_mechanic = 1')) {
+    // механики из Motowarsztat: ставка за н/ч и 40% от работ
+    [['Dima Stagor', 250, 1], ['Aleksey Pril', 250, 1], ['Andrei Prikota', 200, 1], ['Владислав (ст. механик)', 250, 1], ['Виталик (стажёр)', 250, 0]]
+      .forEach(([n, rate, act]) => run(`INSERT INTO staff (name, role, hourly_rate, commission_pct, is_mechanic, active) VALUES (?, 'mechanic', ?, 40, 1, ?)`, n, rate, act));
+  }
+  if (!one('SELECT 1 FROM stations')) {
+    [['1 Подъёмник / развал', '#1BF372'], ['2 Подъёмник', '#5BA8FF'], ['3 Подъёмник', '#F5C451'], ['4 Подъёмник', '#FF9F43'], ['Кондиционер', '#B388FF']]
+      .forEach(([n, c], i) => run('INSERT INTO stations (name, color, pos) VALUES (?, ?, ?)', n, c, i + 1));
+  }
+  if (!one('SELECT 1 FROM service_catalog')) {
+    // прайс с pulsecar.pl (цены «от»)
+    [
+      ["Diagnostyka", "Diagnostyka komputerowa", 100],
+      ["Diagnostyka", "Diagnostyka zawieszenia", 100],
+      ["Diagnostyka", "Przegląd przed zakupem", 300],
+      ["Diagnostyka", "Przegląd rozszerzony", 250],
+      ["Geometria kół", "Ustawienie geometrii — 1 oś", 150],
+      ["Geometria kół", "Ustawienie geometrii — 2 osie", 300],
+      ["Wulkanizacja", "Wymiana opon R14", 180],
+      ["Wulkanizacja", "Wymiana opon R15", 200],
+      ["Wulkanizacja", "Wymiana opon R16", 220],
+      ["Wulkanizacja", "Wymiana opon R17", 240],
+      ["Wulkanizacja", "Wymiana opon R18", 260],
+      ["Wulkanizacja", "Wymiana opon R19", 280],
+      ["Wulkanizacja", "Wymiana opon R20", 300],
+      ["Wulkanizacja", "Wymiana opon R21", 320],
+      ["Wulkanizacja", "Przechowywanie opon — 1 sezon", 200],
+      ["Klimatyzacja", "Napełnianie klimatyzacji i sprawdzanie próżni", 199],
+      ["Klimatyzacja", "Freon 100 g — R134a", 40],
+      ["Klimatyzacja", "Freon 100 g — R1234yf", 40],
+      ["Serwis", "Wymiana oleju i filtra oleju", 120],
+      ["Serwis", "Wymiana filtra powietrznego", 40],
+      ["Serwis", "Wymiana filtra kabinowego", 40],
+      ["Serwis", "Wymiana filtra paliwa", 40],
+      ["Serwis", "Wymiana żarówki", 30],
+      ["Hamulce", "Wymiana klocków hamulcowych (przód)", 200],
+      ["Hamulce", "Wymiana klocków hamulcowych (tył)", 250],
+      ["Hamulce", "Wymiana klocków i tarcz (przód)", 300],
+      ["Hamulce", "Wymiana klocków i tarcz (tył)", 350],
+      ["Hamulce", "Wymiana płynu hamulcowego", 200],
+      ["Serwis", "Wymiana płynu chłodzącego", 200],
+      ["Zawieszenie", "Wymiana łącznika stabilizatora", 100],
+      ["Zawieszenie", "Wymiana amortyzatora (przód)", 200],
+      ["Zawieszenie", "Wymiana wahacza", 200],
+      ["Układ kierowniczy", "Wymiana końcówki drążka kierowniczego", 150],
+      ["Silnik", "Wymiana poduszki silnika", 150],
+      ["Napęd", "Wymiana półosi", 250],
+      ["Skrzynia biegów", "Wymiana oleju w skrzyni automatycznej", 400],
+      ["Skrzynia biegów", "Wymiana oleju w skrzyni manualnej", 200],
+      ["Skrzynia biegów", "Wymiana sprzęgła", 600],
+      ["Skrzynia biegów", "Wymiana skrzyni automatycznej", 800],
+      ["Silnik", "Wymiana turbosprężarki", 600],
+      ["Silnik", "Wymiana paska rozrządu", 600],
+      ["Silnik", "Wymiana łańcucha rozrządu", 1000],
+      ["Silnik", "Wymiana uszczelki głowicy", 1000],
+      ["Silnik", "Wymiana silnika", 2000],
+      ["Silnik", "Diagnostyka endoskopowa silnika", 300],
+      ["Silnik", "Czyszczenie kanałów dolotowych (łupina orzecha)", 0],
+    ].forEach(([c, n, p]) => run('INSERT INTO service_catalog (category, name, price) VALUES (?, ?, ?)', c, n, p));
+  }
+  if (!one('SELECT 1 FROM settings')) {
+    const s = {
+      company_name: 'AI CARS sp. z o.o.', company_brand: 'Pulsecar', company_address: 'ul. Arkuszowa 176, 01-935 Warszawa',
+      company_phone: '+48 571 058 591', company_email: 'admin@pulsecar.pl', company_nip: '',
+      hours_start: '09:00', hours_end: '18:00', slot_min: '30', default_vat: '23', labor_unit: 'oper',
+    };
+    for (const [k, v] of Object.entries(s)) setSetting(k, v);
+  }
+}
+seed();
+seedMessaging();
+
+// Шаблоны SMS и e-mail — перенесены из Motowarsztat (Ustawienia → Zlecenia, Wyceny, Statusy zleceń, Szablony e-mail)
+function seedMessaging() {
+  if (getSetting('messaging_seeded')) return;
+  const byPos = {
+    2: 'Witaj,\n\nZarezerwowalismy termin wizyty na [[zlecenie.dataPrzyjecia]] o [[zlecenie.godzinaPrzyjecia]] Arkuszowa 176\n\nPozdrawiam PulseCar Service.',
+    4: 'Ponizej karta zlecenia dla [[pojazd.marka]] [[pojazd.nrRejestracyjny]]\n\n[[zlecenie.kartaZlecenia]]\n\nCzekamy na potwierdzenie',
+    7: 'Witaj,\n\nPojazd [[pojazd.marka]] [[pojazd.model]] jest gotowy do odbioru. Kosztorys - [[zlecenie.kartaZlecenia]]\n\nPozdrawiamy,\nPulseCar Service.',
+    8: 'Dziekujemy za wizyte!\nJesli sa Panstwo zadowoleni z uslugi, prosimy o opinie: https://g.page/r/CdP6wLn_Tf1mEBM/review\nDziekujemy! PulseCar',
+    9: 'Dzien dobry!\nMiales dzis wizyte.\nProsze o kontakt: +48571058591, aby ustalic nowy termin.',
+  };
+  for (const [pos, t] of Object.entries(byPos)) {
+    run(`UPDATE order_statuses SET sms_template = ?, sms_mode = 'ask' WHERE pos = ? AND (sms_template IS NULL OR sms_template = '')`, t, Number(pos));
+  }
+  const S = {
+    sms_tpl_reminder: 'Przypominamy o wizycie dnia [[zlecenie.dataPrzyjecia]] o [[zlecenie.godzinaPrzyjecia]] Arkuszowa 176\n\nPozdrawiam PulseCar Service.',
+    sms_tpl_card: 'Witaj,\n\nKarta zlecenia dla [[pojazd.marka]] [[pojazd.nrRejestracyjny]]\n\n[[zlecenie.kartaZlecenia]]\n\nPozdrawiam PulseCar Service',
+    sms_tpl_quote: 'Witaj,\n\nPonizej wycena dla [[pojazd.marka]] [[pojazd.nrRejestracyjny]]\n\n[[wycena.link]]\n\nCzekamy na potwierdzenie\n\nPozdrawiam PulseCar Service.',
+    sms_tpl_paylink: 'Link do platnosci za zlecenie [[zlecenie.numer]] ([[zlecenie.doZaplaty]] zl): [[link.platnosc]]\nPulseCar Service',
+    sms_tpl_code: 'Kod potwierdzenia: [[kod]]. PulseCar Service',
+    sms_tpl_booking: '',
+    sms_tpl_review: 'Dziekujemy za wizyte! Jesli sa Panstwo zadowoleni z uslugi, prosimy o opinie: [[link.opinia]] Dziekujemy! PulseCar',
+    sms_remind_on: '1', sms_remind_hours: '24', sms_translit: '1', sms_review_delayed: '0',
+    review_url: 'https://g.page/r/CdP6wLn_Tf1mEBM/review',
+    doc_description_tpl: 'Marka: [[pojazd.marka]], Model: [[pojazd.model]], Numer rejestracyjny: [[pojazd.rejestracja]], VIN: [[pojazd.vin]], przebieg: [[zlecenie.przebieg]]',
+    mail_invoice_subject: 'Faktura [[dokument.numer]] — PulseCar Service', mail_invoice_body: 'Dzień dobry,\n\nW załączniku przesyłam fakturę za wykonaną usługę.\n\nPozdrawiam',
+    mail_receipt_subject: 'Paragon — PulseCar Service', mail_receipt_body: 'Dzień dobry,\n\nW załączniku przesyłam paragon za wykonaną usługę.\n\nPozdrawiam',
+    mail_storage_subject: 'Dokument przechowania — PulseCar Service', mail_storage_body: 'Dzień dobry,\n\nW załączniku przesyłam dokument przechowania.\n\nPozdrawiam',
+    mail_quote_subject: 'Wycena [[zlecenie.numer]] — PulseCar Service', mail_quote_body: 'Dzień dobry,\n\nW załączniku przesyłam wycenę.\n\n[[wycena.link]]\n\nPozdrawiam',
+    mail_order_subject: 'Zlecenie [[zlecenie.numer]] — PulseCar Service', mail_order_body: 'Dzień dobry,\n\nPoniżej karta zlecenia dla [[pojazd.marka]] [[pojazd.nrRejestracyjny]]:\n[[zlecenie.kartaZlecenia]]\n\nPozdrawiam',
+    card_accept: 'button', card_show_status: '1', card_show_net: '1', card_show_company: '1', card_show_bank: '0', card_show_invoice: '1',
+    card_quote_after_protocol: '0', card_accept_status_id: '', card_rodo: '', card_extra: '',
+    booking_widget: '1', booking_color: '#1BF372',
+  };
+  for (const [k, v] of Object.entries(S)) if (getSetting(k) === null) setSetting(k, v);
+  setSetting('messaging_seeded', '1');
+}

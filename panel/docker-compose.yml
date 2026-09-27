@@ -1,0 +1,10 @@
+services:
+  panel:
+    build: .
+    container_name: pulsecar-panel
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data            # база и ежедневные копии (data/backups)
+    ports:
+      - "127.0.0.1:3100:3100"   # наружу через прокси с HTTPS: panel.pulsecar.tech

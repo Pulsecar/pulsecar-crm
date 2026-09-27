@@ -1,0 +1,11 @@
+node_modules/
+panel/data/
+panel/.env
+app/node_modules/
+app/.expo/
+app/dist/
+*.db
+*.db-shm
+*.db-wal
+app/.claude/
+app/AGENTS.md
