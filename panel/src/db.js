@@ -369,6 +369,7 @@ addColumn('orders', 'accepted_at', 'TEXT');
 addColumn('orders', 'accepted_via', 'TEXT');
 addColumn('orders', 'accept_code', 'TEXT');
 addColumn('orders', 'accept_code_exp', 'INTEGER');
+addColumn('orders', 'accept_doc', 'TEXT');           // какой документ подписывается кодом SMS
 // Данные авто из техпаспорта (Aztec) и по номеру
 for (const [c, t] of [['first_reg', 'TEXT'], ['engine_no', 'TEXT'], ['category', 'TEXT'], ['mass_kg', 'INTEGER'], ['seats', 'INTEGER'],
   ['reg_doc', 'TEXT'], ['inspection_until', 'TEXT'], ['insurance_until', 'TEXT'], ['key_no', 'TEXT'], ['paint_code', 'TEXT'], ['vehicle_type', 'TEXT']]) addColumn('cars', c, t);
@@ -415,6 +416,41 @@ addColumn('staff', 'ext_token', 'TEXT');          // sha256 ключа для р
 addColumn('orders', 'external_no', 'TEXT');
 addColumn('orders', 'faults', 'TEXT');              // wykryte usterki
 addColumn('orders', 'after_notes', 'TEXT');         // uwagi po wykonaniu zlecenia
+addColumn('orders', 'damages', 'TEXT');             // JSON: отметки повреждений на схеме {x,y,type,note}
+// ── Документы продажи, подписи клиента, файлы заказа ─────────────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS sales_docs (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                     -- vat | proforma | correction
+  number TEXT NOT NULL,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  corrects_id INTEGER REFERENCES sales_docs(id),
+  issue_date TEXT NOT NULL, sale_date TEXT, due_date TEXT, place TEXT,
+  payment_method TEXT, paid REAL NOT NULL DEFAULT 0,
+  buyer TEXT NOT NULL DEFAULT '{}', items TEXT NOT NULL DEFAULT '[]',
+  total_net REAL NOT NULL DEFAULT 0, total_vat REAL NOT NULL DEFAULT 0, total_gross REAL NOT NULL DEFAULT 0,
+  notes TEXT, reason TEXT, status TEXT NOT NULL DEFAULT 'issued',
+  ext_id TEXT, ext_url TEXT, ksef INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS sales_docs_order ON sales_docs(order_id);
+CREATE TABLE IF NOT EXISTS order_signatures (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  doc TEXT NOT NULL,                      -- intake | estimate | quote | release
+  method TEXT NOT NULL,                   -- button | sms | drawn | paper
+  signer_name TEXT, phone TEXT, image TEXT, ip TEXT, snapshot TEXT,
+  signed_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS order_signatures_order ON order_signatures(order_id);
+CREATE TABLE IF NOT EXISTS order_files (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, path TEXT NOT NULL, mime TEXT, size INTEGER,
+  client_visible INTEGER NOT NULL DEFAULT 1, staff TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`);
 addColumn('products', 'price_group_id', 'INTEGER');
 addColumn('products', 'gtu', 'TEXT');
 addColumn('stations', 'slot_min', 'INTEGER');
@@ -531,6 +567,8 @@ function seedMotowarsztat() {
       ['PR', 'Хранение шин (przechowalnia)', 'P [numer]/[rok]', 'year']]
       .forEach(([k, l, p, r], i) => run('INSERT INTO doc_numbering (key, label, pattern, reset, pos) VALUES (?, ?, ?, ?, ?)', k, l, p, r, i));
   }
+  [['FV', 'Фактура VAT', 'FV [numer]/[miesiac]/[rok]', 'month', 20], ['PRO', 'Фактура Pro forma', 'PRO [numer]/[miesiac]/[rok]', 'month', 21], ['FK', 'Фактура корректирующая', 'FK [numer]/[miesiac]/[rok]', 'month', 22]]
+    .forEach(([k, l, p, r, i]) => run('INSERT OR IGNORE INTO doc_numbering (key, label, pattern, reset, pos) VALUES (?, ?, ?, ?, ?)', k, l, p, r, i));
   if (!getSetting('mw_services_seeded')) {
     const site = new Set(all(`SELECT lower(name) n FROM service_catalog WHERE COALESCE(source, '') <> 'motowarsztat'`).map((r) => r.n));
     const have = new Set(all('SELECT lower(category) || \'|\' || lower(name) k FROM service_catalog').map((r) => r.k));
@@ -571,8 +609,21 @@ function seedMotowarsztat() {
     client_require_phone: '0', client_marketing_default: '1', calendar_scale_day: '15', calendar_scale_week: '15', calendar_auto_jobs: '1',
     work_hours: JSON.stringify({ 1: ['09:00', '18:00'], 2: ['09:00', '18:00'], 3: ['09:00', '18:00'], 4: ['09:00', '18:00'], 5: ['09:00', '18:00'], 6: ['10:00', '14:00'], 0: null }),
     stock_negative: '1', stock_reserve_on_order: '1', default_markup: '40', storage_months: '6', storage_price: '200', doc_show_logo: '1', doc_show_signatures: '1', doc_footer: '',
+    // Wygląd dokumentów — как в Motowarsztat
+    doc_code_in_name: '0', doc_place: 'Warszawa', company_legal_address: 'ul. Rodziny Hiszpańskich 8, 02-685 Warszawa', quote_valid_days: '14',
+    est_net: '0', est_gross: '1', est_labor_net: '0', est_labor_gross: '1', est_parts_code: '0', est_parts_brand: '1', est_parts_net: '0', est_parts_gross: '1', est_extra: '',
+    spec_qty: '1', spec_parts_code: '0', spec_after_notes: '1', spec_labor_gross: '1', spec_parts_gross: '1', spec_parts_brand: '1',
+    mech_contact: '1', mech_basic: '1', mech_station: '1', mech_code: '1', mech_vehicle_end: '1', mech_extra_labor: '3', mech_extra_parts: '3',
+    sale_code: '0', sale_gtu: '0', sale_discount: '1', sale_order_line: '1', sale_mpp: '1', sale_footer: '', sale_person: '', invoice_mode: 'auto',
+    stock_code: '1', stock_location: '0', wz_cost_col: '0', release_terms: '', intake_terms: '',
+    storage_terms: 'Firma [[firma]] przechowuje koła / opony letnie w okresie zimowym, koła / opony zimowe w okresie letnim. Koła / opony przechowywane są zgodnie z wymaganiami Polskiej Normy PN-C-94300-7. Firma [[firma]] gwarantuje zabezpieczenie przed kradzieżą oraz wykona bezpłatny przegląd opon i kontrolę ciśnienia w kołach. Odbiór kół / opon jest możliwy w każdy dzień roboczy, jednak nie później niż:\n– koła / opony letnie: do dnia 01 czerwca\n– koła / opony zimowe: do dnia 01 grudnia\nKoła / opony przechowywane po ww. datach podlegają opłaceniu kolejnego depozytu wg aktualnego cennika, lecz nie dłużej niż 100 dni od niezapłacenia depozytu. Koła / opony nieodebrane i niezapłacone w terminie 100 dni od wyznaczonych dat zostaną zagospodarowane jako odpad. Zapoznałem się z warunkami przechowalni kół / opon i wyrażam zgodę na ich stosowanie.',
+    // Elektroniczna karta zlecenia
+    card_files: '1', card_intake_on: '1', card_intake_accept: 'button,sms', card_intake_desc: '1', card_intake_tasks: '1', card_intake_damage: '1',
+    card_estimate_on: '1', card_estimate_accept: 'button,sms', card_labor_net: '0', card_labor_gross: '1', card_parts_code: '0', card_parts_brand: '1', card_parts_net: '0', card_parts_gross: '1',
+    card_pay_online: '1', card_release_on: '0', card_release_accept: 'button', card_drawn_signature: '1',
   };
   for (const [k, v] of Object.entries(W)) if (getSetting(k) === null) setSetting(k, v);
+  if (!getSetting('company_nip')) setSetting('company_nip', '5214141930'); // NIP AI CARS sp. z o.o. (как в Motowarsztat)
 }
 
 // Шаблоны SMS и e-mail — перенесены из Motowarsztat (Ustawienia → Zlecenia, Wyceny, Statusy zleceń, Szablony e-mail)

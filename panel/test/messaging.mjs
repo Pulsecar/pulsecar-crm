@@ -146,26 +146,26 @@ try {
   const token = link.split('/k/')[1];
   let pg = await req('/k/' + token, { anon: true });
   assert.equal(pg.status, 200);
-  for (const s of ['Karta zlecenia', 'Wymiana wahacza', 'Wahacz TRW', '550,00 zł', 'Volkswagen Passat', 'WE12345', 'Stuki z przodu', 'Akceptuję']) assert.ok(pg.j.includes(s), 'на карте нет: ' + s);
+  for (const s of ['Protokół przyjęcia', 'Kosztorys', 'Historia podpisów', 'Wymiana wahacza', 'Wahacz TRW', '550,00 zł', 'Volkswagen Passat', 'WE12345', 'Stuki z przodu', 'Akceptuję']) assert.ok(pg.j.includes(s), 'на карте нет: ' + s);
   assert.equal((await req('/k/nieistnieje123', { anon: true })).status, 404);
   // акцепт кнопкой → статус «Согласование» не трогаем, но в заказе отметка и история
   let r = await req(`/k/${token}/accept`, { form: {}, anon: true });
   assert.equal(r.status, 303);
   pg = await req('/k/' + token + '?m=accepted', { anon: true });
-  assert.ok(pg.j.includes('Zaakceptowano') && pg.j.includes('Dziękujemy'));
+  assert.ok(pg.j.includes('Zaakceptowany') && pg.j.includes('Dziękujemy') && pg.j.includes('Przycisk „Akceptuję”'));
   let o = ok(await req('/crm-api/orders/' + order.id), 'order after accept');
   assert.ok(o.accepted_at); assert.equal(o.accepted_via, 'button');
   assert.ok(o.activity.some((a) => a.action === 'accepted'));
 
   // акцепт кодом SMS на смете + смена статуса после акцепта
   const inRepair = byPos[4];
-  ok(await req('/crm-api/messaging', { method: 'PUT', body: { card_accept: 'sms', card_accept_status_id: String(inRepair.id) } }), 'accept sms');
+  ok(await req('/crm-api/settings', { method: 'PUT', body: { card_estimate_accept: 'sms', card_accept_status_id: String(inRepair.id) } }), 'accept sms');
   const q = ok(await req('/crm-api/orders', { body: { kind: 'order', customer_id: cust.id, car_id: car.id } }), 'order2');
   ok(await req(`/crm-api/orders/${q.id}/items`, { body: { kind: 'labor', name: 'Diagnostyka', qty: 1, price: 100 } }), 'labor2');
   const cardUrl = ok(await req(`/crm-api/orders/${q.id}/card`, { body: {} }), 'card url').url;
   const t2 = cardUrl.split('/k/')[1];
   pg = await req('/k/' + t2, { anon: true });
-  assert.ok(pg.j.includes('Wyślij kod SMS'));
+  assert.ok(pg.j.includes('Podpisz kodem SMS'));
   r = await req(`/k/${t2}/code`, { form: {}, anon: true });
   assert.equal(r.status, 303);
   const code = sent.at(-1).text.match(/(\d{6})/)[1];
@@ -173,7 +173,7 @@ try {
   r = await req(`/k/${t2}/accept`, { form: { code: '000000' === code ? '111111' : '000000' }, anon: true });
   assert.match(r.headers.get('location'), /m=badcode/);
   r = await req(`/k/${t2}/accept`, { form: { code }, anon: true });
-  assert.match(r.headers.get('location'), /m=accepted/);
+  assert.match(r.headers.get('location'), /m=signed/);
   o = ok(await req('/crm-api/orders/' + q.id), 'order2 after');
   assert.equal(o.accepted_via, 'sms'); assert.equal(o.status_id, inRepair.id);
   console.log('✓ смена статуса → окно с готовой SMS; электронная карта заказа: акцепт кнопкой и кодом SMS, статус меняется сам');

@@ -24,6 +24,8 @@ import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, 
 import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
 import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
 import * as FIN from './finance.js';
+import * as DOC from './documents.js';
+import path from 'node:path';
 import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate, testSmshttp, activeProvider, smsParts, translit } from './sms.js';
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
@@ -340,6 +342,10 @@ crm.get('/orders/:id', (req, res) => {
   const o = orderFull(Number(req.params.id));
   assertAssigned(me, o);
   hideFor(permsOf(me), o);
+  o.damages = (() => { try { return JSON.parse(o.damages || '[]'); } catch { return []; } })();
+  o.sales_docs = all('SELECT id, kind, number, issue_date, total_gross, paid, ksef, ext_url, corrects_id, created_by FROM sales_docs WHERE order_id = ? ORDER BY id', o.id);
+  o.signatures = all('SELECT id, doc, method, signer_name, phone, signed_at, ip FROM order_signatures WHERE order_id = ? ORDER BY id', o.id);
+  o.files = all('SELECT id, name, mime, size, client_visible, staff, created_at FROM order_files WHERE order_id = ? ORDER BY id', o.id);
   if (o.customer_id) o.redeem = redeemLimits(o.customer_id, o.total, o.payments.filter((p) => p.method === 'points').reduce((a, p) => a + p.amount, 0));
   res.json(o);
 });
@@ -357,6 +363,11 @@ crm.put('/orders/:id', (req, res) => {
   const d = {};
   for (const k of ORDER_FIELDS) if (b[k] !== undefined) d[k] = b[k] === '' ? null : b[k];
   if (b.flags !== undefined) d.flags = JSON.stringify(b.flags || {});
+  if (b.damages !== undefined) {
+    const marks = (Array.isArray(b.damages) ? b.damages : []).slice(0, 60).map((m) => ({ x: Math.max(0, Math.min(100, Number(m.x) || 0)), y: Math.max(0, Math.min(100, Number(m.y) || 0)),
+      type: String(m.type || 'inne').slice(0, 20), note: String(m.note || '').slice(0, 300) }));
+    d.damages = JSON.stringify(marks);
+  }
   update('orders', o.id, d);
   if (d.mileage && (d.car_id || o.car_id)) run('UPDATE cars SET last_mileage = MAX(COALESCE(last_mileage,0), ?) WHERE id = ?', d.mileage, d.car_id || o.car_id);
   if (d.car_id && (d.customer_id || o.customer_id)) run('UPDATE cars SET customer_id = COALESCE(customer_id, ?) WHERE id = ?', d.customer_id || o.customer_id, d.car_id);
@@ -1476,48 +1487,136 @@ crm.post('/pos/checkout', (req, res) => {
   res.json(checkout(req.body || {}, s.name));
 });
 
-// ── Печать: карта заказа / смета ────────────────────────────────────────────
-const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-const zl = (n) => (Number(n) || 0).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// ── Печать документов (шаблоны в src/documents.js) ─────────────────────────
+const sendHtml = (res, h) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Cache-Control', 'no-store'); res.send(h); };
 crm.get('/print/order/:id', (req, res) => {
-  who(req);
-  const o = orderFull(Number(req.params.id));
-  const S = Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value]));
-  const title = o.kind === 'quote' ? 'Wycena' : 'Zlecenie naprawy';
-  const row = (i, n) => {
-    const gross = i.qty * i.price * (1 - (i.discount || 0) / 100);
-    return `<tr><td>${n}</td><td>${esc(i.name)}${i.code ? `<div class="m">${esc(i.code)}</div>` : ''}</td><td class="r">${i.qty}</td><td>${esc(i.unit || (i.kind === 'labor' ? 'usł.' : 'szt.'))}</td><td class="r">${zl(i.price)}</td><td class="r">${i.discount ? i.discount + '%' : ''}</td><td class="r">${zl(gross)}</td></tr>`;
-  };
-  const labor = o.items.filter((i) => i.kind === 'labor');
-  const parts = o.items.filter((i) => i.kind === 'part');
-  const c = o.customer || {};
-  const k = o.car || {};
-  const f = o.flags || {};
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!doctype html><html lang="pl"><head><meta charset="utf-8"><title>${esc(o.number)}</title>
-<style>
- body{font:12px/1.45 Arial,Helvetica,sans-serif;color:#111;margin:24px;max-width:800px}
- h1{font-size:20px;margin:0}.top{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:14px}
- .logo{height:42px}.m{color:#666;font-size:11px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
- .box{border:1px solid #bbb;border-radius:6px;padding:8px 10px}.box b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#555;margin-bottom:4px}
- table{width:100%;border-collapse:collapse;margin:6px 0 12px}th,td{border-bottom:1px solid #ccc;padding:5px 6px;text-align:left;vertical-align:top}
- th{font-size:10px;text-transform:uppercase;color:#555}.r{text-align:right}.tot{font-size:16px;font-weight:bold;text-align:right}
- .sig{display:flex;justify-content:space-between;margin-top:50px}.sig div{border-top:1px solid #111;width:40%;text-align:center;padding-top:4px;font-size:11px}
- .terms{font-size:10px;color:#444;margin-top:18px;white-space:pre-wrap}
- @media print{body{margin:0}.noprint{display:none}}
-</style></head><body>
-<p class="noprint"><button onclick="print()">Drukuj / Печать</button></p>
-<div class="top"><div><img class="logo" src="/logo-dark.png" alt="Pulsecar"><div class="m">${esc(S.company_name)} · ${esc(S.company_address)}<br>${esc(S.company_phone)} · ${esc(S.company_email)}${S.company_nip ? ' · NIP ' + esc(S.company_nip) : ''}</div></div>
-<div style="text-align:right"><h1>${title}</h1><div style="font-size:16px;font-weight:bold">${esc(o.number)}</div><div class="m">Data przyjęcia: ${esc(o.created_at?.slice(0, 16))}${o.pickup_at ? '<br>Termin odbioru: ' + esc(o.pickup_at) : ''}</div></div></div>
-<div class="grid"><div class="box"><b>Klient</b>${esc(c.company || c.name || '—')}<br>${esc(c.phone || '')}${c.nip ? '<br>NIP ' + esc(c.nip) : ''}${c.street ? '<br>' + esc(c.street) + ', ' + esc(c.postcode || '') + ' ' + esc(c.city || '') : ''}</div>
-<div class="box"><b>Pojazd</b>${esc([k.make, k.model, k.year].filter(Boolean).join(' ') || '—')}<br>Nr rej.: ${esc(k.plate || '—')} · VIN: ${esc(k.vin || '—')}<br>Przebieg: ${o.mileage ? esc(o.mileage) + ' km' : '—'}${o.fuel_level ? ' · Paliwo: ' + esc(o.fuel_level) : ''}</div></div>
-${o.complaint ? `<div class="box" style="margin-bottom:12px"><b>Opis zgłoszenia</b>${esc(o.complaint)}</div>` : ''}
-${labor.length ? `<table><thead><tr><th>#</th><th>Usługa</th><th class="r">Ilość</th><th>J.m.</th><th class="r">Cena</th><th class="r">Rabat</th><th class="r">Wartość brutto</th></tr></thead><tbody>${labor.map((i, n) => row(i, n + 1)).join('')}</tbody></table>` : ''}
-${parts.length ? `<table><thead><tr><th>#</th><th>Części</th><th class="r">Ilość</th><th>J.m.</th><th class="r">Cena</th><th class="r">Rabat</th><th class="r">Wartość brutto</th></tr></thead><tbody>${parts.map((i, n) => row(i, n + 1)).join('')}</tbody></table>` : ''}
-<div class="tot">Razem brutto: ${zl(o.total)} zł</div><div class="m" style="text-align:right">netto ${zl(o.total_net)} zł${o.paid ? ` · zapłacono ${zl(o.paid)} zł` : ''}</div>
-<div class="grid" style="margin-top:12px"><div class="box"><b>Zgody / uwagi</b>Zwrot części: ${f.return_parts ? 'TAK' : 'NIE'} · Dowód rejestracyjny: ${f.reg_doc ? 'TAK' : 'NIE'} · Jazda próbna: ${f.test_drive ? 'TAK' : 'NIE'}</div>
-<div class="box"><b>Gwarancja</b>6 miesięcy na usługę · części wg gwarancji producenta</div></div>
-${S.order_terms ? `<div class="terms">${esc(S.order_terms)}</div>` : ''}
-<div class="sig"><div>Podpis przyjmującego</div><div>Podpis klienta</div></div>
-</body></html>`);
+  who(req, 'orders.view');
+  const o = getOrder(Number(req.params.id));
+  res.redirect(302, `/crm-api/print/${o.kind === 'quote' ? 'estimate' : 'spec'}/${o.id}`);
+});
+const ORDER_DOCS = ['intake', 'spec', 'mechanic', 'estimate', 'release'];
+crm.get('/print/:type/:id', (req, res, next) => {
+  const t = req.params.type;
+  if (ORDER_DOCS.includes(t)) {
+    const me = who(req, 'orders.view');
+    const o = getOrder(Number(req.params.id));
+    assertAssigned(me, o);
+    if (t !== 'mechanic' && t !== 'intake' && !can(me, 'orders.prices')) throw new HttpError(403, 'Недостаточно прав: цены скрыты');
+    return sendHtml(res, DOC.orderDoc(t, o.id));
+  }
+  if (t === 'sale') { who(req, 'orders.view'); return sendHtml(res, DOC.saleDocHtml(Number(req.params.id))); }
+  if (t === 'stock') { who(req, 'products.view'); return sendHtml(res, DOC.stockDocHtml(Number(req.params.id))); }
+  if (t === 'cash') { who(req, 'cash.view'); return sendHtml(res, DOC.cashDocHtml(Number(req.params.id))); }
+  if (t === 'storage') { who(req, 'storage.view'); return sendHtml(res, DOC.storageDocHtml(Number(req.params.id))); }
+  next();
+});
+
+// ── Документы продажи: фактура VAT (через Fakturownia → KSeF или своя), Pro forma, корректа ──
+crm.get('/sales-docs', (req, res) => {
+  who(req, 'invoices.create');
+  const q = `%${String(req.query.q || '').trim()}%`;
+  res.json({ rows: all(`SELECT d.id, d.kind, d.number, d.issue_date, d.total_gross, d.paid, d.ksef, d.order_id, o.number order_no, json_extract(d.buyer, '$.name') buyer
+    FROM sales_docs d LEFT JOIN orders o ON o.id = d.order_id WHERE d.number LIKE ? OR json_extract(d.buyer, '$.name') LIKE ? OR o.number LIKE ? ORDER BY d.id DESC LIMIT 300`, q, q, q) });
+});
+crm.post('/orders/:id/sales-docs', async (req, res) => {
+  const s = who(req, 'invoices.create');
+  const o = getOrder(Number(req.params.id));
+  const b = req.body || {};
+  const kind = b.kind === 'proforma' ? 'proforma' : 'vat';
+  if (kind === 'proforma' && getSetting('proforma_on', '1') === '0') throw new HttpError(400, 'Pro forma выключены в настройках');
+  if (kind === 'vat' && one(`SELECT 1 FROM sales_docs WHERE order_id = ? AND kind = 'vat'`, o.id)) throw new HttpError(409, 'По заказу уже выставлена фактура VAT. Для изменений — фактура корректирующая.');
+  const buyer = { ...DOC.buyerFromCustomer(o.customer_id ? one('SELECT * FROM customers WHERE id = ?', o.customer_id) : {}), ...(b.buyer || {}) };
+  let ext = null;
+  const viaFakturownia = kind === 'vat' && invoicesEnabled() && getSetting('invoice_mode', 'auto') !== 'local';
+  if (viaFakturownia) {
+    const r = await issueInvoice(o.id, { buyer });
+    ext = { id: r.id, number: r.number, url: r.url };
+  }
+  const d = DOC.createSaleDoc({ kind, orderId: o.id, buyer, issue_date: b.issue_date, sale_date: b.sale_date, payment_method: b.payment_method, due_days: b.due_days, notes: b.notes, ext }, s.name);
+  log('order', o.id, kind === 'vat' ? 'invoice' : 'proforma', d.number, s.name);
+  if (kind === 'vat') {
+    const target = Number(getSetting('status_on_sale_doc', '')) || null;
+    if (target) try { setStatus(o.id, target, s.name); } catch (e) { log('order', o.id, 'invoice_error', 'Статус после фактуры: ' + e.message, s.name); }
+  }
+  res.json({ ...d, ksef: !!ext, warning: kind === 'vat' && !ext ? 'Фактура выставлена в CRM, но не отправлена в KSeF. С 2026 года фактуры VAT нужно передавать в KSeF — подключите Fakturownia (Настройки → Интеграции).' : null });
+});
+crm.post('/sales-docs/:id/correct', (req, res) => {
+  const s = who(req, 'invoices.create');
+  const orig = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
+  if (!orig || orig.kind !== 'vat') throw new HttpError(400, 'Корректировать можно только фактуру VAT');
+  const b = req.body || {};
+  if (!String(b.reason || '').trim()) throw new HttpError(400, 'Укажите причину корректы');
+  const OL = JSON.parse(orig.items || '[]');
+  const lines = OL.map((l, i) => {
+    const c = (b.lines || [])[i] || {};
+    const qty = c.qty === undefined ? l.qty : Number(c.qty) || 0;
+    const unitGross = c.unit_gross === undefined ? (l.qty ? l.gross / l.qty : 0) : Number(c.unit_gross) || 0;
+    const gross = round2(qty * unitGross);
+    const net = round2(gross / (1 + l.vat / 100));
+    return { ...l, qty, gross, net, vat_amt: round2(gross - net), unit_net: qty ? round2(net / qty) : 0 };
+  });
+  const d = DOC.createSaleDoc({ kind: 'correction', orderId: orig.order_id, buyer: JSON.parse(orig.buyer || '{}'), lines, corrects_id: orig.id, reason: String(b.reason).slice(0, 300), payment_method: orig.payment_method, paid: 0, notes: b.notes }, s.name);
+  if (orig.order_id) log('order', orig.order_id, 'invoice', `${d.number} (korekta ${orig.number})`, s.name);
+  res.json({ ...d, warning: orig.ksef ? 'Исходная фактура в KSeF: корректу нужно также провести в Fakturownia.' : null });
+});
+crm.delete('/sales-docs/:id', (req, res) => {
+  const s = who(req, 'invoices.create');
+  const d = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Документ не найден');
+  if (d.kind !== 'proforma') throw new HttpError(400, 'Фактуру VAT удалить нельзя — выставьте корректу.');
+  run('DELETE FROM sales_docs WHERE id = ?', d.id);
+  if (d.order_id) log('order', d.order_id, 'update', `Удалена ${d.number}`, s.name);
+  res.json({ ok: true });
+});
+
+// ── Файлы заказа (фото, видео, PDF) — видны клиенту в электронной карте ─────
+const FILES_DIR = DOC.FILES_DIR;
+const sendOrderFile = DOC.sendOrderFile;
+crm.post('/orders/:id/files', upload.array('files', 20), (req, res) => {
+  const s = who(req, 'orders.edit');
+  const o = getOrder(Number(req.params.id));
+  const dir = path.join(FILES_DIR, String(o.id));
+  fs.mkdirSync(dir, { recursive: true });
+  const out = [];
+  const OK = /^(image\/(jpeg|png|webp|heic|heif|gif)|video\/(mp4|quicktime|webm|3gpp)|application\/pdf)$/;
+  const bad = (req.files || []).filter((f) => !OK.test(f.mimetype)).map((f) => f.originalname);
+  if (bad.length) throw new HttpError(400, `Можно загружать фото, видео и PDF. Не подходит: ${bad.join(', ')}`);
+  for (const f of req.files || []) {
+    const safe = f.originalname.normalize('NFKD').replace(/[^\w.\-]+/g, '_').slice(-80) || 'plik';
+    const name = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}-${safe}`;
+    fs.writeFileSync(path.join(dir, name), f.buffer);
+    out.push(insert('order_files', { order_id: o.id, name: f.originalname.slice(0, 200), path: `${o.id}/${name}`, mime: f.mimetype, size: f.size, client_visible: req.body?.client_visible === '0' ? 0 : 1, staff: s.name }));
+  }
+  log('order', o.id, 'update', `Файлы: ${out.length}`, s.name);
+  res.json({ ok: true, ids: out });
+});
+crm.get('/files/:id', (req, res) => {
+  who(req, 'orders.view');
+  const f = one('SELECT * FROM order_files WHERE id = ?', Number(req.params.id));
+  if (!f) throw new HttpError(404, 'Файл не найден');
+  sendOrderFile(res, f, req.query.dl === '1');
+});
+crm.put('/files/:id', (req, res) => {
+  who(req, 'orders.edit');
+  run('UPDATE order_files SET client_visible = ? WHERE id = ?', req.body?.client_visible ? 1 : 0, Number(req.params.id));
+  res.json({ ok: true });
+});
+crm.delete('/files/:id', (req, res) => {
+  const s = who(req, 'orders.edit');
+  const f = one('SELECT * FROM order_files WHERE id = ?', Number(req.params.id));
+  if (!f) throw new HttpError(404, 'Файл не найден');
+  try { fs.unlinkSync(path.join(FILES_DIR, f.path)); } catch {}
+  run('DELETE FROM order_files WHERE id = ?', f.id);
+  log('order', f.order_id, 'update', `Удалён файл ${f.name}`, s.name);
+  res.json({ ok: true });
+});
+/** Подпись на бумаге: сотрудник отмечает, что клиент подписал документ в сервисе */
+crm.post('/orders/:id/signatures', (req, res) => {
+  const s = who(req, 'orders.edit');
+  const o = getOrder(Number(req.params.id));
+  const doc = ['intake', 'estimate', 'quote', 'release'].includes(req.body?.doc) ? req.body.doc : 'intake';
+  insert('order_signatures', { order_id: o.id, doc, method: 'paper', signer_name: String(req.body?.signer_name || '').slice(0, 100) || null, ip: s.name });
+  if ((doc === 'estimate' || doc === 'quote') && !o.accepted_at) run(`UPDATE orders SET accepted_at = datetime('now','localtime'), accepted_via = 'paper' WHERE id = ?`, o.id);
+  log('order', o.id, 'accepted', `${DOC.SIG_KIND[doc]} — подпись на бумаге`, s.name);
+  res.json({ ok: true });
 });

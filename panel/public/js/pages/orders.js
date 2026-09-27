@@ -3,6 +3,7 @@ import {
   ConfirmButton, useDebounced, zl, num, fdate, fdt, carName, METHOD, toast,
 } from '../lib.js';
 import { SupplierParts } from './suppliers.js';
+import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ScanBox } from '../scan.js';
 
@@ -155,7 +156,7 @@ export function OrderPage({ id }) {
     if (r.sms || r.email) setNotice({ sms: r.sms, email: r.email, sendSms: !!r.sms, sendEmail: !!r.email });
     reload();
   };
-  const tabs = [['items', 'Работы и запчасти'], ['main', 'Данные заказа'], ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['check', 'Чек-листы'], ['plan', 'Терминарз']]), ['log', 'История']];
+  const tabs = [['items', 'Работы и запчасти'], ['main', 'Данные заказа'], ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['intake', 'Приём авто' + (o.damages?.length || o.files?.length ? ` · ${(o.damages?.length || 0) + (o.files?.length || 0)}` : '')], ['check', 'Чек-листы'], ['plan', 'Терминарз']]), ['log', 'История']];
   return html`
     <div class="crumbs"><a href=${isQuote ? '#/quotes' : '#/orders'}>${isQuote ? 'Сметы' : 'Заказы'}</a></div>
     <div class="order-head">
@@ -170,7 +171,7 @@ export function OrderPage({ id }) {
         </div>
       </div>
       <div class="row">
-        <a class="btn" href=${'/crm-api/print/order/' + o.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать</a>
+        <${DocsMenu} o=${o} />
         ${isQuote && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/to-order`, { body: {} }), 'Заказ создан'); go('/orders/' + r.id); }}>Превратить в заказ</button>`}
         ${app.perms['orders.delete'] && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
       </div>
@@ -191,9 +192,10 @@ export function OrderPage({ id }) {
     ${tab === 'pay' && html`<${Payments} o=${o} reload=${reload} />`}
     ${tab === 'plan' && html`<${Plan} o=${o} />`}
     ${tab === 'check' && html`<${Checklists} o=${o} />`}
+    ${tab === 'intake' && html`<${Intake} o=${o} reload=${reload} />`}
     ${tab === 'log' && html`<div class="card"><table class="tbl"><tbody>${o.activity.map((a) => html`<tr><td class="nowrap sub">${fdt(a.created_at)}</td><td>${ACTION[a.action] || a.action} ${a.action === 'status' ? html`<b>${JSON.parse(a.details || '""')}</b>` : ''}</td><td class="sub">${a.staff || ''}</td></tr>`)}</tbody></table></div>`}`;
 }
-const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', to_order: 'Создан заказ из сметы', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
+const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', proforma: 'Выставлена Pro forma', to_order: 'Создан заказ из сметы', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
 
 // ── Позиции ────────────────────────────────────────────────────────────────
 function Items({ o, reload }) {
@@ -312,7 +314,6 @@ function Payments({ o, reload }) {
   const [scan, setScan] = useState(null); // {ticket, limits, client}
   const [scanOpen, setScanOpen] = useState(false);
   const [pts, setPts] = useState('');
-  const [inv, setInv] = useState(null);
   const addPay = async () => { await act(() => api(`orders/${o.id}/payments`, { body: p }), 'Оплата добавлена'); setP({ ...p, amount: '' }); reload(); };
   const onScan = async (data) => {
     try {
@@ -321,7 +322,6 @@ function Payments({ o, reload }) {
     } catch (e) { toast(e.message, 'error'); }
   };
   const redeem = async () => { await act(() => api(`orders/${o.id}/redeem`, { body: { ticket: scan.ticket, points: Number(pts) } }), 'Баллы списаны'); setScan(null); reload(); };
-  const issue = async () => { const r = await act(() => api(`orders/${o.id}/invoice`, { body: inv }), 'Фактура выставлена'); setInv(null); reload(); return r; };
   return html`<div class="grid g2">
     <div class="card">
       <h2>Оплаты</h2>
@@ -353,19 +353,11 @@ function Payments({ o, reload }) {
       </div>
 
       <${Contact} o=${o} reload=${reload} />
-      <div class="card">
-        <h2>Фактура VAT</h2>
-        ${o.invoice_no ? html`<div class="row"><b>${o.invoice_no}</b><a class="btn sm" href=${'/crm-api/orders/' + o.id + '/invoice.pdf'} target="_blank" rel="noopener">PDF</a>${o.invoice_url && html`<a class="btn sm" href=${o.invoice_url} target="_blank" rel="noopener">В Fakturownia <${Icon} n="external" /></a>`}</div>`
-          : !app.features.invoices ? html`<div class="muted small">Подключите Fakturownia в <a href="#/settings/integrations">Настройки → Интеграции</a>, чтобы выставлять фактуры отсюда — они сами отправятся в KSeF.</div>`
-          : html`<button class="btn" onClick=${() => setInv({ name: o.customer?.company || o.customer?.name || '', nip: o.customer?.nip || '', street: o.customer?.street || '', postcode: o.customer?.postcode || '', city: o.customer?.city || '' })} disabled=${!o.items.length}>Выставить фактуру</button>`}
-      </div>
-    </div>
+      ${app.perms['invoices.create'] ? html`<${SalesDocs} o=${o} reload=${reload} />` : ''}
+        </div>
 
     ${scanOpen && html`<${Modal} title="QR клиента" onClose=${() => setScanOpen(false)}><${ScanBox} onResult=${onScan} /></${Modal}>`}
-    ${inv && html`<${Modal} title="Фактура VAT" onClose=${() => setInv(null)} foot=${html`<button class="btn" onClick=${() => setInv(null)}>Отмена</button><button class="btn primary" onClick=${issue}>Выставить на ${zl(o.total)}</button>`}>
-      <div class="grid g2">${[['name', 'Покупатель'], ['nip', 'NIP (для фирмы)'], ['street', 'Улица'], ['postcode', 'Индекс'], ['city', 'Город']].map(([k, l]) => html`<label class="f">${l}<input value=${inv[k]} onInput=${(e) => setInv({ ...inv, [k]: e.target.value })} /></label>`)}</div>
-      <div class="muted small">Позиции заказа и оплата перенесутся автоматически. Фактура появится в Fakturownia и уйдёт в KSeF по их настройкам.</div>
-    </${Modal}>`}
+
   </div>`;
 }
 

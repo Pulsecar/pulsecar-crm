@@ -140,7 +140,18 @@ try {
   const co = ok(await req('/crm-api/orders/' + conv.id), 'conv get');
   assert.equal(co.total, 1000); assert.equal(co.kind, 'order'); assert.equal(co.quote_id, q.id);
   const pr = await req('/crm-api/print/order/' + o.id);
-  assert.equal(pr.status, 200); assert.ok(pr.j.includes('Zlecenie naprawy') && pr.j.includes('Wymiana oleju'));
+  assert.equal(pr.status, 200); assert.ok(pr.j.includes('Specyfikacja zlecenia') && pr.j.includes('Wymiana oleju'));
+  for (const [t, title] of [['intake', 'Protokół przyjęcia'], ['mechanic', 'Karta dla mechanika'], ['estimate', 'Kosztorys'], ['release', 'Protokół wydania']]) {
+    const d = await req(`/crm-api/print/${t}/${o.id}`); assert.equal(d.status, 200, t); assert.ok(d.j.includes(title), t);
+  }
+  const pf = ok(await req(`/crm-api/orders/${o.id}/sales-docs`, { body: { kind: 'proforma' } }), 'proforma');
+  const fv = ok(await req(`/crm-api/orders/${o.id}/sales-docs`, { body: { kind: 'vat', payment_method: 'cash' } }), 'fv');
+  assert.match(pf.number, /^PRO /); assert.match(fv.number, /^FV /);
+  assert.equal((await req(`/crm-api/orders/${o.id}/sales-docs`, { body: { kind: 'vat' } })).status, 409, 'вторая фактура VAT — нельзя');
+  const fvh = await req('/crm-api/print/sale/' + fv.id); assert.ok(fvh.j.includes('Faktura VAT') && fvh.j.includes('Słownie') && fvh.j.includes('Nabywca'));
+  const fk = ok(await req(`/crm-api/sales-docs/${fv.id}/correct`, { body: { reason: 'Zwrot', lines: [{ qty: 0 }] } }), 'fk');
+  assert.ok(fk.total_gross < fv.total_gross);
+  console.log('✓ документы: протоколы, спецификация, карта механика, kosztorys, фактура VAT, Pro forma, корректа');
   assert.equal((await req(`/crm-api/orders/${co.id}/invoice`, { body: {} })).status, 400);
   console.log('✓ смета WY → заказ, печать карты заказа, фактура требует настройки Fakturownia');
 

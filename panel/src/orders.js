@@ -40,6 +40,7 @@ export function createOrder(data, staffName) {
       type_id: data.type_id || null,
       mechanic_id: data.mechanic_id || null,
       mileage: data.mileage || null,
+      fuel_level: data.fuel_level || null,
       complaint: data.complaint || null,
       internal_note: data.internal_note || null,
       external_no: data.external_no || null,

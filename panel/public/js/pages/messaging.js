@@ -70,22 +70,7 @@ export default function Messaging() {
 
     <div class="card stack">
       <h2>Электронная карта заказа</h2>
-      <div class="muted small">Клиент открывает ссылку из SMS и видит авто, описание, работы, запчасти и сумму, может подтвердить заказ, оплатить онлайн и скачать фактуру.</div>
-      <div class="grid g3">
-        <label class="f">Как клиент подтверждает<select value=${v.card_accept} onChange=${(e) => set('card_accept', e.target.value)}>
-          <option value="button">Кнопка «Akceptuję»</option><option value="sms">Код из SMS</option><option value="none">Без подтверждения</option></select></label>
-        <label class="f">После подтверждения поставить статус<select value=${v.card_accept_status_id} onChange=${(e) => set('card_accept_status_id', e.target.value)}>
-          <option value="">— не менять —</option>${app.statuses.filter((s) => !s.is_final).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
-      </div>
-      <div class="grid g2">
-        ${chk('card_show_status', 'Показывать текущий статус заказа')}
-        ${chk('card_show_net', 'Показывать сумму нетто')}
-        ${chk('card_show_invoice', 'Давать скачать фактуру PDF')}
-        ${chk('card_show_bank', 'Показывать номер счёта для перевода (Фирма → Номер счёта)')}
-        ${chk('card_quote_after_protocol', 'Показывать смету только после подтверждения приёма авто')}
-      </div>
-      <label class="f">Дополнительный текст на карте<textarea rows="2" value=${v.card_extra} onInput=${(e) => set('card_extra', e.target.value)} placeholder="Np. Gwarancja 6 miesięcy na usługę."></textarea></label>
-      <label class="f">Текст RODO<textarea rows="3" value=${v.card_rodo} onInput=${(e) => set('card_rodo', e.target.value)} placeholder="Administratorem danych osobowych jest…"></textarea></label>
+      <div class="muted small">Протокол приёма, kosztorys, протокол выдачи, способы подписи, фото и тексты карты настраиваются в <a href="#/settings/params">Настройки → Параметры → Электронная карта</a>.</div>
     </div>
 
     <div class="card stack">
