@@ -52,6 +52,17 @@ export const DEFS = [
     ],
   },
   {
+    key: 'ksef', group: 'Бухгалтерия', title: 'KSeF — фактуры напрямую в Минфин',
+    about: 'Фактура VAT и корректа из CRM уходят прямо в KSeF (как в Motowarsztat): номер KSeF, статус «Przyjęty», UPO и QR-код KSeF на фактуре. Fakturownia не нужна.',
+    howto: 'ap.ksef.mf.gov.pl → войти (Profil Zaufany / подпись) в контексте NIP фирмы → Tokeny → Generuj token → права «Wystawianie faktur» и «Przeglądanie faktur» → скопировать токен (показывается один раз).',
+    fields: [
+      { k: 'token', label: 'Токен KSeF', secret: true, required: true },
+      { k: 'env', label: 'Среда', type: 'select', options: [['prod', 'Боевая (api.ksef.mf.gov.pl)'], ['demo', 'Предпродакшн DEMO'], ['test', 'Тестовая TEST']], def: 'prod' },
+      { k: 'autoSend', label: 'Отправлять фактуру в KSeF сразу при выставлении', type: 'bool', def: true },
+      { k: 'nip', label: 'NIP (если пусто — из Настройки → Фирма)', advanced: true },
+    ],
+  },
+  {
     key: 'fakturownia', group: 'Бухгалтерия', title: 'Fakturownia.pl',
     about: 'Фактуры VAT из заказа одной кнопкой. Fakturownia сама отправляет их в KSeF и формирует JPK.',
     howto: 'В Fakturownia: Ustawienia → Ustawienia konta → Integracja → Kod autoryzacyjny API. Домен — первая часть адреса: pulsecar.fakturownia.pl → pulsecar.',

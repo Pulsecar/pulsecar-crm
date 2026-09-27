@@ -25,6 +25,8 @@ import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
 import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
 import * as FIN from './finance.js';
 import * as DOC from './documents.js';
+import * as KSEF from './integrations/ksef.js';
+import { lookupNip } from './integrations/nip.js';
 import path from 'node:path';
 import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate, testSmshttp, activeProvider, smsParts, translit } from './sms.js';
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
@@ -104,7 +106,7 @@ crm.get('/me', (req, res) => {
     settings: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])),
     loyalty: loyaltySummary(0).rules,
     features: {
-      invoices: invoicesEnabled(), marketingUrl: cfg('marketing')?.url || config.marketingUrl, autoEarnFromCrm: config.loyalty.autoEarnFromCrm,
+      invoices: invoicesEnabled(), ksef: KSEF.ksefEnabled(), marketingUrl: cfg('marketing')?.url || config.marketingUrl, autoEarnFromCrm: config.loyalty.autoEarnFromCrm,
       intercars: !!cfg('intercars'), tpay: !!cfg('tpay'), email: !!cfg('email'), sms: !!activeProvider(), smsProvider: activeProvider(), plate: !!cfg('plate'),
     },
   });
@@ -343,7 +345,7 @@ crm.get('/orders/:id', (req, res) => {
   assertAssigned(me, o);
   hideFor(permsOf(me), o);
   o.damages = (() => { try { return JSON.parse(o.damages || '[]'); } catch { return []; } })();
-  o.sales_docs = all('SELECT id, kind, number, issue_date, total_gross, paid, ksef, ext_url, corrects_id, created_by FROM sales_docs WHERE order_id = ? ORDER BY id', o.id);
+  o.sales_docs = all('SELECT id, kind, number, issue_date, total_gross, paid, ksef, ext_url, corrects_id, created_by, ksef_status, ksef_number, ksef_error FROM sales_docs WHERE order_id = ? ORDER BY id', o.id);
   o.signatures = all('SELECT id, doc, method, signer_name, phone, signed_at, ip FROM order_signatures WHERE order_id = ? ORDER BY id', o.id);
   o.files = all('SELECT id, name, mime, size, client_visible, staff, created_at FROM order_files WHERE order_id = ? ORDER BY id', o.id);
   if (o.customer_id) o.redeem = redeemLimits(o.customer_id, o.total, o.payments.filter((p) => p.method === 'points').reduce((a, p) => a + p.amount, 0));
@@ -981,12 +983,22 @@ crm.get('/finance/orders', (req, res) => {
     WHERE ${f.where} ORDER BY o.total DESC LIMIT 300`, ...f.params));
 });
 
+/** Данные фирмы по NIP из «Białej listy» Минфина (для клиентов B2B и настроек фирмы) */
+crm.get('/nip/:nip', async (req, res) => { who(req); res.json(await lookupNip(req.params.nip)); });
+
 // ── Настройки ──────────────────────────────────────────────────────────────
 crm.put('/settings', (req, res) => {
   who(req, 'settings.manage');
   const allowed = ['company_name', 'company_brand', 'company_address', 'company_phone', 'company_email', 'company_nip', 'company_bank',
+    'company_legal_name', 'company_street', 'company_postcode', 'company_city', 'company_legal_address', 'company_regon', 'company_krs', 'company_court', 'company_capital',
+    'company_bdo', 'company_vat_eu', 'company_bank_name', 'company_swift', 'company_www', 'company_pkd',
     'hours_start', 'hours_end', 'slot_min', 'default_vat', 'cash_opening', 'order_terms', ...SETTINGS_KEYS];
   for (const [k, v] of Object.entries(req.body || {})) if (allowed.includes(k)) setSetting(k, String(v ?? ''));
+  const b = req.body || {};
+  if (b.company_street !== undefined || b.company_city !== undefined) {
+    const st = getSetting('company_street', ''), pc = getSetting('company_postcode', ''), city = getSetting('company_city', '');
+    if (st || city) setSetting('company_legal_address', [st, [pc, city].filter(Boolean).join(' ')].filter(Boolean).join(', '));
+  }
   res.json({ ok: true });
 });
 
@@ -1150,7 +1162,7 @@ crm.put('/integrations/:key', (req, res) => {
   res.json({ ok: true });
 });
 const TESTS = {
-  intercars: () => IC.testIntercars(), fakturownia: () => testFakturownia(), smsapi: () => testSms(), email: () => testEmail(), tpay: () => testTpay(),
+  intercars: () => IC.testIntercars(), fakturownia: () => testFakturownia(), ksef: () => KSEF.testKsef(), smsapi: () => testSms(), email: () => testEmail(), tpay: () => testTpay(),
   hart: () => SUP.testHart(), mailbox: () => SUP.testMailbox(),
   smsgate: () => testSmsgate(), serwersms: () => testSerwersms(), smsplanet: () => testSmsplanet(), twilio: () => testTwilio(), smshttp: () => testSmshttp(), plate: () => testPlate(),
   telegram: async () => { const r = await testTelegram(); const row = one(`SELECT config FROM integrations WHERE key='telegram'`); const c = row ? JSON.parse(row.config) : {};
@@ -1527,7 +1539,10 @@ crm.post('/orders/:id/sales-docs', async (req, res) => {
   if (kind === 'vat' && one(`SELECT 1 FROM sales_docs WHERE order_id = ? AND kind = 'vat'`, o.id)) throw new HttpError(409, 'По заказу уже выставлена фактура VAT. Для изменений — фактура корректирующая.');
   const buyer = { ...DOC.buyerFromCustomer(o.customer_id ? one('SELECT * FROM customers WHERE id = ?', o.customer_id) : {}), ...(b.buyer || {}) };
   let ext = null;
-  const viaFakturownia = kind === 'vat' && invoicesEnabled() && getSetting('invoice_mode', 'auto') !== 'local';
+  const mode = getSetting('invoice_mode', 'auto');
+  const viaKsef = kind === 'vat' && mode === 'auto' && KSEF.ksefEnabled();
+  const viaFakturownia = kind === 'vat' && !viaKsef && invoicesEnabled() && mode !== 'local';
+  if (viaKsef) b.issue_date = today(); // KSeF: дата выставления = день отправки (иначе фактура считается офлайн)
   if (viaFakturownia) {
     const r = await issueInvoice(o.id, { buyer });
     ext = { id: r.id, number: r.number, url: r.url };
@@ -1538,9 +1553,14 @@ crm.post('/orders/:id/sales-docs', async (req, res) => {
     const target = Number(getSetting('status_on_sale_doc', '')) || null;
     if (target) try { setStatus(o.id, target, s.name); } catch (e) { log('order', o.id, 'invoice_error', 'Статус после фактуры: ' + e.message, s.name); }
   }
-  res.json({ ...d, ksef: !!ext, warning: kind === 'vat' && !ext ? 'Фактура выставлена в CRM, но не отправлена в KSeF. С 2026 года фактуры VAT нужно передавать в KSeF — подключите Fakturownia (Настройки → Интеграции).' : null });
+  let ks = null, warning = null;
+  if (viaKsef && (cfg('ksef')?.autoSend ?? true)) {
+    try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
+    if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил фактуру: ' + ks.ksef_error;
+  } else if (kind === 'vat' && !ext && !viaKsef) warning = 'Фактура выставлена в CRM, но не отправлена в KSeF. С 2026 года фактуры VAT нужно передавать в KSeF — подключите KSeF (Настройки → Интеграции).';
+  res.json({ ...d, ...(ks || {}), ksef: !!ext, warning });
 });
-crm.post('/sales-docs/:id/correct', (req, res) => {
+crm.post('/sales-docs/:id/correct', async (req, res) => {
   const s = who(req, 'invoices.create');
   const orig = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
   if (!orig || orig.kind !== 'vat') throw new HttpError(400, 'Корректировать можно только фактуру VAT');
@@ -1557,7 +1577,39 @@ crm.post('/sales-docs/:id/correct', (req, res) => {
   });
   const d = DOC.createSaleDoc({ kind: 'correction', orderId: orig.order_id, buyer: JSON.parse(orig.buyer || '{}'), lines, corrects_id: orig.id, reason: String(b.reason).slice(0, 300), payment_method: orig.payment_method, paid: 0, notes: b.notes }, s.name);
   if (orig.order_id) log('order', orig.order_id, 'invoice', `${d.number} (korekta ${orig.number})`, s.name);
-  res.json({ ...d, warning: orig.ksef ? 'Исходная фактура в KSeF: корректу нужно также провести в Fakturownia.' : null });
+  let ks = null, warning = orig.ksef ? 'Исходная фактура в Fakturownia: корректу нужно также провести в Fakturownia.' : null;
+  if (orig.ksef_status && KSEF.ksefEnabled() && (cfg('ksef')?.autoSend ?? true)) {
+    try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
+    if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил корректу: ' + ks.ksef_error;
+  }
+  res.json({ ...d, ...(ks || {}), warning });
+});
+/** KSeF: отправить (повторно), обновить статус, скачать UPO и XML FA(3) */
+crm.post('/sales-docs/:id/ksef', async (req, res) => {
+  const s = who(req, 'invoices.create');
+  const d = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Документ не найден');
+  if (d.ksef_status === 'rejected' || d.ksef_status === 'error') run('UPDATE sales_docs SET ksef_xml = NULL, ksef_ref = NULL WHERE id = ?', d.id);
+  const r = d.ksef_ref && !['rejected', 'error'].includes(d.ksef_status) ? await KSEF.refreshStatus(d.id) : await KSEF.sendToKsef(d.id).catch((e) => {
+    run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); throw e; });
+  if (d.order_id) log('order', d.order_id, 'invoice', `${d.number} → KSeF: ${r.ksef_number || r.ksef_status}`, s.name);
+  res.json(r);
+});
+crm.get('/sales-docs/:id/upo', async (req, res) => {
+  who(req, 'invoices.create');
+  const d = one('SELECT number FROM sales_docs WHERE id = ?', Number(req.params.id));
+  const xml = await KSEF.upoXml(Number(req.params.id));
+  res.setHeader('Content-Type', 'application/xml');
+  res.setHeader('Content-Disposition', `attachment; filename="UPO-${String(d?.number || req.params.id).replace(/[^\w-]+/g, '-')}.xml"`);
+  res.send(xml);
+});
+crm.get('/sales-docs/:id/xml', (req, res) => {
+  who(req, 'invoices.create');
+  const d = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
+  if (!d || d.kind === 'proforma') throw new HttpError(404, 'Нет XML');
+  res.setHeader('Content-Type', 'application/xml');
+  res.setHeader('Content-Disposition', `attachment; filename="${String(d.number).replace(/[^\w-]+/g, '-')}.xml"`);
+  res.send(d.ksef_xml || KSEF.buildFa3(d));
 });
 crm.delete('/sales-docs/:id', (req, res) => {
   const s = who(req, 'invoices.create');

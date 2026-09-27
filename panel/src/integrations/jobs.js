@@ -1,4 +1,5 @@
 // Фоновые задачи интеграций: напоминания о визите, просьба об отзыве, проверка онлайн-оплат, мало на складе
+import { startKsefPoller } from './ksef.js';
 import { all, one, run, ilog, getSetting, setSetting } from '../db.js';
 import { cfg } from './index.js';
 import { sendSms } from '../sms.js';
@@ -74,6 +75,7 @@ export async function runJobs() {
 export function startJobs() {
   startIntercarsSync();
   startSupplierSync();
+  startKsefPoller();
   setInterval(() => runJobs().catch((e) => console.error('jobs:', e.message)), 10 * 60_000);
   setTimeout(() => runJobs().catch(() => {}), 20_000);
 }

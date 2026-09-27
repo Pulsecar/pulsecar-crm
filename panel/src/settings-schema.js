@@ -126,7 +126,7 @@ export const SETTINGS_SCHEMA = [
       txt('release_terms', 'Текст протокола выдачи', '', { multiline: true }),
     ] },
     { title: 'Документы продажи (фактуры)', fields: [
-      sel('invoice_mode', 'Фактура VAT', [['auto', 'Через Fakturownia → KSeF, если подключена'], ['local', 'Только в CRM (без KSeF)']]),
+      sel('invoice_mode', 'Фактура VAT', [['auto', 'KSeF напрямую, если подключён (иначе Fakturownia, если подключена)'], ['fakturownia', 'Через Fakturownia'], ['local', 'Только в CRM (без KSeF)']]),
       txt('sale_person', 'Подпись: кто выставляет фактуры'),
       yes('sale_code', 'Код товара'), yes('sale_gtu', 'Код GTU'), yes('sale_discount', 'Показывать скидку'), yes('sale_order_line', 'Строка с заказом и авто (VIN, пробег)'),
       yes('sale_mpp', 'Надпись «Mechanizm podzielonej płatności» от 15 000 zł'),

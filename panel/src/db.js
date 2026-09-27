@@ -451,6 +451,7 @@ CREATE TABLE IF NOT EXISTS order_files (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+for (const [c, t] of [['ksef_status', 'TEXT'], ['ksef_number', 'TEXT'], ['ksef_ref', 'TEXT'], ['ksef_session', 'TEXT'], ['ksef_hash', 'TEXT'], ['ksef_xml', 'TEXT'], ['ksef_env', 'TEXT'], ['ksef_error', 'TEXT'], ['ksef_sent_at', 'TEXT']]) addColumn('sales_docs', c, t);
 addColumn('products', 'price_group_id', 'INTEGER');
 addColumn('products', 'gtu', 'TEXT');
 addColumn('stations', 'slot_min', 'INTEGER');
@@ -610,6 +611,7 @@ function seedMotowarsztat() {
     work_hours: JSON.stringify({ 1: ['09:00', '18:00'], 2: ['09:00', '18:00'], 3: ['09:00', '18:00'], 4: ['09:00', '18:00'], 5: ['09:00', '18:00'], 6: ['10:00', '14:00'], 0: null }),
     stock_negative: '1', stock_reserve_on_order: '1', default_markup: '40', storage_months: '6', storage_price: '200', doc_show_logo: '1', doc_show_signatures: '1', doc_footer: '',
     // Wygląd dokumentów — как в Motowarsztat
+    company_legal_name: 'AI CARS SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ', company_street: 'ul. Rodziny Hiszpańskich 8', company_postcode: '02-685', company_city: 'Warszawa',
     doc_code_in_name: '0', doc_place: 'Warszawa', company_legal_address: 'ul. Rodziny Hiszpańskich 8, 02-685 Warszawa', quote_valid_days: '14',
     est_net: '0', est_gross: '1', est_labor_net: '0', est_labor_gross: '1', est_parts_code: '0', est_parts_brand: '1', est_parts_net: '0', est_parts_gross: '1', est_extra: '',
     spec_qty: '1', spec_parts_code: '0', spec_after_notes: '1', spec_labor_gross: '1', spec_parts_gross: '1', spec_parts_brand: '1',

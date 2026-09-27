@@ -41,7 +41,8 @@ export function CustomerForm({ c = {}, onClose, onSaved }) {
   const inp = (k, l, t = 'text') => html`<label class="f">${l}<input type=${t} value=${f[k]} onInput=${(e) => set({ ...f, [k]: t === 'number' ? Number(e.target.value) : e.target.value })} /></label>`;
   return html`<${Modal} title=${c.id ? 'Данные клиента' : 'Новый клиент'} onClose=${onClose} wide foot=${html`<button class="btn" onClick=${onClose}>Отмена</button><button class="btn primary" onClick=${save}>Сохранить</button>`}>
     <div class="grid g3">${inp('name', 'Имя и фамилия')}${inp('phone', 'Телефон')}${inp('email', 'E-mail', 'email')}</div>
-    <div class="grid g3">${inp('company', 'Фирма')}${inp('nip', 'NIP')}${inp('street', 'Улица')}</div>
+    <div class="grid g3">${inp('company', 'Фирма')}<label class="f">NIP<div class="row" style="gap:6px;flex-wrap:nowrap"><input value=${f.nip} onInput=${(e) => set({ ...f, nip: e.target.value })} placeholder="10 цифр" />
+        <button class="btn" type="button" title="Найти фирму в реестре Минфина" onClick=${async () => { const r = await act(() => api('nip/' + encodeURIComponent(f.nip))); set({ ...f, company: r.name, street: r.street, postcode: r.postcode, city: r.city, nip: r.nip }); toast(`${r.name} · VAT: ${r.statusVat}`); }}><${Icon} n="search" />Найти</button></div></label>${inp('street', 'Улица')}</div>
     <div class="grid g4">${inp('postcode', 'Индекс')}${inp('city', 'Город')}${inp('discount_labor', 'Скидка на работы, %', 'number')}${inp('discount_parts', 'Скидка на запчасти, %', 'number')}</div>
     <label class="f">Заметка о клиенте<textarea rows="2" value=${f.notes} onInput=${(e) => set({ ...f, notes: e.target.value })}></textarea></label>
     <label class="check"><input type="checkbox" checked=${!!f.marketing_consent} onChange=${(e) => set({ ...f, marketing_consent: e.target.checked ? 1 : 0 })} />Согласие на маркетинговые сообщения</label>

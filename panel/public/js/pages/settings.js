@@ -1,4 +1,4 @@
-import { html, useState, useData, api, act, go, useApp, Icon, Modal, ConfirmButton, Badge, zl, num, fdt } from '../lib.js';
+import { html, useState, useData, api, act, go, useApp, Icon, Modal, ConfirmButton, Badge, zl, num, fdt, toast } from '../lib.js';
 import Integrations from './integrations.js';
 import Messaging, { TplField } from './messaging.js';
 import { Params, Numbering, StaffAccess, CatalogFull, Templates, ChecklistsSettings, Lists } from './settings2.js';
@@ -28,18 +28,40 @@ export default function Settings({ sub }) {
 function Company() {
   const app = useApp();
   const [f, set] = useState({ ...app.settings });
-  const inp = (k, l, t = 'text') => html`<label class="f">${l}<input type=${t} value=${f[k] || ''} onInput=${(e) => set({ ...f, [k]: e.target.value })} /></label>`;
-  return html`<div class="card stack">
-    <div class="grid g3">${inp('company_name', 'Юр. название (для печати)')}${inp('company_brand', 'Бренд')}${inp('company_nip', 'NIP')}</div>
-    <div class="grid g3">${inp('company_address', 'Адрес')}${inp('company_phone', 'Телефон')}${inp('company_email', 'E-mail')}</div>
-    <div class="grid g3">${inp('company_bank', 'Номер счёта (для перевода на карте заказа)')}</div>
-    <div class="grid g4">${inp('hours_start', 'Терминарз с', 'time')}${inp('hours_end', 'Терминарз до', 'time')}
-      <label class="f">Шаг сетки<select value=${f.slot_min} onChange=${(e) => set({ ...f, slot_min: e.target.value })}><option value="15">15 мин</option><option value="30">30 мин</option><option value="60">60 мин</option></select></label>
-      ${inp('cash_opening', 'Наличные в кассе на старте, zł', 'number')}</div>
-    <label class="f">Условия на карте заказа (печатаются внизу)<textarea rows="4" value=${f.order_terms || ''} onInput=${(e) => set({ ...f, order_terms: e.target.value })}
-      placeholder="Np. Warsztat nie odpowiada za rzeczy pozostawione w pojeździe. Części wymienione zwracamy na życzenie klienta…"></textarea></label>
+  const [busy, setBusy] = useState(false);
+  const inp = (k, l, t = 'text', ph = '') => html`<label class="f">${l}<input type=${t} value=${f[k] || ''} placeholder=${ph} onInput=${(e) => set({ ...f, [k]: e.target.value })} /></label>`;
+  const find = async () => {
+    setBusy(true);
+    try {
+      const r = await act(() => api('nip/' + encodeURIComponent(f.company_nip || '')));
+      set({ ...f, company_legal_name: r.name, company_street: r.street, company_postcode: r.postcode, company_city: r.city, company_regon: r.regon || f.company_regon, company_krs: r.krs || f.company_krs,
+        company_bank: f.company_bank || (r.accounts[0] ? r.accounts[0].replace(/(\d{2})(\d{4})(\d{4})(\d{4})(\d{4})(\d{4})(\d{4})/, '$1 $2 $3 $4 $5 $6 $7') : '') });
+      toast(`Найдено: ${r.name} · VAT: ${r.statusVat}`);
+    } finally { setBusy(false); }
+  };
+  return html`<div class="stack">
+    <div class="card stack"><h2>Реквизиты для фактур и KSeF</h2>
+      <div class="grid g3">${inp('company_nip', 'NIP', 'text', '5214141930')}
+        <div class="f" style="align-self:end"><button class="btn" onClick=${find} disabled=${busy}><${Icon} n="search" />${busy ? 'Ищу…' : 'Заполнить по NIP (реестр Минфина)'}</button></div>
+        ${inp('company_vat_eu', 'NIP UE (VAT-UE)', 'text', 'PL5214141930')}</div>
+      <div class="grid g2">${inp('company_legal_name', 'Полное название (на фактуре и в KSeF)', 'text', 'AI CARS SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ')}${inp('company_name', 'Короткое название (на документах)')}</div>
+      <div class="grid g3">${inp('company_street', 'Юр. адрес: улица и номер')}${inp('company_postcode', 'Индекс')}${inp('company_city', 'Город')}</div>
+      <div class="grid g4">${inp('company_regon', 'REGON')}${inp('company_krs', 'KRS')}${inp('company_bdo', 'Номер BDO', 'text', '000123456')}${inp('company_capital', 'Уставный капитал', 'text', '5 000,00 zł')}</div>
+      <div class="grid g2">${inp('company_court', 'Суд регистрации (Sąd Rejonowy…)', 'text', 'Sąd Rejonowy dla m.st. Warszawy, XIII Wydział Gospodarczy KRS')}${inp('company_pkd', 'PKD', 'text', '45.20.Z')}</div>
+      <div class="grid g3">${inp('company_bank', 'Номер счёта (IBAN)')}${inp('company_bank_name', 'Банк')}${inp('company_swift', 'SWIFT')}</div>
+      <div class="muted small">Всё это печатается на фактуре (NIP, REGON, KRS, BDO, капитал, счёт) и уходит в KSeF. BDO обязателен на фактурах, если вы продаёте масла, аккумуляторы, шины и т. п. и зарегистрированы в BDO.</div>
+    </div>
+    <div class="card stack"><h2>Сервис</h2>
+      <div class="grid g3">${inp('company_brand', 'Бренд')}${inp('company_address', 'Адрес сервиса (на карте заказа и протоколах)')}${inp('company_www', 'Сайт')}</div>
+      <div class="grid g3">${inp('company_phone', 'Телефон')}${inp('company_email', 'E-mail')}</div>
+      <div class="grid g4">${inp('hours_start', 'Терминарз с', 'time')}${inp('hours_end', 'Терминарз до', 'time')}
+        <label class="f">Шаг сетки<select value=${f.slot_min} onChange=${(e) => set({ ...f, slot_min: e.target.value })}><option value="15">15 мин</option><option value="30">30 мин</option><option value="60">60 мин</option></select></label>
+        ${inp('cash_opening', 'Наличные в кассе на старте, zł', 'number')}</div>
+      <label class="f">Условия на карте заказа (печатаются внизу)<textarea rows="4" value=${f.order_terms || ''} onInput=${(e) => set({ ...f, order_terms: e.target.value })}
+        placeholder="Np. Warsztat nie odpowiada za rzeczy pozostawione w pojeździe. Części wymienione zwracamy na życzenie klienta…"></textarea></label>
+    </div>
     <div class="row"><button class="btn primary" onClick=${async () => { await act(() => api('settings', { method: 'PUT', body: f }), 'Сохранено'); app.reload(); }}>Сохранить</button></div>
-    <div class="muted small">Токены SMS, Fakturownia, Inter Cars и других сервисов — во вкладке «Интеграции». Шаблоны SMS и e-mail — во вкладке «SMS и шаблоны». Правила Pulse Points — в файле .env на сервере.</div>
+    <div class="muted small">Токены SMS, KSeF, Inter Cars и других сервисов — во вкладке «Интеграции». Шаблоны SMS и e-mail — во вкладке «SMS и шаблоны».</div>
   </div>`;
 }
 

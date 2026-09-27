@@ -5,6 +5,7 @@ import { all, one, run, insert, getSetting } from './db.js';
 import { orderFull, lineGross } from './orders.js';
 import { HttpError, nextNumber, round2, today } from './util.js';
 import { config } from './config.js';
+import { KSEF_ENVS } from './integrations/ksef.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -104,6 +105,7 @@ tr.empty td{height:22px}
 .sig .who{font-size:10px;color:#15171a;margin-bottom:2px}
 .esig{margin-top:14px;border:1px solid #1bb86a;background:#f0fbf5;border-radius:6px;padding:7px 10px;font-size:9.5px;break-inside:avoid}
 .esig img{height:48px;display:block;margin-top:4px}
+.ksef{display:flex;gap:14px;align-items:center;margin-top:14px;border:1px solid #cfd2d6;border-radius:6px;padding:10px;break-inside:avoid}.ksef .qr svg{width:110px;height:110px;display:block}.ksef .kl{font-size:8.5px;text-transform:uppercase;letter-spacing:.08em;color:#6b7078}.ksef .kn{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;margin:2px 0 4px}
 .foot{margin-top:18px;padding-top:6px;border-top:1px solid #cfd2d6;font-size:8px;color:#6b7078;white-space:pre-wrap}
 .dmg{display:grid;grid-template-columns:230px 1fr;gap:12px;align-items:start}
 .gauge{display:inline-block;width:70px;height:7px;border:1px solid #15171a;border-radius:4px;vertical-align:middle;margin-left:4px;overflow:hidden}.gauge i{display:block;height:100%;background:#15171a}
@@ -387,17 +389,31 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
       <div class="words">Słownie: ${esc(slownie(Math.max(0, d.kind === 'proforma' ? d.total_gross : due) || d.total_gross))}</div>`;
   }
   const mpp = d.kind === 'vat' && d.total_gross >= 15000 && S.sale_mpp !== '0';
+  // KSeF: QR «KOD I» (ссылка на проверку фактуры в Минфине) и номер KSeF под ним
+  let ksefBox = '';
+  if (d.ksef_hash) {
+    const env = KSEF_ENVS[d.ksef_env] || KSEF_ENVS.prod;
+    const [y, m, dd] = d.issue_date.split('-');
+    const url = `${env.qr}/invoice/${String(S.company_nip || '').replace(/\D/g, '')}/${dd}-${m}-${y}/${Buffer.from(d.ksef_hash, 'base64').toString('base64url')}`;
+    ksefBox = `<div class="ksef"><div class="qr" data-qr="${esc(url)}"></div><div><div class="kl">Numer KSeF</div><div class="kn">${esc(d.ksef_number || 'OFFLINE')}</div>
+      <div class="sub">Faktura wystawiona w Krajowym Systemie e-Faktur. Zeskanuj kod, aby zweryfikować fakturę.</div></div></div>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+      <script>document.querySelectorAll('[data-qr]').forEach(function(el){try{var q=qrcode(0,'M');q.addData(el.dataset.qr);q.make();el.innerHTML=q.createSvgTag({cellSize:3,margin:0});}catch(e){el.textContent=el.dataset.qr}})</script>`;
+  }
   const body = `<div class="cols">
-      <div class="box"><h3>Sprzedawca</h3><div class="n">${esc(S.company_name || '')}</div>${esc(S.company_legal_address || S.company_address || '')}<br>NIP: <b>${esc(S.company_nip || '—')}</b>${S.company_bank ? `<br>Nr konta: <b>${esc(S.company_bank)}</b>` : ''}</div>
+      <div class="box"><h3>Sprzedawca</h3><div class="n">${esc(S.company_legal_name || S.company_name || '')}</div>${esc(S.company_legal_address || S.company_address || '')}<br>NIP: <b>${esc(S.company_nip || '—')}</b>${S.company_bank ? `<br>Nr konta: <b>${esc(S.company_bank)}</b>` : ''}</div>
       <div class="box"><h3>Nabywca</h3><div class="n">${esc(b.name || '')}</div>${esc([b.street, [b.postcode, b.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}${b.nip ? `<br>NIP: <b>${esc(b.nip)}</b>` : ''}</div>
     </div>
     ${d.kind === 'correction' && orig ? `<div class="sec box kv"><span>Dotyczy faktury</span><b>${esc(orig.number)} z dnia ${esc(orig.issue_date)}</b><span>Data sprzedaży</span><b>${esc(orig.sale_date)}</b></div>` : ''}
     ${o && S.sale_order_line !== '0' ? `<div class="sub" style="margin-bottom:6px">Zlecenie ${esc(o.number)}${o.make ? ` · ${esc([o.make, o.model, o.plate].filter(Boolean).join(' '))}` : ''}${o.vin ? ` · VIN ${esc(o.vin)}` : ''}${o.mileage ? ` · przebieg ${esc(o.mileage)} km` : ''}</div>` : ''}
     ${items}${totals}
     <div class="cols" style="margin-top:10px"><div class="box kv"><span>Sposób płatności</span><b>${esc(PAY_PL[d.payment_method] || d.payment_method)}</b><span>Termin płatności</span><b>${esc(d.due_date)}</b>${S.company_bank && d.payment_method === 'transfer' ? `<span>Rachunek</span><b>${esc(S.company_bank)}</b>` : ''}</div>
-      ${(() => { const t = `${mpp ? '<b>Mechanizm podzielonej płatności</b><br>' : ''}${d.kind === 'proforma' ? '<b>Dokument nie jest fakturą VAT</b> i nie stanowi podstawy do odliczenia podatku.<br>' : ''}${d.ksef && d.ext_id ? 'Faktura przekazana do KSeF przez Fakturownia.<br>' : ''}${esc(d.notes || '')}`; return t ? `<div class="box">${t}</div>` : '<div></div>'; })()}</div>
+      ${(() => { const t = `${mpp ? '<b>Mechanizm podzielonej płatności</b><br>' : ''}${d.kind === 'proforma' ? '<b>Dokument nie jest fakturą VAT</b> i nie stanowi podstawy do odliczenia podatku.<br>' : ''}${d.ksef && d.ext_id ? 'Faktura przekazana do KSeF przez Fakturownia.<br>' : ''}${d.ksef_number ? 'Faktura przyjęta w KSeF.<br>' : ''}${esc(d.notes || '')}`; return t ? `<div class="box">${t}</div>` : '<div></div>'; })()}</div>
+    ${ksefBox}
+    ${[S.company_krs && `KRS ${S.company_krs}${S.company_court ? ', ' + S.company_court : ''}`, S.company_regon && `REGON ${S.company_regon}`, S.company_bdo && `BDO ${S.company_bdo}`, S.company_capital && `Kapitał zakładowy ${S.company_capital}`].filter(Boolean).length
+      ? `<div class="sec sub">${esc([S.company_krs && `KRS ${S.company_krs}${S.company_court ? ', ' + S.company_court : ''}`, S.company_regon && `REGON ${S.company_regon}`, S.company_bdo && `Nr BDO ${S.company_bdo}`, S.company_capital && `Kapitał zakładowy ${S.company_capital}`].filter(Boolean).join(' · '))}</div>` : ''}
     ${S.sale_footer ? `<div class="sec note">${esc(S.sale_footer)}</div>` : ''}
-    ${sigBlock('Osoba upoważniona do wystawienia', 'Osoba upoważniona do odbioru', S.sale_person || d.created_by || '')}`;
+    ${d.ksef_hash ? '' : sigBlock('Osoba upoważniona do wystawienia', 'Osoba upoważniona do odbioru', S.sale_person || d.created_by || '')}`;
   return page({
     S, title: SALE_KIND[d.kind], number: d.number, legal: true, bar, back,
     meta: [['Data wystawienia', d.issue_date], d.kind !== 'proforma' ? ['Data sprzedaży', d.sale_date] : null, ['Miejsce wystawienia', d.place || 'Warszawa']],

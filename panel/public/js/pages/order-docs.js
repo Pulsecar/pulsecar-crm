@@ -19,6 +19,14 @@ export function DocsMenu({ o }) {
 const KIND = { vat: 'Фактура VAT', proforma: 'Pro forma', correction: 'Корректа' };
 const PAYM = [['cash', 'Наличные'], ['card', 'Карта'], ['transfer', 'Перевод']];
 
+const KS = { accepted: ['Przyjęty', 'var(--accent)'], sent: ['Wysłano, ждём номер', 'var(--warn)'], rejected: ['Odrzucony', 'var(--danger)'], error: ['Ошибка отправки', 'var(--danger)'] };
+function KsefChip({ d }) {
+  if (!d.ksef_status) return d.ext_url ? html`<div class="sub">KSeF через Fakturownia</div>` : html`<div class="sub">не в KSeF</div>`;
+  const [l, c] = KS[d.ksef_status] || [d.ksef_status, 'var(--muted)'];
+  return html`<div class="small"><span class="badge" style=${`border-color:${c};color:${c}`}>KSeF · ${l}</span> ${d.ksef_number ? html`<span class="sub mono">${d.ksef_number}</span>` : ''}
+    ${d.ksef_error ? html`<div class="sub" style="color:var(--danger)">${d.ksef_error}</div>` : ''}</div>`;
+}
+
 export function SalesDocs({ o, reload }) {
   const app = useApp();
   const [form, setForm] = useState(null);
@@ -51,12 +59,15 @@ export function SalesDocs({ o, reload }) {
   return html`<div class="card">
     <h2>Документы продажи</h2>
     ${o.sales_docs?.length ? html`<table class="tbl" style="margin-bottom:10px"><tbody>${o.sales_docs.map((d) => html`<tr>
-      <td><b>${d.number}</b><div class="sub">${KIND[d.kind]} · ${d.issue_date}${d.kind === 'vat' ? (d.ksef ? ' · KSeF ✓' : ' · не в KSeF') : ''}</div></td><td class="r nowrap">${zl(d.total_gross)}</td>
+      <td><b>${d.number}</b><div class="sub">${KIND[d.kind]} · ${d.issue_date}</div>${d.kind !== 'proforma' ? html`<${KsefChip} d=${d} />` : ''}</td><td class="r nowrap">${zl(d.total_gross)}</td>
       <td class="act nowrap"><a class="btn sm" href=${'/crm-api/print/sale/' + d.id} target="_blank" rel="noopener">Открыть</a>
+        ${d.kind !== 'proforma' && !d.ext_url && app.features.ksef && d.ksef_status !== 'accepted' && html`<button class="btn sm" onClick=${async () => { const r = await act(() => api(`sales-docs/${d.id}/ksef`, { body: {} })); toast(r.ksef_number ? 'KSeF: ' + r.ksef_number : r.ksef_status === 'rejected' ? 'KSeF отклонил: ' + r.ksef_error : 'Отправлено, ждём номер KSeF', r.ksef_status === 'rejected' ? 'error' : 'ok'); reload(); }}>${d.ksef_status ? 'Проверить KSeF' : 'В KSeF'}</button>`}
+        ${d.ksef_number && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + d.id + '/upo'}>UPO</a>`}
+        ${d.kind !== 'proforma' && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + d.id + '/xml'} title="XML FA(3)">XML</a>`}
         ${d.ext_url && html`<a class="btn sm" href=${d.ext_url} target="_blank" rel="noopener">Fakturownia</a>`}
         ${d.kind === 'vat' && html`<button class="btn sm" onClick=${() => startCorr(d)}>Корректа</button>`}
         ${d.kind === 'proforma' && html`<${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api('sales-docs/' + d.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table>`
-      : html`<div class="muted small" style="margin-bottom:10px">Фактур пока нет. ${app.features.invoices ? 'Фактура VAT уйдёт в Fakturownia и KSeF.' : html`Фактура VAT будет выставлена в CRM без KSeF — <a href="#/settings/integrations">подключить Fakturownia</a>.`}</div>`}
+      : html`<div class="muted small" style="margin-bottom:10px">Фактур пока нет. ${app.features.ksef ? 'Фактура VAT сразу уйдёт в KSeF.' : app.features.invoices ? 'Фактура VAT уйдёт в Fakturownia и KSeF.' : html`Фактура VAT будет выставлена в CRM без KSeF — <a href="#/settings/integrations">подключить KSeF</a>.`}</div>`}
     <div class="row">${!hasVat && html`<button class="btn primary" disabled=${!o.items.length} onClick=${() => open('vat')}>Фактура VAT</button>`}
       ${app.settings.proforma_on !== '0' && html`<button class="btn" disabled=${!o.items.length} onClick=${() => open('proforma')}>Pro forma</button>`}</div>
     ${o.invoice_no && !o.sales_docs?.some((d) => d.kind === 'vat') ? html`<div class="small" style="margin-top:8px">Фактура из Fakturownia: <b>${o.invoice_no}</b> <a class="btn sm" href=${'/crm-api/orders/' + o.id + '/invoice.pdf'} target="_blank" rel="noopener">PDF</a></div>` : ''}
