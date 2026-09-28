@@ -120,6 +120,11 @@ const P = {
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
   tag: 'M3 12V4h8l10 10-8 8zM7.5 7.5h.01',
   chat: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12zM8 11h.01M12 11h.01M16 11h.01',
+  list: 'M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01',
+  play: 'M8 5.5v13l10-6.5z',
+  grip: 'M4 8h16M4 12h16M4 16h16',
+  camera: 'M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
+  down: 'M6 9l6 6 6-6',
 };
 export const Icon = ({ n }) => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${P[n] || ''} /></svg>`;
 

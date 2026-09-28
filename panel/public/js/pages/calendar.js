@@ -17,6 +17,11 @@ const h1 = (n) => `${Math.round(n * 100) / 100}`.replace('.', ',') + ' ч';
 const store = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const keep = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 const isHours = (j) => !/szt|шт|us[lł]|kpl/i.test(j.unit || '');
+// цвета записей без заказа (заявка, запланировано, приехал, не приехал) — меняются в легенде терминарза
+const APPT_COLOR = { request: '#F0B429', planned: '#5B8DEF', arrived: '#1BF372', no_show: '#E34948', block: '#6B6E75' };
+export const evColor = (a, S) => (a.status === 'block' ? S.cal_color_block || APPT_COLOR.block
+  : a.order_id && a.status_color && a.status !== 'no_show' ? a.status_color : S['cal_color_' + a.status] || APPT_COLOR[a.status] || APPT_COLOR.planned);
+const tint = (c) => `border-left-color:${c};background:color-mix(in srgb, ${c} 22%, var(--surface3));`;
 
 export default function Calendar({ query }) {
   const app = useApp();
@@ -63,12 +68,23 @@ export default function Calendar({ query }) {
   // растягивание карточки за нижний край — меняем длительность
   const resize = (e, a) => {
     e.preventDefault(); e.stopPropagation();
-    const y0 = e.clientY, d0 = a.duration_min, el = e.currentTarget.parentElement;
+    const y0 = e.clientY, d0 = a.duration_min, el = e.currentTarget.closest('.cal-ev');
+    const was = el.draggable; el.draggable = false; el.classList.add('resizing');
     let dur = d0;
-    const mv = (ev) => { dur = Math.max(step, Math.round((d0 + ((ev.clientY - y0) / SLOT_PX) * step) / step) * step); el.style.height = `${(dur / step) * SLOT_PX - 3}px`; };
-    const up = () => { removeEventListener('mousemove', mv); removeEventListener('mouseup', up); if (dur !== d0) put(a.id, { duration_min: dur }, `Длительность: ${h1(dur / 60)}`); };
-    addEventListener('mousemove', mv); addEventListener('mouseup', up);
+    const tip = document.createElement('div'); tip.className = 'hg-dur'; el.appendChild(tip);
+    const show = () => { tip.textContent = `${h1(dur / 60)} · до ${hhmm(toMin(a.start_at.slice(11, 16)) + dur)}`; };
+    show();
+    const mv = (ev) => { dur = Math.max(step, Math.round((d0 + ((ev.clientY - y0) / SLOT_PX) * step) / step) * step); el.style.height = `${(dur / step) * SLOT_PX - 3}px`; show(); };
+    const up = () => {
+      removeEventListener('pointermove', mv); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+      tip.remove(); el.classList.remove('resizing'); el.draggable = was;
+      el.dataset.justResized = '1'; setTimeout(() => { delete el.dataset.justResized; }, 250);
+      if (dur !== d0) put(a.id, { duration_min: dur }, `Длительность: ${h1(dur / 60)}`);
+    };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up); addEventListener('pointercancel', up);
   };
+  const open = (e, a) => { if (e.currentTarget.dataset.justResized) return; setEdit(a); };
+  const [legend, setLegend] = useState(false);
 
   const d = new Date(date + 'T12:00:00');
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
@@ -93,8 +109,10 @@ export default function Calendar({ query }) {
       <div class="hg-title">${title}</div>
       <div class="btn-group">${[['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) => html`<button class=${'btn' + (view === k ? ' primary' : '')} onClick=${() => setView(k)}>${l}</button>`)}</div>
       ${canEdit && html`<button class="btn primary" onClick=${() => setCreate({ station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="plus" />Добавить</button>`}
+      <button class=${'btn' + (legend ? ' on' : '')} onClick=${() => setLegend(!legend)} title="Цвета статусов">Цвета</button>
       ${app.perms['settings.manage'] && html`<a class="btn" href="#/settings/stations" title="Посты и часы работы"><${Icon} n="gear" /></a>`}
     </div>
+    ${legend && html`<${Legend} app=${app} onChanged=${() => { app.reload(); reload(); }} />`}
 
     <div class=${'hg' + (left ? '' : ' no-left')}>
       ${left && html`<aside class=${'hg-left' + (drag?.type === 'appt' ? ' droppable' : '')} onDragOver=${(e) => drag?.type === 'appt' && e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>
@@ -102,7 +120,7 @@ export default function Calendar({ query }) {
         <input type="search" placeholder="Поиск: номер, клиент, авто…" value=${q} onInput=${(e) => setQ(e.target.value)} />
         ${drag?.type === 'appt' && html`<div class="hg-hint">Отпустите здесь, чтобы убрать из графика</div>`}
         <div class="hg-list">${pending.map((x) => x._t === 'order' ? html`
-          <div class="hg-card" draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'order', id: x.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>
+          <div class="hg-card" style=${x.status_color ? 'border-left:4px solid ' + x.status_color : ''} draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'order', id: x.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>
             <div class="row"><${Icon} n="wrench" /><a href=${'#/orders/' + x.id} class="grow"><b>${x.number}</b></a>
               <span class="small">${h1(Math.max(0, (x.hours || 0) - x.planned_min / 60) || x.hours || 0)}</span>${x.jobs?.length ? html`<span class="chip">${x.jobs.length}</span>` : ''}
               ${canEdit && html`<button class="icon-btn sm" title="Поставить в график" onClick=${() => setCreate({ order: x, station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="cal" /></button>`}</div>
@@ -149,17 +167,18 @@ export default function Calendar({ query }) {
             const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX;
             const h = Math.max(SLOT_PX - 3, (a.duration_min / step) * SLOT_PX - 3);
             if (a.status === 'block') return html`<div class="cal-ev block" style=${`top:${top}px;height:${h}px`} onClick=${() => setEdit(a)}>
-              <b><${Icon} n="x" /> ${a.title || 'Занято'}</b>${canEdit && html`<i class="hg-resize" onMouseDown=${(e) => resize(e, a)}></i>`}</div>`;
+              <b><${Icon} n="x" /> ${a.title || 'Занято'}</b>${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}</div>`;
             return html`<div class=${'cal-ev' + (a.status === 'request' ? ' request' : '') + (a.status === 'arrived' ? ' arrived' : '') + (a.status === 'no_show' ? ' noshow' : '') + (drag?.id === a.id && drag.type === 'appt' ? ' dragging' : '')}
-                draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${() => setEdit(a)}
-                style=${`top:${top}px;height:${h}px;border-left-color:${a.status_color || s.color || 'var(--accent)'}`}>
+                draggable=${canEdit} onDragStart=${(e) => { if (e.currentTarget.classList.contains('resizing')) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${(e) => open(e, a)}
+                style=${`top:${top}px;height:${h}px;` + tint(evColor(a, app.settings))} title=${a.status_name ? 'Статус заказа: ' + a.status_name : STATUS[a.status] || ''}>
               <div class="row"><${Icon} n=${a.order_id ? 'wrench' : 'cal'} /><b class="grow">${a.order_number || a.title || 'Запись'}</b>
                 ${a.part_total > 1 ? html`<span class="chip">${a.part_no}/${a.part_total}</span>` : ''}</div>
               ${(a.customer_name || a.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${a.customer_name || a.contact_name}</div>`}
               ${(a.make || a.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(a)} ${a.plate || ''}</div>`}
               ${h > SLOT_PX * 1.5 ? html`<div class="hg-jobs">${(a.jobs || []).map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}
                 ${!a.jobs?.length && (a.order_complaint || a.note) ? html`<div class="muted">${a.order_complaint || a.note}</div>` : ''}</div>` : ''}
-              ${canEdit && html`<i class="hg-resize" title="Потяните, чтобы изменить длительность" onMouseDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}
+              ${a.status_name ? html`<div class="hg-st" style=${'color:' + evColor(a, app.settings)}>${a.status_name}${a.media_done ? ' · 📷' : ''}</div>` : ''}
+              ${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}
             </div>`;
           })}
         </div>`)}
@@ -172,7 +191,7 @@ export default function Calendar({ query }) {
             onDragOver=${(e) => { if (!drag) return; e.preventDefault(); setOver('w' + day); }} onDrop=${(e) => { e.preventDefault(); const s0 = stations[0]; if (s0) dropOn(drag?.type === 'appt' ? rows.find((x) => x.id === drag.id)?.station_id || s0.id : s0.id, drag?.type === 'appt' ? toMin(rows.find((x) => x.id === drag.id)?.start_at.slice(11) || hhmm(start)) : start, day); }}>
           <h4><a href="#" onClick=${(e) => { e.preventDefault(); setDate(day); setView('day'); }}>${DAYS[new Date(day + 'T12:00').getDay()]} ${fdate(day).slice(0, 5)}</a> <span class="faint">${busy ? h1(busy) : ''}</span></h4>
           ${evs.map((a) => html`<div class=${'ev' + (a.status === 'block' ? ' block' : '')} draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: a.id })} onDragEnd=${() => { setDrag(null); setOver(null); }}
-              style=${'border-left-color:' + (a.status_color || stations.find((s) => s.id === a.station_id)?.color || 'var(--accent)')} onClick=${() => setEdit(a)}>
+              style=${tint(evColor(a, app.settings))} onClick=${() => setEdit(a)}>
             <b>${a.start_at.slice(11)}</b> ${a.order_number || a.title || ''}<div class="muted">${a.customer_name || a.contact_name || ''}</div><div class="muted">${carName(a)} ${a.plate || ''}</div></div>`)}
         </div>`;
       })}</div>` : html`
@@ -275,7 +294,7 @@ function ApptModal({ a, onClose, onSaved }) {
     onClose(); go('/orders/' + r.id);
   };
   const isBlock = a.status === 'block';
-  return html`<${Modal} wide title=${isBlock ? 'Блокировка' : a.order_number ? 'Заказ ' + a.order_number : 'Заявка / запись'} onClose=${onClose} foot=${html`
+  return html`<${Modal} wide xl=${!!a.order_id} title=${isBlock ? 'Блокировка' : a.order_number ? 'Заказ ' + a.order_number : 'Заявка / запись'} onClose=${onClose} foot=${html`
       ${canEdit && html`<${ConfirmButton} cls="btn danger" label=${a.order_id ? 'Убрать из графика?' : 'Точно?'} onConfirm=${async () => { await act(() => api('appointments/' + f.id, { method: 'DELETE' }), a.order_id ? 'Убрано из графика — заказ в «Неназначенных»' : 'Удалено'); onSaved(); }}>${a.order_id ? 'Убрать из графика' : isBlock ? 'Удалить блокировку' : 'Отменить запись'}</${ConfirmButton}>`}
       <span style="flex:1"></span>
       ${a.order_id ? html`<a class="btn" href=${'#/orders/' + a.order_id} onClick=${onClose}>Открыть заказ</a>` : !isBlock && canEdit ? html`<button class="btn" onClick=${toOrder}>Создать заказ</button>` : ''}
@@ -290,7 +309,7 @@ function ApptModal({ a, onClose, onSaved }) {
       <div class="card" style="background:var(--surface2)"><div class="row"><b class="grow">${a.order_number}</b>${a.status_name && html`<span class="badge" style=${`border-color:${a.status_color};color:${a.status_color}`}>${a.status_name}</span>`}</div>
         <div class="muted">${a.customer_name || ''} ${a.customer_phone || ''} · ${carName(a)} ${a.plate || ''}</div>
         ${a.order_complaint && html`<div style="margin-top:6px">${a.order_complaint}</div>`}
-        ${a.jobs?.length ? html`<div class="hg-jobs" style="margin-top:6px">${a.jobs.map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}</div>` : ''}</div>
+        <${OrderItems} a=${a} onStatus=${onSaved} /></div>
       <div class="grid g2"><label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
         <label class="f">Статус записи<select value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${['planned', 'arrived', 'no_show'].map((k) => html`<option value=${k}>${STATUS[k]}</option>`)}</select></label></div>` : html`
     <div class="grid g2">
@@ -315,4 +334,50 @@ function ApptModal({ a, onClose, onSaved }) {
     ${a.source === 'app' ? html`<div class="muted small">Заявка из приложения · ${fdt(a.created_at)}</div>` : ''}
     <div class="muted small">«Создать заказ» превратит заявку в заказ — запись останется в графике и будет связана с заказом.</div>`}
   </${Modal}>`;
+}
+
+// ── Работы и товары заказа прямо в окне записи + смена статуса (цвет карточки) ──
+function OrderItems({ a, onStatus }) {
+  const app = useApp();
+  const { data: o, error, reload } = useData(a.order_id ? 'orders/' + a.order_id : null, [a.order_id]);
+  if (error) return a.jobs?.length ? html`<div class="hg-jobs" style="margin-top:6px">${a.jobs.map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span></div>`)}</div>` : '';
+  if (!o) return html`<div class="muted small" style="margin-top:6px">Загружаю работы и товары…</div>`;
+  const labor = o.items.filter((i) => i.kind === 'labor'), parts = o.items.filter((i) => i.kind === 'part');
+  const toggle = async (it) => { await act(() => api(`orders/${o.id}/items/${it.id}`, { method: 'PUT', body: { done: it.done ? 0 : 1 } })); reload(); };
+  const setStatus = async (sid) => { const r = await act(() => api(`orders/${o.id}/status`, { body: { status_id: Number(sid) } }), 'Статус изменён'); if (r?.sms || r?.email) toast('Уведомление клиенту — в карточке заказа'); onStatus(); };
+  const sum = (x) => x.reduce((t, i) => t + (i.qty * i.price * (1 - (i.discount || 0) / 100)), 0);
+  const money = (n) => (Number(n) || 0).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' zł';
+  return html`<div class="appt-order">
+    ${app.perms['orders.status'] && html`<label class="f" style="max-width:320px">Статус заказа<select value=${o.status_id} onChange=${(e) => setStatus(e.target.value)} style=${`border-color:${o.status?.color || ''}`}>
+      ${app.statuses.map((st) => html`<option value=${st.id}>${st.name}</option>`)}</select></label>`}
+    <div class="grid g2" style="margin-top:8px">
+      <div><h4 class="appt-h">Работы <span class="faint">${labor.length}</span></h4>
+        ${labor.length ? html`<div class="appt-list">${labor.map((j) => html`<label class=${'appt-row' + (j.done ? ' done' : '')}>
+          <input type="checkbox" checked=${!!j.done} onChange=${() => toggle(j)} /><span class="grow">${j.name}</span>
+          <span class="faint nowrap">${Number(j.qty)} ${j.unit || ''}</span>${o.total !== null ? html`<span class="nowrap">${money(j.qty * j.price * (1 - (j.discount || 0) / 100))}</span>` : ''}</label>`)}</div>` : html`<div class="muted small">Работ нет</div>`}</div>
+      <div><h4 class="appt-h">Товары <span class="faint">${parts.length}</span></h4>
+        ${parts.length ? html`<div class="appt-list">${parts.map((p) => html`<div class="appt-row"><span class="grow">${p.name}${p.code ? html` <span class="faint small">${p.code}</span>` : ''}
+          ${p.product_id && p.product_stock !== null && p.product_stock < p.qty ? html`<div class="stock-warn">нет на складе — заказать</div>` : ''}</span>
+          <span class="faint nowrap">${Number(p.qty)} ${p.unit || 'szt.'}</span>${o.total !== null ? html`<span class="nowrap">${money(p.qty * p.price * (1 - (p.discount || 0) / 100))}</span>` : ''}</div>`)}</div>` : html`<div class="muted small">Товаров нет</div>`}</div>
+    </div>
+    ${o.total !== null ? html`<div class="row small" style="margin-top:6px;justify-content:flex-end"><span class="muted">Работы ${money(sum(labor))} · товары ${money(sum(parts))} ·</span><b>итого ${money(o.total)}</b></div>` : ''}
+    ${o.mechanic_note ? html`<div class="small" style="margin-top:6px"><span class="muted">Для механика:</span> ${o.mechanic_note}</div>` : ''}
+    ${o.media_done ? html`<div class="small pos" style="margin-top:4px">📷 Фото/видео до/после загружены (${o.media_done_by || ''})</div>` : ''}
+  </div>`;
+}
+
+// ── Легенда цветов: статусы заказов и записи без заказа, цвет меняется прямо здесь ──
+function Legend({ app, onChanged }) {
+  const can = app.perms['settings.manage'];
+  const S = app.settings;
+  const setOrder = async (st, color) => { await act(() => api('dict/statuses', { body: { ...st, color } }), 'Цвет статуса сохранён'); onChanged(); };
+  const setAppt = async (k, color) => { await act(() => api('settings', { method: 'PUT', body: { ['cal_color_' + k]: color } }), 'Цвет сохранён'); onChanged(); };
+  const sw = (color, onPick) => can ? html`<input type="color" class="sw" value=${color} onChange=${(e) => onPick(e.target.value)} title="Изменить цвет" />` : html`<i class="sw" style=${'background:' + color}></i>`;
+  return html`<div class="card hg-legend">
+    <div class="row wrap"><b class="small">Заказ по статусу:</b>
+      ${app.statuses.map((st) => html`<span class="lg">${sw(st.color || '#5B8DEF', (c) => setOrder(st, c))}${st.name}</span>`)}</div>
+    <div class="row wrap"><b class="small">Записи без заказа:</b>
+      ${['request', 'planned', 'arrived', 'no_show', 'block'].map((k) => html`<span class="lg">${sw(S['cal_color_' + k] || APPT_COLOR[k], (c) => setAppt(k, c))}${STATUS[k]}</span>`)}</div>
+    <div class="muted small">${can ? 'Нажмите на цвет, чтобы поменять. ' : ''}Карточка в графике окрашивается по статусу заказа — поменяли статус, поменялся цвет.</div>
+  </div>`;
 }

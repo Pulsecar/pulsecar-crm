@@ -4,6 +4,7 @@ import { html, useState, useEffect, api, act, go, useApp, Icon, Picker, ConfirmB
 import { CustomerCarPicker } from './orders.js';
 import { SupplierParts } from './suppliers.js';
 import { CarDiagram, DMG } from './order-docs.js';
+import { LaborBlock } from './labor.js';
 
 export const FLAGS = [['return_parts', 'Возврат деталей клиенту'], ['reg_doc', 'Техпаспорт'], ['test_drive', 'Согласие на тест-драйв'], ['fluids', 'Долить жидкости'], ['lights', 'Проверить освещение']];
 export const FUEL = ['', 'резерв', '1/4', '1/2', '3/4', 'полный'];
@@ -146,38 +147,15 @@ export function ItemsMW({ o, reload }) {
   const sumRow = (rows, mode, span, tail) => html`<tr class="sum-row"><td colspan=${span}></td>
     <td class="r nowrap">${zl(rows.reduce((s, i) => s + net(lineGross(i), i.vat), 0))}<div class="sub">нетто</div></td><td class="r nowrap"><b>${zl(rows.reduce((s, i) => s + lineGross(i), 0))}</b><div class="sub">брутто</div></td>${tail}</tr>`;
 
-  const laborHead = html`<tr><th style="width:28px">${quote ? '' : '✓'}</th><th style="width:28px">Lp.</th><th>Работа</th>${!quote ? html`<th>Механик</th>` : ''}<th class="r">Кол-во</th><th>Ед.</th>
-    ${seePrice ? html`<th class="r">Цена ${modeL === 'net' ? 'нетто' : 'брутто'}</th>${showDisc ? html`<th class="r">Скидка %</th>` : ''}<th>VAT</th><th class="r">Сумма нетто</th><th class="r">Сумма брутто</th>` : ''}<th></th></tr>`;
   const partsHead = html`<tr><th style="width:28px">Lp.</th><th>Товар</th><th>Код</th>${!quote ? html`<th>Работа</th>` : ''}<th class="r">Кол-во</th><th>Ед.</th>
     ${seePrice ? html`<th class="r">Цена ${modeP === 'net' ? 'нетто' : 'брутто'}</th>${showCost ? html`<th class="r" title="Себестоимость (закупка) — видно только в CRM, клиенту не показывается">Себестоимость ${modeP === 'net' ? 'нетто' : 'брутто'}</th>` : ''}${showDisc ? html`<th class="r">Скидка %</th>` : ''}<th>VAT</th><th class="r">Сумма нетто</th><th class="r">Сумма брутто</th>` : ''}<th></th></tr>`;
   const vatSel = (i) => html`<select class="inline-input" style="width:64px" value=${i.vat} disabled=${!editPrice} onChange=${(e) => save(i, { vat: Number(e.target.value) })}>${[...new Set([...vats, i.vat])].map((v) => html`<option value=${v}>${v}%</option>`)}</select>`;
 
   return html`
     ${o.only_my_jobs && html`<div class="card small muted" style="margin-bottom:12px">Показаны только ваши работы и запчасти к ним.</div>`}
-    <div class="card tight">
-      <div class="mw-bar"><h2>Работы</h2><span class="muted small">${num(labor.reduce((s, i) => s + (Number(i.qty) || 0), 0), 2)} ед.</span>
-        ${seePrice && html`<${NetGross} value=${modeL} set=${(v) => { setModeL(v); keep('pc-ng-labor', v); }} />`}</div>
-      ${labor.length ? html`<div class="tbl-wrap"><table class="tbl items mw-items"><thead>${laborHead}</thead><tbody>
-        ${labor.map((it, n) => html`<tr>
-          <td>${!quote && html`<input type="checkbox" class="done-toggle" checked=${!!it.done} title="Выполнено" onChange=${(e) => save(it, { done: e.target.checked ? 1 : 0 })} />`}</td><td class="sub">${n + 1}</td>
-          <td><input class="inline-input iname" value=${it.name} disabled=${mech} onChange=${(e) => save(it, { name: e.target.value })} /></td>
-          ${!quote && html`<td><select class="inline-input" value=${it.mechanic_id || ''} disabled=${mech} onChange=${(e) => save(it, { mechanic_id: e.target.value ? Number(e.target.value) : null })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></td>`}
-          <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '0.1')}</td>
-          <td><select class="inline-input" style="width:74px" value=${it.unit || ''} disabled=${mech} onChange=${(e) => save(it, { unit: e.target.value })}>${[...new Set([...units, it.unit].filter(Boolean))].map((u) => html`<option value=${u}>${u}</option>`)}</select></td>
-          ${seePrice && html`<td class="r">${numIn(it, 'price', 'price', shown(it, modeL), (v) => setPrice(it, modeL, v), !editPrice)}</td>
-            ${showDisc && html`<td class="r">${numIn(it, 'discount', 'disc', it.discount, (v) => save(it, { discount: v }), !editPrice, '1')}</td>`}<td>${vatSel(it)}</td>
-            <td class="r nowrap">${zl(net(lineGross(it), it.vat))}</td><td class="r nowrap"><b>${zl(lineGross(it))}</b></td>`}
-          <td class="act">${!mech && html`<button class="icon-btn" title="Удалить" onClick=${() => del(it)}><${Icon} n="trash" /></button>`}</td></tr>`)}
-        ${seePrice && sumRow(labor, modeL, (quote ? 5 : 6) + 1 + (showDisc ? 1 : 0) + 1, html`<td></td>`)}</tbody></table></div>` : html`<div class="empty" style="padding:16px">Работ пока нет</div>`}
-      ${!mech && html`<div class="mw-actions">
-        <div class="grow" style="max-width:480px"><${Picker} placeholder="+ Из прайса работ…" path=${(q) => 'catalog?q=' + encodeURIComponent(q)}
-          render=${(c) => html`<b>${c.name}</b> <span class="sub">${c.category || ''} · ${c.qty} ${c.unit} · ${zl(c.price)}</span>`}
-          onPick=${(c) => add({ kind: 'labor', name: c.name, qty: c.qty, unit: c.unit, price: c.price, vat: c.vat, discount: discL, mechanic_id: o.mechanic_id })}
-          extra=${{ label: 'Новая работа', onClick: (q) => q && add({ kind: 'labor', name: q, qty: 1, unit: S.labor_unit_default || 'oper', price: 0, discount: discL, mechanic_id: o.mechanic_id }) }} /></div>
-        ${app.templates?.filter((t) => t.active).length ? html`<select style="width:auto" value="" onChange=${async (e) => { const tid = e.target.value; e.target.value = ''; if (!tid) return; const r = await act(() => api(`orders/${o.id}/apply-template/${tid}`, { body: {} })); toast(`Добавлено из шаблона: ${r.added}`); reload(); }}>
-          <option value="">+ Из шаблона заданий…</option>${app.templates.filter((t) => t.active).map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select>` : ''}
-        <button class="btn sm" onClick=${() => add({ kind: 'labor', name: 'Nowa usługa', qty: 1, unit: S.labor_unit_default || 'oper', price: 0, discount: discL, mechanic_id: o.mechanic_id })}><${Icon} n="plus" />Добавить позицию</button></div>`}
-    </div>
+    ${!quote && html`<${MediaCheck} o=${o} reload=${reload} />`}
+    <${LaborBlock} o=${o} reload=${reload} c=${{ quote, mech, seePrice, editPrice, showDisc, units, discL, modeL, S, shown, setPrice, numIn, vatSel, lineGross, net,
+      NetGrossEl: html`<${NetGross} value=${modeL} set=${(v) => { setModeL(v); keep('pc-ng-labor', v); }} />` }} />
 
     <div class="card tight">
       <div class="mw-bar"><h2>Товары</h2>${seePrice && html`<${NetGross} value=${modeP} set=${(v) => { setModeP(v); keep('pc-ng-parts', v); }} />`}</div>
@@ -207,4 +185,16 @@ export function ItemsMW({ o, reload }) {
     <div class="card"><label class="f">Описание для механика<textarea rows="2" value=${o.mechanic_note || ''} disabled=${mech}
       onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { mechanic_note: e.target.value } }), 'Сохранено'); }}></textarea></label>
       ${o.complaint && html`<div class="small" style="margin-top:8px"><span class="muted">Описание заказа:</span> ${o.complaint}</div>`}</div>`;
+}
+
+// ── Фото/видео «до и после»: механик отмечает, что сделал и загрузил в систему ──
+function MediaCheck({ o, reload }) {
+  const n = (o.files || []).filter((f) => /^(image|video)\//.test(f.mime || '')).length;
+  const set = async (done) => { await act(() => api(`orders/${o.id}/media`, { body: { done } }), done ? 'Отмечено: фото/видео загружены' : 'Отметка снята'); reload(); };
+  return html`<label class=${'card media-check' + (o.media_done ? ' ok' : '')}>
+    <input type="checkbox" checked=${!!o.media_done} onChange=${(e) => set(e.target.checked)} />
+    <${Icon} n="camera" />
+    <span class="grow"><b>Фото и видео «до / после» сделаны и загружены в систему</b>
+      <span class="sub">${o.media_done ? `Отметил ${o.media_done_by || ''} · ${String(o.media_done_at || '').slice(0, 16).replace('T', ' ')}` : 'Механик отмечает после загрузки во вкладку «Файлы и подписи»'}${n ? ` · в заказе файлов фото/видео: ${n}` : ''}</span></span>
+  </label>`;
 }

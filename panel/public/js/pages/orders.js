@@ -13,6 +13,12 @@ import { ReceiptBox } from '../fiscal.js';
 import { ObjectHistory } from './audit.js';
 
 
+// ── Выцены: обзвон клиента (статус, причина отказа, когда перезвонить) ─────────
+export const FOLLOWUP = { new: ['Новая', '#5B8DEF'], call_back: ['Перезвонить', '#F0B429'], no_answer: ['Не отвечает', '#E8833A'], thinking: ['Думает', '#A97BE8'],
+  scheduled: ['Записан', '#1BF372'], accepted: ['Согласился', '#1BF372'], declined: ['Отказался', '#E34948'] };
+const REASONS = ['Дорого', 'Сделает сам', 'Сделал в другом сервисе', 'Нет времени', 'Продал авто', 'Передумал', 'Другое'];
+const FuBadge = ({ k }) => (FOLLOWUP[k] ? html`<${Badge} color=${FOLLOWUP[k][1]}>${FOLLOWUP[k][0]}</${Badge}>` : html`<span class="faint">—</span>`);
+
 // ── Список ────────────────────────────────────────────────────────────────
 export function OrdersList({ kind, query }) {
   const app = useApp();
@@ -20,10 +26,11 @@ export function OrdersList({ kind, query }) {
   const [status, setStatus] = useState(query.status || (kind === 'order' ? 'open' : ''));
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [fu, setFu] = useState(query.followup || '');
   const [page, setPage] = useState(0);
   const dq = useDebounced(q);
-  useEffect(() => setPage(0), [dq, status, from, to]);
-  const { data, loading, error } = useData('orders?' + qs({ kind, q: dq, status, from, to, page }));
+  useEffect(() => setPage(0), [dq, status, from, to, fu]);
+  const { data, loading, error } = useData('orders?' + qs({ kind, q: dq, status, from, to, page, followup: kind === 'quote' ? fu : '' }));
   const base = kind === 'quote' ? '/quotes' : '/orders';
   return html`
     <div class="page-head"><h1>${kind === 'quote' ? 'Выцены' : 'Заказы'}</h1>
@@ -33,23 +40,26 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:220px">Статус<select value=${status} onChange=${(e) => setStatus(e.target.value)}>
         <option value="">Все</option>${kind === 'order' && html`<option value="open">Все открытые</option>`}
         ${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+      ${kind === 'quote' && html`<label class="f" style="width:190px">Обзвон<select value=${fu} onChange=${(e) => setFu(e.target.value)}><option value="">Все</option><option value="due">Пора связаться (сегодня)</option><option value="none">Без статуса</option>
+        ${Object.entries(FOLLOWUP).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select></label>`}
       <label class="f" style="width:150px">С<input type="date" value=${from} onInput=${(e) => setFrom(e.target.value)} /></label>
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Номер</th><th>Создан</th><th>Статус</th><th>Клиент</th><th>Авто</th><th>Приём</th><th>Источник</th><th class="r">Сумма</th><th class="r">Оплачено</th></tr></thead>
+      <thead><tr><th>Номер</th><th>Создан</th><th>Статус</th>${kind === 'quote' && html`<th>Обзвон</th>`}<th>Клиент</th><th>Авто</th><th>${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th>Источник</th><th class="r">Сумма</th><th class="r">Оплачено</th></tr></thead>
       <tbody>${(data?.rows || []).map((o) => html`<tr class="click" onClick=${() => go(base + '/' + o.id)}>
         <td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
         <td><${Badge} color=${o.status_color}>${o.status_name || '—'}</${Badge}></td>
+        ${kind === 'quote' && html`<td class="nowrap"><${FuBadge} k=${o.followup} />${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
         <td>${o.customer_name || '—'}<div class="sub">${o.customer_phone || ''}</div></td>
         <td>${carName(o)}${o.plate ? html` <span class="plate">${o.plate}</span>` : ''}</td>
-        <td class="nowrap sub">${fdt(o.planned_at)}</td>
+        ${kind === 'quote' ? html`<td class="sub" style="max-width:260px">${o.last_comment || ''}</td>` : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
         <td class="sub">${o.type_name || ''}</td>
         <td class="r nowrap"><b>${zl(o.total)}</b></td>
         <td class="r nowrap ${o.total > 0 && o.paid >= o.total - 0.01 ? 'pos' : o.paid > 0 ? '' : 'faint'}">${o.paid > 0 ? zl(o.paid) : '—'}</td>
       </tr>`)}</tbody>
-      ${data?.rows?.length ? html`<tfoot><tr><td colspan="7">Итого по фильтру: ${num(data.total)}</td><td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
+      ${data?.rows?.length ? html`<tfoot><tr><td colspan=${kind === 'quote' ? 8 : 7}>Итого по фильтру: ${num(data.total)}</td><td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
     </table></div>
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}`;
@@ -162,7 +172,7 @@ export function OrderPage({ id }) {
       <div class="title grow">
         <h1>${o.number}
           <select class="status-select" value=${o.status_id} onChange=${(e) => setStatus(e.target.value)} style=${`border-color:${o.status?.color};color:${o.status?.color}`}>
-            ${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></h1>
+            ${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>${isQuote && o.followup ? html` <${FuBadge} k=${o.followup} />` : ''}</h1>
         <div class="muted">
           ${o.customer ? html`<a href=${'#/customers/' + o.customer.id}>${o.customer.name || o.customer.phone}</a> · <a href=${'tel:' + o.customer.phone}>${o.customer.phone || ''}</a>` : 'Клиент не выбран'}
           ${o.car ? html` · <a href=${'#/cars/' + o.car.id}>${carName(o.car)}</a> <span class="plate">${o.car.plate || ''}</span>` : ''}
@@ -186,6 +196,7 @@ export function OrderPage({ id }) {
     ${o.accepted_at && html`<div class="card ok-card small" style="margin-bottom:14px">✓ Клиент подтвердил ${isQuote ? 'выцену' : 'заказ'} по электронной карте ${fdt(o.accepted_at)}${o.accepted_via === 'sms' ? ' (кодом SMS)' : ''}</div>`}
     ${notice && html`<${StatusNotice} o=${o} n=${notice} set=${setNotice} reload=${reload} />`}
     ${tab === 'items' && html`<${ItemsMW} o=${o} reload=${reload} />`}
+    ${isQuote && tab === 'items' && html`<div style="margin-top:14px"><${FollowUp} o=${o} reload=${reload} /></div>`}
     ${tab === 'items' && isQuote && html`<div style="margin-top:14px"><${Contact} o=${o} reload=${reload} /></div>`}
     ${tab === 'main' && html`<${OrderMain} o=${o} reload=${reload} />`}
     ${tab === 'files' && html`<${Intake} o=${o} reload=${reload} />`}
@@ -357,5 +368,35 @@ function Checklists({ o }) {
       <table class="tbl"><tbody>${c.results.map((r, i) => html`<tr><td>${r.item}</td>
         <td class="nowrap">${ST.map(([k, l, cls]) => html`<button class=${'btn sm ' + (r.state === k ? cls + ' on-state' : 'ghost')} style="margin-right:4px" onClick=${() => save(c, c.results.map((x, j) => (j === i ? { ...x, state: x.state === k ? '' : k } : x)))}>${l}</button>`)}</td>
         <td><input class="inline-input" placeholder="Заметка" value=${r.note} onChange=${(e) => save(c, c.results.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} /></td></tr>`)}</tbody></table></div>`)}
+  </div>`;
+}
+
+// ── Выцена: статус обзвона, причина, когда связаться и комментарии (история разговоров) ──
+function FollowUp({ o, reload }) {
+  const [f, set] = useState({ followup: o.followup || '', reason: o.followup_reason || '', followup_at: o.followup_at || '', text: '' });
+  useEffect(() => set({ followup: o.followup || '', reason: o.followup_reason || '', followup_at: o.followup_at || '', text: '' }), [o.followup, o.followup_reason, o.followup_at, (o.comments || []).length]);
+  const reasonPreset = REASONS.includes(f.reason) ? f.reason : f.reason ? 'Другое' : '';
+  const changed = f.text.trim() || f.followup !== (o.followup || '') || f.reason !== (o.followup_reason || '') || (f.followup_at || '') !== (o.followup_at || '');
+  const save = async () => {
+    await act(() => api(`orders/${o.id}/followup`, { body: { ...f, followup_at: f.followup_at || null } }), 'Сохранено');
+    reload();
+  };
+  const quick = (k) => { const d = new Date(); d.setDate(d.getDate() + (k === 'call_back' || k === 'no_answer' ? 1 : k === 'thinking' ? 3 : 0)); set({ ...f, followup: k, followup_at: ['call_back', 'no_answer', 'thinking'].includes(k) ? d.toISOString().slice(0, 10) : k === 'scheduled' || k === 'declined' || k === 'accepted' ? '' : f.followup_at }); };
+  return html`<div class="card fu">
+    <div class="row"><h2 class="grow" style="margin:0">Обзвон и комментарии</h2>${o.followup ? html`<${FuBadge} k=${o.followup} />` : ''}</div>
+    <div class="fu-states">${Object.entries(FOLLOWUP).map(([k, [l, c]]) => html`<button class=${'fu-st' + (f.followup === k ? ' on' : '')} style=${f.followup === k ? `background:${c}26;border-color:${c};color:${c}` : ''} onClick=${() => quick(k)}><i style=${'background:' + c}></i>${l}</button>`)}</div>
+    <div class="grid g3">
+      ${f.followup === 'declined' ? html`<label class="f">Причина отказа<select value=${reasonPreset} onChange=${(e) => set({ ...f, reason: e.target.value === 'Другое' ? (REASONS.includes(f.reason) ? '' : f.reason) || ' ' : e.target.value })}>
+          <option value="">— выберите</option>${REASONS.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+        ${reasonPreset === 'Другое' || (f.reason && !REASONS.includes(f.reason)) ? html`<label class="f">Своя причина<input value=${f.reason.trim()} onInput=${(e) => set({ ...f, reason: e.target.value })} placeholder="Почему отказался" /></label>` : html`<span></span>`}`
+        : html`<label class="f">Когда связаться<input type="date" value=${f.followup_at || ''} onInput=${(e) => set({ ...f, followup_at: e.target.value })} /></label><span></span>`}
+      <span></span>
+    </div>
+    <label class="f">Комментарий<textarea rows="2" value=${f.text} onInput=${(e) => set({ ...f, text: e.target.value })} placeholder="О чём договорились, что сказал клиент…"></textarea></label>
+    <div class="row"><span class="grow"></span><button class="btn primary" disabled=${!changed} onClick=${save}>Сохранить</button></div>
+    ${(o.comments || []).length ? html`<div class="fu-log">${o.comments.map((c) => html`<div class="fu-item">
+      <div class="fu-meta"><b>${fdt(c.at)}</b> <span class="muted">${c.staff || ''}</span>${c.followup ? html` <${FuBadge} k=${c.followup} />` : ''}${c.reason ? html` <span class="small">${c.reason}</span>` : ''}${c.followup_at ? html` <span class="faint small">→ связаться ${fdate(c.followup_at)}</span>` : ''}
+        <button class="icon-btn sm" title="Удалить" style="margin-left:auto" onClick=${async () => { await act(() => api(`orders/${o.id}/comments/${c.id}`, { method: 'DELETE' })); reload(); }}><${Icon} n="x" /></button></div>
+      ${c.text ? html`<div class="fu-text">${c.text}</div>` : ''}</div>`)}</div>` : html`<div class="muted small">Комментариев пока нет</div>`}
   </div>`;
 }

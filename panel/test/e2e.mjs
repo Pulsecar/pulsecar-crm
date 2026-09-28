@@ -284,6 +284,35 @@ try {
   console.log('✓ журнал изменений: создание, «было → стало», автор, позиции и оплаты заказа, пароли не пишутся');
   console.log('✓ меню профиля: свои данные и пароль, запланированные напоминания');
 
+  // 9b. работы как в Motowarsztat: порядок, фото/видео до/после, обзвон выцены, парковка с оплатой
+  const wo = ok(await req('/crm-api/orders', { body: { customer_id: jan.id, items: [{ kind: 'labor', name: 'A', price: 10 }, { kind: 'labor', name: 'B', price: 20 }, { kind: 'labor', name: 'C', price: 30 }] } }), 'order for reorder');
+  let wd = ok(await req('/crm-api/orders/' + wo.id), 'get');
+  const ids = wd.items.filter((i) => i.kind === 'labor').map((i) => i.id);
+  ok(await req(`/crm-api/orders/${wo.id}/items/reorder`, { body: { ids: [ids[2], ids[0], ids[1]] } }), 'reorder');
+  wd = ok(await req('/crm-api/orders/' + wo.id), 'get2');
+  assert.deepEqual(wd.items.filter((i) => i.kind === 'labor').map((i) => i.name), ['C', 'A', 'B']);
+  ok(await req(`/crm-api/orders/${wo.id}/media`, { body: { done: true } }), 'media');
+  wd = ok(await req('/crm-api/orders/' + wo.id), 'get3');
+  assert.equal(wd.media_done, 1); assert.ok(wd.media_done_by && wd.media_done_at);
+  const wq = ok(await req('/crm-api/orders', { body: { kind: 'quote', customer_id: jan.id, items: [{ kind: 'labor', name: 'Rozrząd', price: 900 }] } }), 'quote fu');
+  assert.equal((await req(`/crm-api/orders/${wq.id}/followup`, { body: { followup: 'declined' } })).status, 400, 'отказ без причины');
+  ok(await req(`/crm-api/orders/${wq.id}/followup`, { body: { followup: 'call_back', followup_at: '2020-01-01', text: 'Попросил перезвонить в пятницу' } }), 'fu call back');
+  ok(await req(`/crm-api/orders/${wq.id}/followup`, { body: { followup: 'declined', reason: 'Дорого', text: 'Сделает у знакомого' } }), 'fu declined');
+  const wqd = ok(await req('/crm-api/orders/' + wq.id), 'quote get');
+  assert.equal(wqd.followup, 'declined'); assert.equal(wqd.followup_reason, 'Дорого'); assert.equal(wqd.comments.length, 2);
+  const ql = ok(await req('/crm-api/orders?kind=quote&followup=declined'), 'quote list fu');
+  assert.ok(ql.rows.some((r) => r.id === wq.id && r.last_comment === 'Сделает у знакомого'));
+  const pk = ok(await req('/crm-api/storage', { body: { customer_id: jan.id, kind: 'parking', price: 30, date_in: '2026-01-01', description: 'ключи в сейфе' } }), 'parking');
+  ok(await req(`/crm-api/storage/${pk.id}/pay`, { body: { amount: 90, method: 'card' } }), 'parking pay');
+  const pkl = ok(await req('/crm-api/storage?q=' + encodeURIComponent('ключи')), 'storage list');
+  const prow = pkl.find((x) => x.id === pk.id);
+  assert.equal(prow.kind, 'parking'); assert.equal(prow.paid, 90); assert.equal(prow.qty, 1);
+  const cash2 = ok(await req('/crm-api/cash?from=2000-01-01&to=2100-01-01'), 'cash');
+  assert.ok(cash2.rows.some((r) => r.note === 'Парковка ' + prow.number && r.amount === 90 && r.method === 'card'));
+  const aw = ok(await req('/crm-api/audit?entity=orders&id=' + wq.id), 'audit fu');
+  assert.ok(aw.rows.some((r) => r.entity === 'order_comments'));
+  console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
+
   // 10. удаление аккаунта в приложении
   ok(await req('/api/me/delete', { body: {}, token: sess.token }), 'delete');
   assert.equal((await req('/api/me', { token: sess.token })).status, 401);

@@ -314,6 +314,9 @@ crm.get('/orders', (req, res) => {
   else if (req.query.status) { cond.push('o.status_id = ?'); params.push(Number(req.query.status)); }
   if (req.query.from) { cond.push('substr(o.created_at,1,10) >= ?'); params.push(req.query.from); }
   if (req.query.to) { cond.push('substr(o.created_at,1,10) <= ?'); params.push(req.query.to); }
+  if (req.query.followup === 'none') cond.push("COALESCE(o.followup,'') = ''");
+  else if (req.query.followup === 'due') { cond.push("o.followup_at IS NOT NULL AND o.followup_at <= ? AND COALESCE(o.followup,'') NOT IN ('scheduled','declined')"); params.push(today()); }
+  else if (req.query.followup) { cond.push('o.followup = ?'); params.push(String(req.query.followup)); }
   if (P['orders.only_assigned']) { cond.push('(o.mechanic_id = ? OR o.id IN (SELECT order_id FROM order_items WHERE mechanic_id = ?))'); params.push(me.id, me.id); }
   if (req.query.mechanic) { cond.push('(o.mechanic_id = ? OR o.id IN (SELECT order_id FROM order_items WHERE mechanic_id = ?))'); params.push(Number(req.query.mechanic), Number(req.query.mechanic)); }
   if (q) {
@@ -326,7 +329,8 @@ crm.get('/orders', (req, res) => {
   const agg = one(`SELECT COUNT(*) n, COALESCE(SUM(o.total),0) s ${from}`, ...params);
   const rows = all(`SELECT o.*, c.name customer_name, c.phone customer_phone, k.plate, k.make, k.model, st.name status_name, st.color status_color,
       st.is_final, t.name type_name,
-      (SELECT MIN(start_at) FROM appointments WHERE order_id = o.id AND status <> 'cancelled') planned_at
+      (SELECT MIN(start_at) FROM appointments WHERE order_id = o.id AND status <> 'cancelled') planned_at,
+      (SELECT text FROM order_comments WHERE order_id = o.id AND COALESCE(text,'') <> '' ORDER BY id DESC LIMIT 1) last_comment
     ${from} ORDER BY o.id DESC LIMIT ${PAGE} OFFSET ${page * PAGE}`, ...params);
   res.json({ rows: rows.map((o) => hideFor(P, o)), total: agg.n, sum: P['orders.prices'] ? agg.s : null, pageSize: PAGE });
 });
@@ -404,6 +408,7 @@ crm.get('/orders/:id', (req, res) => {
   o.sales_docs = all('SELECT id, kind, number, issue_date, total_gross, paid, ksef, ext_url, corrects_id, created_by, ksef_status, ksef_number, ksef_error FROM sales_docs WHERE order_id = ? ORDER BY id', o.id);
   o.signatures = all('SELECT id, doc, method, signer_name, phone, signed_at, ip FROM order_signatures WHERE order_id = ? ORDER BY id', o.id);
   o.files = all('SELECT id, name, mime, size, client_visible, staff, created_at FROM order_files WHERE order_id = ? ORDER BY id', o.id);
+  o.comments = all('SELECT * FROM order_comments WHERE order_id = ? ORDER BY id DESC', o.id);
   if (o.customer_id) o.redeem = redeemLimits(o.customer_id, o.total, o.payments.filter((p) => p.method === 'points').reduce((a, p) => a + p.amount, 0));
   res.json(o);
 });
@@ -477,6 +482,51 @@ crm.delete('/orders/:id/items/:itemId', (req, res) => {
   assertEditable(o, s);
   run('DELETE FROM order_items WHERE id = ? AND order_id = ?', Number(req.params.itemId), o.id);
   recalc(o.id);
+  res.json({ ok: true });
+});
+
+/** Порядок работ / товаров (перетаскивание за ≡, как в Motowarsztat) */
+crm.post('/orders/:id/items/reorder', (req, res) => {
+  const s = who(req, 'orders.jobs');
+  const o = getOrder(Number(req.params.id));
+  assertEditable(o, s);
+  const ids = (req.body?.ids || []).map(Number).filter(Boolean);
+  tx(() => ids.forEach((id, i) => run('UPDATE order_items SET pos = ? WHERE id = ? AND order_id = ?', i + 1, id, o.id)));
+  res.json({ ok: true });
+});
+/** Механик отмечает: фото/видео «до и после» сделаны и загружены в систему */
+crm.post('/orders/:id/media', (req, res) => {
+  const s = who(req, 'orders.view');
+  const o = getOrder(Number(req.params.id));
+  assertAssigned(s, o);
+  const done = req.body?.done ? 1 : 0;
+  run(`UPDATE orders SET media_done = ?, media_done_by = ?, media_done_at = CASE WHEN ? THEN datetime('now','localtime') END WHERE id = ?`, done, done ? s.name : null, done, o.id);
+  res.json({ ok: true, media_done: done, media_done_by: done ? s.name : null });
+});
+/** Выцена: статус обзвона (перезвонить / записан / отказался…), причина, дата следующего контакта и комментарий */
+const FOLLOWUP = ['', 'new', 'call_back', 'thinking', 'scheduled', 'accepted', 'declined', 'no_answer'];
+crm.post('/orders/:id/followup', (req, res) => {
+  const s = who(req, 'orders.view');
+  const o = getOrder(Number(req.params.id));
+  const P = permsOf(s);
+  if (!(P[o.kind === 'quote' ? 'quotes.manage' : 'orders.edit'])) throw new HttpError(403, 'Нет доступа');
+  const b = req.body || {};
+  const fu = b.followup === undefined ? o.followup || '' : String(b.followup || '');
+  if (!FOLLOWUP.includes(fu)) throw new HttpError(400, 'Неизвестный статус');
+  const reason = b.reason === undefined ? o.followup_reason : String(b.reason || '').trim() || null;
+  if (fu === 'declined' && !reason) throw new HttpError(400, 'Укажите причину отказа');
+  const at = b.followup_at === undefined ? o.followup_at : b.followup_at || null;
+  const text = String(b.text || '').trim().slice(0, 2000);
+  run('UPDATE orders SET followup = ?, followup_reason = ?, followup_at = ? WHERE id = ?', fu || null, fu === 'declined' ? reason : reason && fu ? reason : null, at, o.id);
+  if (text || fu !== (o.followup || '') || at !== o.followup_at) insert('order_comments', { order_id: o.id, staff: s.name, text: text || null, followup: fu || null, reason: fu === 'declined' ? reason : null, followup_at: at });
+  res.json({ ok: true });
+});
+crm.delete('/orders/:id/comments/:cid', (req, res) => {
+  const s = who(req, 'orders.view');
+  const c = one('SELECT * FROM order_comments WHERE id = ? AND order_id = ?', Number(req.params.cid), Number(req.params.id));
+  if (!c) throw new HttpError(404, 'Нет комментария');
+  if (c.staff !== s.name && !permsOf(s)['settings.manage']) throw new HttpError(403, 'Удалить можно только свой комментарий');
+  run('DELETE FROM order_comments WHERE id = ?', c.id);
   res.json({ ok: true });
 });
 
@@ -568,7 +618,7 @@ crm.get('/appointments', (req, res) => {
   who(req, 'calendar.view');
   const from = String(req.query.from || today());
   const to = String(req.query.to || from);
-  const base = `SELECT a.*, COALESCE(CASE WHEN c.kind = 'company' THEN c.company END, c.name) customer_name, c.phone customer_phone, k.make, k.model, k.plate, o.number order_number, o.kind order_kind, o.complaint order_complaint, o.total order_total,
+  const base = `SELECT a.*, COALESCE(CASE WHEN c.kind = 'company' THEN c.company END, c.name) customer_name, c.phone customer_phone, k.make, k.model, k.plate, o.number order_number, o.kind order_kind, o.complaint order_complaint, o.total order_total, o.status_id order_status_id, o.media_done,
       st.name status_name, st.color status_color, s.name mechanic_name,
       (SELECT COUNT(*) FROM appointments x WHERE x.order_id = a.order_id AND a.order_id IS NOT NULL AND x.status NOT IN ('cancelled') AND x.start_at IS NOT NULL) part_total,
       (SELECT COUNT(*) FROM appointments x WHERE x.order_id = a.order_id AND a.order_id IS NOT NULL AND x.status NOT IN ('cancelled') AND x.start_at IS NOT NULL AND (x.start_at < a.start_at OR (x.start_at = a.start_at AND x.id <= a.id))) part_no
@@ -830,11 +880,29 @@ crm.post('/storage', (req, res) => {
     qty: Number(b.qty) || 4, location: b.location || null, date_in: b.date_in || today(), date_until: b.date_until || null,
     price: round2(b.price), note: b.note || null,
   };
+  if (!['opony', 'koła', 'parking'].includes(d.kind)) d.kind = 'opony';
+  if (d.kind === 'parking') d.qty = 1;
   if (!d.customer_id) throw new HttpError(400, 'Выберите клиента');
   let id = Number(b.id);
   if (id) update('storage', id, d); else id = insert('storage', { ...d, number: nextNumber('PR', new Date(), true) });
   log('storage', id, b.id ? 'update' : 'create', null, s.name);
   res.json({ id });
+});
+/** Оплата хранения / парковки: приход в кассу (KP) и отметка на записи */
+crm.post('/storage/:id/pay', (req, res) => {
+  const s = who(req, 'storage.edit');
+  const st = one('SELECT * FROM storage WHERE id = ?', Number(req.params.id));
+  if (!st) throw new HttpError(404, 'Запись не найдена');
+  const amount = round2(req.body?.amount);
+  if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
+  const method = ['cash', 'card', 'transfer'].includes(req.body?.method) ? req.body.method : 'cash';
+  const what = st.kind === 'parking' ? 'Парковка' : 'Хранение шин';
+  tx(() => {
+    insert('payments', { number: nextNumber('KP'), direction: 'in', method, amount, note: `${what} ${st.number}`, staff: s.name, customer_id: st.customer_id || null });
+    run('UPDATE storage SET paid = ROUND(COALESCE(paid,0) + ?, 2) WHERE id = ?', amount, st.id);
+  });
+  log('storage', st.id, 'payment', `${amount} ${method}`, s.name);
+  res.json({ ok: true });
 });
 crm.post('/storage/:id/release', (req, res) => {
   const s = who(req, 'storage.edit');
@@ -1240,7 +1308,7 @@ crm.put('/settings', (req, res) => {
   const allowed = ['company_name', 'company_brand', 'company_address', 'company_phone', 'company_email', 'company_nip', 'company_bank',
     'company_legal_name', 'company_street', 'company_postcode', 'company_city', 'company_legal_address', 'company_regon', 'company_krs', 'company_court', 'company_capital',
     'company_bdo', 'company_vat_eu', 'company_bank_name', 'company_swift', 'company_www', 'company_pkd',
-    'hours_start', 'hours_end', 'slot_min', 'default_vat', 'cash_opening', 'order_terms', ...SETTINGS_KEYS];
+    'hours_start', 'hours_end', 'slot_min', 'default_vat', 'cash_opening', 'order_terms', 'cal_color_request', 'cal_color_planned', 'cal_color_arrived', 'cal_color_no_show', 'cal_color_block', ...SETTINGS_KEYS];
   for (const [k, v] of Object.entries(req.body || {})) if (allowed.includes(k)) setSetting(k, String(v ?? ''));
   const b = req.body || {};
   if (b.company_street !== undefined || b.company_city !== undefined) {

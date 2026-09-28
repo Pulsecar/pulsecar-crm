@@ -436,6 +436,19 @@ addColumn('orders', 'contact_person', 'TEXT');      // Osoba kontaktowa
 addColumn('orders', 'contact_phone', 'TEXT');
 addColumn('orders', 'notes', 'TEXT');               // Uwagi (видит клиент, для выцен)
 addColumn('order_items', 'task_id', 'INTEGER');     // запчасть к работе (Nazwa zadania в Motowarsztat)
+// фото/видео «до и после» сделаны и загружены (отмечает механик)
+addColumn('orders', 'media_done', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('orders', 'media_done_by', 'TEXT');
+addColumn('orders', 'media_done_at', 'TEXT');
+// выцены: обзвон — статус, причина отказа, когда связаться снова; комментарии — в order_comments
+addColumn('orders', 'followup', 'TEXT');
+addColumn('orders', 'followup_reason', 'TEXT');
+addColumn('orders', 'followup_at', 'TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS order_comments (
+  id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  at TEXT NOT NULL DEFAULT (datetime('now','localtime')), staff TEXT, text TEXT, followup TEXT, reason TEXT, followup_at TEXT)`);
+// хранение: парковка авто (цена за сутки) и оплата хранения / парковки
+addColumn('storage', 'paid', 'REAL NOT NULL DEFAULT 0');
 // ── Несколько касс (Kasy): наличные, терминал, счёт; перенос денег между ними ──
 db.exec(`CREATE TABLE IF NOT EXISTS cash_registers (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'cash', -- cash | card | bank

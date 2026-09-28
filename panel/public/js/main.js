@@ -31,7 +31,7 @@ const NAV = [
   { sep: true },
   { to: '/stock', icon: 'box', label: 'Склад', perm: 'products.view' },
   { to: '/purchases', icon: 'cart', label: 'Закупки', perm: 'purchases.view' },
-  { to: '/storage', icon: 'tire', label: 'Хранение шин', perm: 'storage.view' },
+  { to: '/storage', icon: 'tire', label: 'Хранение и парковка', perm: 'storage.view' },
   { to: '/sales', icon: 'file', label: 'Продажи', perm: 'invoices.create' },
   { to: '/cash', icon: 'cash', label: 'Касса', perm: 'cash.view' },
   { to: '/pos', icon: 'qr', label: 'Pulse Points', perm: 'loyalty.use' },
