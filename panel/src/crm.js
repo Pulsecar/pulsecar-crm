@@ -347,6 +347,12 @@ function assertAssigned(me, o) {
   if (o.mechanic_id !== me.id && !one('SELECT 1 FROM order_items WHERE order_id = ? AND mechanic_id = ?', o.id, me.id)) throw new HttpError(403, 'Этот заказ назначен другому механику');
 }
 
+/** Авто без владельца (или только что созданные) привязываем к клиенту заказа / выцены; первое авто клиента — «по умолчанию» */
+function linkCar(carId, customerId) {
+  if (!carId || !customerId) return;
+  run('UPDATE cars SET customer_id = ? WHERE id = ? AND customer_id IS NULL', customerId, carId);
+  run('UPDATE customers SET default_car_id = ? WHERE id = ? AND default_car_id IS NULL AND EXISTS (SELECT 1 FROM cars WHERE id = ? AND customer_id = ?)', carId, customerId, carId, customerId);
+}
 crm.post('/orders', (req, res) => {
   const b = req.body || {};
   const s = who(req, b.kind === 'quote' ? 'quotes.manage' : 'orders.create');
@@ -357,7 +363,18 @@ crm.post('/orders', (req, res) => {
       customerId = (ph && one('SELECT id FROM customers WHERE phone = ?', ph)?.id) || createCustomer(b.new_customer);
     }
     let carId = b.car_id || null;
-    if (!carId && b.new_car && (b.new_car.plate || b.new_car.vin || b.new_car.make)) carId = createCar({ ...b.new_car, customer_id: customerId });
+    if (!carId && b.new_car && (b.new_car.plate || b.new_car.vin || b.new_car.make)) {
+      // тот же авто уже есть в базе (по номеру / VIN) — берём его, а не создаём дубль
+      const vin = normVin(b.new_car.vin), plate = normPlate(b.new_car.plate);
+      carId = (vin && one('SELECT id FROM cars WHERE vin = ?', vin)?.id) || (plate && one('SELECT id FROM cars WHERE plate = ?', plate)?.id) || createCar({ ...b.new_car, customer_id: customerId });
+    }
+    // клиент без выбранного авто, но машина одна или отмечена «по умолчанию» — подставляем её
+    if (!carId && customerId && !b.no_car) {
+      const c = one('SELECT default_car_id FROM customers WHERE id = ?', customerId);
+      carId = c?.default_car_id || (one('SELECT COUNT(*) n FROM cars WHERE customer_id = ?', customerId).n === 1 ? one('SELECT id FROM cars WHERE customer_id = ?', customerId).id : null);
+    }
+    if (carId && !customerId) customerId = one('SELECT customer_id FROM cars WHERE id = ?', carId)?.customer_id || null;
+    linkCar(carId, customerId);
     return createOrder({ ...b, customer_id: customerId, car_id: carId }, s.name);
   });
   if (b.appointment_id) run('UPDATE appointments SET order_id = ?, customer_id = COALESCE(customer_id, (SELECT customer_id FROM orders WHERE id = ?)), car_id = COALESCE(car_id, (SELECT car_id FROM orders WHERE id = ?)), status = CASE WHEN status = \'request\' THEN \'planned\' ELSE status END WHERE id = ?', id, id, id, Number(b.appointment_id));
@@ -397,7 +414,7 @@ crm.put('/orders/:id', (req, res) => {
   }
   update('orders', o.id, d);
   if (d.mileage && (d.car_id || o.car_id)) run('UPDATE cars SET last_mileage = MAX(COALESCE(last_mileage,0), ?) WHERE id = ?', d.mileage, d.car_id || o.car_id);
-  if (d.car_id && (d.customer_id || o.customer_id)) run('UPDATE cars SET customer_id = COALESCE(customer_id, ?) WHERE id = ?', d.customer_id || o.customer_id, d.car_id);
+  linkCar(d.car_id || o.car_id, d.customer_id || o.customer_id);
   log('order', o.id, 'update', Object.keys(d), s.name);
   res.json({ ok: true });
 });

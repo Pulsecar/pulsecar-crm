@@ -124,14 +124,14 @@ function light(hex) {
   return r * 0.3 + g * 0.59 + b * 0.11 > 70;
 }
 
-export function Modal({ title, onClose, children, foot, wide }) {
+export function Modal({ title, onClose, children, foot, wide, xl }) {
   useEffect(() => {
     const k = (e) => e.key === 'Escape' && onClose?.();
     addEventListener('keydown', k);
     return () => removeEventListener('keydown', k);
   }, []);
   return html`<div class="modal-bg" onMouseDown=${(e) => e.target === e.currentTarget && onClose?.()}>
-    <div class=${'modal' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-label=${title}>
+    <div class=${'modal' + (xl ? ' xl' : wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-label=${title}>
       <div class="modal-head"><h2>${title}</h2><button class="icon-btn" onClick=${onClose} aria-label="Закрыть"><${Icon} n="x" /></button></div>
       <div class="modal-body">${children}</div>
       ${foot && html`<div class="modal-foot">${foot}</div>`}

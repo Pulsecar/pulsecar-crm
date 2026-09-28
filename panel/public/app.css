@@ -371,3 +371,5 @@ a.btn.disabled{pointer-events:none;opacity:.5}
 @media (max-width: 560px) { .mwf .g2, .mwf .g3 { grid-template-columns: 1fr; } }
 .ig .addon svg { width: 16px; height: 16px; }
 div.f .ac input, div.f .ig { font-size: 14px; color: var(--text); }
+.modal.xl { max-width: 1200px; }
+.modal.xl .mwf-tabs { display: none; }

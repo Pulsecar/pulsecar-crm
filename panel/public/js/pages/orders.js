@@ -6,6 +6,8 @@ import { SupplierParts } from './suppliers.js';
 import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
 import { OrderMain, ItemsMW } from './order-form.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
+import { CustomerEditor } from './customers.js';
+import { CarEditor } from './cars.js';
 import { ScanBox } from '../scan.js';
 import { ReceiptBox } from '../fiscal.js';
 
@@ -54,55 +56,76 @@ export function OrdersList({ kind, query }) {
 
 // ── Выбор клиента и авто (используется и в новом заказе, и в карточке) ─────────
 export function CustomerCarPicker({ value, onChange, only }) {
+  // onChange принимает функцию от текущего значения — обе половины (авто и клиент) работают с одним состоянием
   const { customer, car } = value;
-  const [newC, setNewC] = useState(null);
-  const [newCar, setNewCar] = useState(null);
+  const [modal, setModal] = useState(null); // 'customer' | 'car'
   const { data: cust } = useData(customer?.id ? 'customers/' + customer.id : null, [customer?.id]);
+  const cname = (c) => (c?.kind === 'company' && c.company ? c.company : c?.name || c?.phone || '—');
+  const pickCustomer = async (c) => {
+    const full = await api('customers/' + c.id).catch(() => c);
+    onChange((v) => {
+      let k = v.car;
+      // авто ещё не выбрано — берём авто клиента по умолчанию или единственное
+      if (!k && full.cars?.length) k = full.cars.find((x) => x.id === full.default_car_id) || (full.cars.length === 1 ? full.cars[0] : null);
+      // выбранное авто принадлежит другому клиенту — снимаем его
+      if (k && k.customer_id && k.customer_id !== full.id) k = null;
+      return { ...v, customer: full, newCustomer: null, car: k || null };
+    });
+  };
+  const pickCar = async (k) => {
+    const full = await api('cars/' + k.id).catch(() => k);
+    onChange((v) => ({ ...v, car: full, newCar: null, customer: v.customer || full.owner || null }));
+  };
+  const newCustomerSaved = async (id) => {
+    setModal(null);
+    const c = await api('customers/' + id);
+    const k = value.car;
+    // авто уже выбрано и без владельца — сразу привязываем к новому клиенту
+    if (k?.id && !k.customer_id) { await api('cars/' + k.id, { method: 'PUT', body: { customer_id: id } }).catch(() => {}); k.customer_id = id; }
+    onChange((v) => ({ ...v, customer: c, newCustomer: null, car: v.car || (c.cars?.length === 1 ? c.cars[0] : null) }));
+    toast('Клиент добавлен' + (k?.id && k.customer_id === id ? ' и связан с авто' : ''));
+  };
+  const newCarSaved = async (id) => {
+    setModal(null);
+    const k = await api('cars/' + id);
+    onChange((v) => ({ ...v, car: k, newCar: null, customer: v.customer || k.owner || null }));
+    toast('Авто добавлено' + (k.customer_id ? ' и связано с клиентом' : ''));
+  };
   const custCol = only === 'car' ? '' : html`<div class="stack">
       ${!only && html`<h3>Клиент</h3>`}
-      ${customer ? html`<div class="row"><div class="grow"><b>${customer.name || '—'}</b><div class="muted small">${customer.phone || ''}</div></div>
-          <button class="btn sm" onClick=${() => onChange({ customer: null, car: null })}>Сменить</button></div>`
-        : newC ? html`<div class="stack">
-            <div class="grid g2"><label class="f">Имя и фамилия<input value=${newC.name} onInput=${(e) => { const n = { ...newC, name: e.target.value }; setNewC(n); onChange({ ...value, newCustomer: n }); }} /></label>
-            <label class="f">Телефон<input value=${newC.phone} onInput=${(e) => { const n = { ...newC, phone: e.target.value }; setNewC(n); onChange({ ...value, newCustomer: n }); }} placeholder="+48" /></label></div>
-            <button class="btn ghost sm" style="align-self:flex-start" onClick=${() => { setNewC(null); onChange({ ...value, newCustomer: null }); }}>Отмена — выбрать из базы</button></div>`
-        : html`<${Picker} placeholder="Имя, телефон, номер авто…" path=${(q) => 'customers?q=' + encodeURIComponent(q)}
-            render=${(c) => html`<b>${c.name || '—'}</b> <span class="sub">${c.phone || ''}${c.cars ? ' · ' + c.cars : ''}</span>`}
-            onPick=${(c) => onChange({ customer: c, car: null })}
-            extra=${{ label: 'Новый клиент', onClick: (q) => { const n = /\d{6,}/.test(q) ? { name: '', phone: q } : { name: q, phone: '' }; setNewC(n); onChange({ ...value, newCustomer: n }); } }} />`}
+      ${customer ? html`<div class="row"><div class="grow"><b>${cname(customer)}</b>${customer.kind === 'company' && customer.name && customer.name !== customer.company ? html` <span class="sub">${customer.name}</span>` : ''}
+            <div class="muted small">${[customer.phone, customer.nip && 'NIP ' + customer.nip].filter(Boolean).join(' · ')}</div></div>
+          <a class="btn sm ghost" href=${'#/customers/' + customer.id} target="_blank" title="Открыть карточку клиента"><${Icon} n="users" /></a>
+          <button class="btn sm" onClick=${() => onChange((v) => ({ ...v, customer: null, car: v.car && v.car.customer_id === customer.id ? null : v.car }))}>Сменить</button></div>`
+        : html`<div class="stack">
+            ${value.newCustomer && (value.newCustomer.name || value.newCustomer.phone) ? html`<div class="row small"><span class="grow">Новый клиент: <b>${value.newCustomer.name || ''}</b> ${value.newCustomer.phone || ''}</span>
+              <button class="btn sm" onClick=${() => setModal('customer')}>Заполнить карточку</button></div>` : ''}
+            <${Picker} placeholder="Имя, телефон, NIP, номер авто…" path=${(q) => 'customers?q=' + encodeURIComponent(q)}
+              render=${(c) => html`<b>${cname(c)}</b> <span class="sub">${c.phone || ''}${c.cars ? ' · ' + c.cars : ''}</span>`}
+              onPick=${pickCustomer}
+              extra=${{ label: 'Новый клиент', onClick: (q) => { onChange((v) => ({ ...v, newCustomer: /\d{6,}/.test(q) ? { name: '', phone: q } : { name: q, phone: '' } })); setModal('customer'); } }} />
+            <button class="btn sm" style="align-self:flex-start" onClick=${() => setModal('customer')}><${Icon} n="plus" />Новый клиент</button></div>`}
     </div>`;
   const carCol = only === 'customer' ? '' : html`<div class="stack">
       ${!only && html`<h3>Автомобиль</h3>`}
       ${car ? html`<div class="row"><div class="grow"><b>${carName(car)}</b> ${car.plate ? html`<span class="plate">${car.plate}</span>` : ''}<div class="muted small">${car.vin || ''}</div></div>
-          <button class="btn sm" onClick=${() => onChange({ ...value, car: null })}>Сменить</button></div>`
-        : newCar ? html`<div class="grid g2">
-            ${[['plate', 'Номер'], ['vin', 'VIN'], ['make', 'Марка'], ['model', 'Модель'], ['year', 'Год']].map(([k, l]) => html`<div class="row end" style="gap:6px"><label class="f grow">${l}<input value=${newCar[k] || ''} onInput=${(e) => { const n = { ...newCar, [k]: e.target.value }; setNewCar(n); onChange({ ...value, newCar: n }); }} /></label>
-              ${k === 'plate' && html`<${PlateButton} plate=${newCar.plate} onData=${(r) => { const n = mergeCar(newCar, r); setNewCar(n); onChange({ ...value, newCar: n }); }} />`}</div>`)}
-            <button class="btn ghost sm" style="align-self:end" onClick=${() => { setNewCar(null); onChange({ ...value, newCar: null }); }}>Отмена</button></div>`
+          <a class="btn sm ghost" href=${'#/cars/' + car.id} target="_blank" title="Открыть карточку авто"><${Icon} n="car" /></a>
+          <button class="btn sm" onClick=${() => onChange((v) => ({ ...v, car: null }))}>Сменить</button></div>`
         : html`<div class="stack">
-            ${cust?.cars?.length ? html`<div class="row">${cust.cars.map((k) => html`<button class="btn sm" onClick=${() => onChange({ ...value, car: k })}>${carName(k)} ${k.plate || ''}</button>`)}</div>` : ''}
+            ${cust?.cars?.length ? html`<div class="row">${cust.cars.map((k) => html`<button class="btn sm" onClick=${() => onChange((v) => ({ ...v, car: k }))}>${carName(k)} ${k.plate || ''}</button>`)}</div>` : ''}
             <div class="row">
               <div class="grow"><${Picker} placeholder="Найти авто: номер, VIN" path=${(q) => 'cars?q=' + encodeURIComponent(q)}
                 render=${(k) => html`<b>${carName(k)}</b> <span class="plate">${k.plate || ''}</span> <span class="sub">${k.owner_name || ''}</span>`}
-                onPick=${(k) => onChange({ ...value, car: k })} /></div>
-              <button class="btn sm" onClick=${() => setNewCar({ plate: '', vin: '', make: '', model: '', year: '' })}><${Icon} n="plus" />Новое авто</button>
-              <${AztecButton} label="Техпаспорт" onData=${async (r) => {
-                if (r.existing) {
-                  const k = await api('cars/' + r.existing.id);
-                  const patch = { ...value, car: k };
-                  if (!customer && k.owner) patch.customer = await api('customers/' + k.owner.id);
-                  onChange(patch);
-                  return;
-                }
-                const n = mergeCar({}, r.car);
-                setNewCar(n);
-                const patch = { ...value, newCar: n };
-                if (!customer && !newC && r.owner?.name) { const nc = { name: r.owner.name, phone: '', street: r.owner.street, postcode: r.owner.postcode, city: r.owner.city }; setNewC(nc); patch.newCustomer = nc; }
-                onChange(patch);
-              }} />
+                onPick=${pickCar} /></div>
+              <button class="btn sm" onClick=${() => setModal('car')}><${Icon} n="plus" />Новое авто</button>
             </div></div>`}
     </div>`;
-  return only ? (only === 'car' ? carCol : custCol) : html`<div class="grid g2">${custCol}${carCol}</div>`;
+  const modals = html`
+    ${modal === 'customer' && html`<${Modal} xl title="Новый клиент" onClose=${() => setModal(null)}>
+      <${CustomerEditor} c=${value.newCustomer || {}} onSaved=${newCustomerSaved} onCancel=${() => setModal(null)} /></${Modal}>`}
+    ${modal === 'car' && html`<${Modal} xl title=${customer ? 'Новое авто клиента ' + cname(customer) : 'Новый автомобиль'} onClose=${() => setModal(null)}>
+      <${CarEditor} k=${{ customer_id: customer?.id || null }} owner0=${customer} onSaved=${newCarSaved} onCancel=${() => setModal(null)} /></${Modal}>`}`;
+  return only ? html`${only === 'car' ? carCol : custCol}${modals}` : html`<div class="grid g2">${custCol}${carCol}</div>${modals}`;
 }
 
 // ── Новый заказ / выцена ────────────────────────────────────────────────────

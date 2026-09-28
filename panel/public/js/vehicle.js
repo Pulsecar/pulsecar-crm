@@ -109,8 +109,8 @@ function AztecModal({ onClose, onData }) {
 export function PlateButton({ plate, onData }) {
   const app = useApp();
   const [busy, setBusy] = useState(false);
-  if (!app.features.plate) return null;
   return html`<button type="button" class="btn sm" disabled=${busy || !plate} title="Найти данные авто по номеру" onClick=${async () => {
+    if (!app.features.plate) { toast('Поиск по номеру не подключён: Настройки → Интеграции → «Данные авто по номеру» (RegCheck). Пока можно отсканировать техпаспорт или расшифровать VIN.', 'error'); return; }
     setBusy(true);
     try { const r = await act(() => api('vehicle/plate/' + encodeURIComponent(plate))); if (r) { toast(`Найдено: ${[r.make, r.model, r.year].filter(Boolean).join(' ')}`); onData(r); } } finally { setBusy(false); }
   }}><${Icon} n="search" /></button>`;
