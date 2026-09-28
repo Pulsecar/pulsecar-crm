@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pulsecar — запчасти от поставщика",
   "short_name": "Pulsecar",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Кнопка «Pulsecar» на сайтах поставщиков: запчасть сразу в заказ, выцену или на склад, фактуры и WZ — в приход CRM Pulsecar. Печать чеков на фискальной кассе Novitus.",
   "icons": {
     "16": "icons/icon16.png",
@@ -51,6 +51,30 @@
     "http://127.0.0.1/*"
   ],
   "content_scripts": [
+    {
+      "matches": [
+        "https://*.intercars.eu/*",
+        "https://*.intercars.com.pl/*",
+        "https://*.intercars.pl/*",
+        "https://*.hartphp.com.pl/*",
+        "https://*.autopartner.com/*",
+        "https://*.autopartner.pl/*",
+        "https://*.apcat.eu/*",
+        "https://*.inter-team.com.pl/*",
+        "https://*.motoprofil.pl/*",
+        "https://*.profiauto.pl/*",
+        "https://*.gordon.com.pl/*",
+        "https://*.motorol.pl/*",
+        "https://*.rodon.pl/*",
+        "https://*.arge.pl/*",
+        "https://*.elit.pl/*",
+        "https://*.autoland.pl/*"
+      ],
+      "js": [
+        "guard.js"
+      ],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "https://*.intercars.eu/*",

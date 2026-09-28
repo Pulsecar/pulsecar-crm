@@ -258,6 +258,12 @@
       <div class="f"><button class="c" id="cancel">Anuluj</button><button class="p" id="go"><i></i>Pobierz do Pulsecar</button></div>
     </div></div>`;
     document.documentElement.appendChild(host);
+    // клавиши из окна — только нам: сайт поставщика не должен их ловить (Enter перезагружал страницу Inter Cars)
+    for (const t of ['keydown', 'keyup', 'keypress']) host.addEventListener(t, (e) => {
+      e.stopPropagation();
+      if (t === 'keydown' && e.key === 'Enter' && e.composedPath()[0]?.tagName === 'INPUT') { e.preventDefault(); e.composedPath()[0].blur(); }
+      if (t === 'keydown' && e.key === 'Escape') close();
+    });
     const $ = (id) => root.getElementById(id);
     const close = () => host.remove();
     $('cancel').onclick = close;

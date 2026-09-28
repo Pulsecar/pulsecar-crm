@@ -51,19 +51,19 @@ async function check() {
 // ── сайты, где пользователь включил кнопку сам (любой поставщик, которого нет в списке) ──
 async function syncSites() {
   const { sites = [] } = await chrome.storage.sync.get('sites');
-  const reg = await chrome.scripting.getRegisteredContentScripts({ ids: ['pulsecar-sites'] }).catch(() => []);
-  if (reg.length) await chrome.scripting.unregisterContentScripts({ ids: ['pulsecar-sites'] }).catch(() => {});
+  const reg = await chrome.scripting.getRegisteredContentScripts({ ids: ['pulsecar-sites', 'pulsecar-guard'] }).catch(() => []);
+  if (reg.length) await chrome.scripting.unregisterContentScripts({ ids: reg.map((r) => r.id) }).catch(() => {});
   const granted = [];
   for (const o of sites) if (await chrome.permissions.contains({ origins: [o + '/*'] })) granted.push(o + '/*');
   if (granted.length) {
-    await chrome.scripting.registerContentScripts([{ id: 'pulsecar-sites', matches: granted, js: ['content.js'], runAt: 'document_idle', persistAcrossSessions: true }])
+    await chrome.scripting.registerContentScripts([{ id: 'pulsecar-guard', matches: granted, js: ['guard.js'], runAt: 'document_start', persistAcrossSessions: true }, { id: 'pulsecar-sites', matches: granted, js: ['content.js'], runAt: 'document_idle', persistAcrossSessions: true }])
       .catch((e) => console.warn('Pulsecar:', e.message));
   }
 }
 
 async function inject(tabId, mode) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['guard.js', 'content.js'] });
     await chrome.tabs.sendMessage(tabId, { type: 'pulsecar-capture', mode });
     return { ok: true };
   } catch (e) { return { error: 'На этой странице кнопку не запустить: ' + e.message }; }
