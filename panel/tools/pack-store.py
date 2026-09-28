@@ -8,7 +8,7 @@ src = os.path.join(root, 'extension')
 m = json.load(open(os.path.join(src, 'manifest.json'), encoding='utf-8'))
 
 DEV = ('http://localhost/*', 'http://127.0.0.1/*')
-m['name'] = 'Pulsecar – części z hurtowni i Allegro do CRM'
+m['name'] = 'Pulsecar'
 m['short_name'] = 'Pulsecar'
 m['description'] = 'Części z Inter Cars, Allegro i hurtowni jednym kliknięciem do zleceń, wycen i magazynu CRM Pulsecar. Paragony na kasie Novitus.'
 m['homepage_url'] = 'https://panel.pulsecar.tech'
