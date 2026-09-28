@@ -246,6 +246,15 @@ try {
   assert.ok(q1.id);
   console.log('✓ клиент (частное лицо / фирма, имя и фамилия, срок оплаты, авто по умолчанию) и авто (km/mi) как в Motowarsztat');
 
+  // 9e. меню профиля: мой аккаунт, напоминания
+  ok(await req('/crm-api/me', { method: 'PUT', body: { name: 'Администратор', phone: '+48600000001', email: 'admin@pulsecar.pl' } }), 'me upd');
+  assert.equal(ok(await req('/crm-api/me'), 'me').user.email, 'admin@pulsecar.pl');
+  assert.equal((await req('/crm-api/me', { method: 'PUT', body: { current_password: 'wrong', new_password: 'newpass-123' } })).status, 400);
+  ok(await req('/crm-api/me', { method: 'PUT', body: { current_password: 'test-pass-123', new_password: 'test-pass-123' } }), 'pw');
+  const rem = ok(await req('/crm-api/reminders'), 'reminders');
+  assert.ok(Array.isArray(rem.rows) && typeof rem.hours === 'number');
+  console.log('✓ меню профиля: свои данные и пароль, запланированные напоминания');
+
   // 10. удаление аккаунта в приложении
   ok(await req('/api/me/delete', { body: {}, token: sess.token }), 'delete');
   assert.equal((await req('/api/me', { token: sess.token })).status, 401);

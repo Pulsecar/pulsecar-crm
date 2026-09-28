@@ -373,3 +373,48 @@ a.btn.disabled{pointer-events:none;opacity:.5}
 div.f .ac input, div.f .ig { font-size: 14px; color: var(--text); }
 .modal.xl { max-width: 1200px; }
 .modal.xl .mwf-tabs { display: none; }
+
+/* ── Меню профиля (как в Motowarsztat) ── */
+.umenu { position: relative; margin-left: auto; }
+.um-btn { display: flex; align-items: center; gap: 10px; background: none; border: 1px solid transparent; color: var(--muted); padding: 5px 8px 5px 12px; border-radius: 999px; cursor: pointer; font: inherit; }
+.um-btn:hover, .um-btn[aria-expanded="true"] { border-color: var(--border2); color: var(--text); background: var(--surface); }
+.um-btn svg { width: 28px; height: 28px; }
+.um-drop { position: absolute; right: 0; top: calc(100% + 8px); width: 300px; background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.35); padding: 8px; z-index: 60; max-height: calc(100vh - 80px); overflow-y: auto; }
+.um-head { display: flex; flex-direction: column; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.um-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border-radius: 8px; color: var(--text); background: none; border: 0; font: inherit; text-align: left; cursor: pointer; }
+.um-item:hover { background: var(--surface2); text-decoration: none; }
+.um-item svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.um-row .grow { flex: 1; }
+.um-row .lang-switch { margin: 0; }
+.um-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+.changes { margin: 0; padding-left: 18px; line-height: 1.7; }
+.seg.sel { margin: 0; align-self: flex-start; }
+.seg.sel button { padding: 7px 14px; font-size: 13px; letter-spacing: 0; }
+@media (max-width: 720px) { .um-name { display: none; } .um-drop { position: fixed; left: 8px; right: 8px; width: auto; top: 60px; } }
+
+/* ── Компактные таблицы и узкое левое меню ── */
+html.compact .tbl td { padding: 5px 8px; }
+html.compact .tbl th { padding: 6px 8px; }
+@media (min-width: 861px) {
+html.side-mini .shell { grid-template-columns: 64px 1fr; }
+html.side-mini .side { padding: 14px 8px; }
+html.side-mini .side .nl, html.side-mini .nav-foot { display: none; }
+html.side-mini .side .brand img { height: 22px; max-width: 46px; object-fit: cover; object-position: left; }
+html.side-mini .nav-item { justify-content: center; padding: 10px 0; position: relative; }
+html.side-mini .nav-item .count { position: absolute; top: 2px; right: 2px; }
+}
+
+/* ── Светлая тема ── */
+:root[data-theme="light"] {
+  --bg: #f5f6f8; --panel: #ffffff; --surface: #ffffff; --surface2: #f0f1f4; --surface3: #e3e5ea;
+  --border: #e3e5ea; --border2: #d3d6dd;
+  --text: #16181c; --muted: #5d626c; --faint: #8b9099;
+  --accent: #0ea452; --accent-dim: rgba(14,164,82,.12); --on-accent: #fff;
+  --danger: #d93636; --warn: #b07800; --info: #1f6fd1;
+  color-scheme: light;
+}
+:root[data-theme="light"] a { color: #0a8f45; }
+:root[data-theme="light"] .btn.primary, :root[data-theme="light"] .nav-item .count { color: #fff; }
+:root[data-theme="light"] .nav-item.on { color: #0a8f45; }
+:root[data-theme="light"] .um-drop { box-shadow: 0 16px 40px rgba(20,24,30,.14); }
+:root[data-theme="light"] .modal-bg { background: rgba(20,24,30,.35); }

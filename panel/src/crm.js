@@ -102,7 +102,7 @@ const lists = () => ({
 crm.get('/me', (req, res) => {
   const s = who(req);
   res.json({
-    user: { id: s.id, name: s.name, role: s.role },
+    user: { id: s.id, name: s.name, role: s.role, login: s.login, phone: s.phone, email: s.email, last_login: s.last_login },
     perms: permsOf(s),
     ...lists(),
     settings: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])),
@@ -947,6 +947,45 @@ crm.get('/reports', (req, res) => {
 });
 
 // ── Расширение Chrome «Pulsecar для поставщиков» ──────────────────────────────
+// ── Мой аккаунт: свои данные и пароль ───────────────────────────────────────
+crm.put('/me', (req, res) => {
+  const s = who(req);
+  const b = req.body || {};
+  const d = {};
+  if (b.name !== undefined) { if (!String(b.name).trim()) throw new HttpError(400, 'Имя обязательно'); d.name = String(b.name).trim().slice(0, 80); }
+  if (b.phone !== undefined) d.phone = String(b.phone || '').trim() || null;
+  if (b.email !== undefined) d.email = String(b.email || '').trim() || null;
+  if (b.new_password) {
+    const me = one('SELECT pass_hash FROM staff WHERE id = ?', s.id);
+    if (me.pass_hash && !checkPassword(String(b.current_password || ''), me.pass_hash)) throw new HttpError(400, 'Текущий пароль неверный');
+    if (String(b.new_password).length < 8) throw new HttpError(400, 'Пароль — минимум 8 символов');
+    d.pass_hash = hashPassword(String(b.new_password));
+  }
+  if (Object.keys(d).length) update('staff', s.id, d);
+  log('staff', s.id, 'self_update', Object.keys(d).filter((k) => k !== 'pass_hash').concat(d.pass_hash ? ['password'] : []), s.name);
+  res.json({ ok: true });
+});
+// ── Запланированные напоминания (SMS о визите) ──────────────────────────────
+crm.get('/reminders', (req, res) => {
+  who(req, 'sms.view');
+  const S = (k, d) => getSetting(k, d);
+  const on = S('sms_remind_on', '1') === '1' && !!S('sms_tpl_reminder');
+  const hours = Number(S('sms_remind_hours', '24')) || 24;
+  const rows = all(`SELECT a.id, a.start_at, a.status, a.reminded, a.order_id, a.customer_id, a.title, a.contact_phone a_phone, a.contact_name a_name, c.name cname, c.company, c.kind, c.phone cphone,
+      k.plate, k.make, k.model, o.number order_no, st.name station
+    FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id LEFT JOIN cars k ON k.id = a.car_id LEFT JOIN orders o ON o.id = a.order_id LEFT JOIN stations st ON st.id = a.station_id
+    WHERE a.start_at IS NOT NULL AND a.start_at >= datetime('now', 'localtime', '-2 days') AND a.status IN ('planned', 'request') ORDER BY a.start_at LIMIT 300`)
+    .map((a) => {
+      const phone = a.cphone || a.a_phone || null;
+      const at = new Date(new Date(a.start_at.replace(' ', 'T')).getTime() - hours * 3600e3);
+      const sendAt = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+      const state = a.reminded ? 'sent' : !on ? 'off' : !phone ? 'no_phone' : a.status !== 'planned' ? 'request' : 'planned';
+      return { ...a, phone, send_at: sendAt, state };
+    });
+  const sent = all(`SELECT id, phone, text, status, created_at, customer_id, order_id FROM sms_log WHERE kind = 'reminder' ORDER BY id DESC LIMIT 50`);
+  res.json({ on, hours, rows, sent });
+});
+
 crm.post('/me/ext-token', (req, res) => {
   const s = who(req);
   const token = 'pcx_' + crypto.randomBytes(24).toString('base64url');

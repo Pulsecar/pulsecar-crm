@@ -18,6 +18,7 @@ import Search from './pages/search.js';
 import Sms from './pages/sms.js';
 import { ClipPage } from './pages/suppliers.js';
 import { initI18n, LangSwitch } from './i18n.js';
+import { MyAccount, Reminders, Changelog, ScreenSettings, applyScreen, isDark, setTheme } from './pages/account.js';
 
 const NAV = [
   { to: '/', icon: 'home', label: 'Главная' },
@@ -26,7 +27,6 @@ const NAV = [
   { to: '/calendar', icon: 'cal', label: 'Терминарз', badge: 'requests', perm: 'calendar.view' },
   { to: '/customers', icon: 'users', label: 'Клиенты', perm: 'clients.view' },
   { to: '/cars', icon: 'car', label: 'Автомобили', perm: 'cars.view' },
-  { to: '/sms', icon: 'chat', label: 'SMS', perm: 'sms.view' },
   { sep: true },
   { to: '/stock', icon: 'box', label: 'Склад', perm: 'products.view' },
   { to: '/purchases', icon: 'cart', label: 'Закупки', perm: 'purchases.view' },
@@ -36,10 +36,51 @@ const NAV = [
   { to: '/pos', icon: 'qr', label: 'Pulse Points', perm: 'loyalty.use' },
   { to: '/finance', icon: 'chart', label: 'Финансы', perm: 'reports.view' },
   { to: '/reports', icon: 'file', label: 'Рапорты', perm: 'reports.view' },
-  { sep: true },
-  { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' },
-  { to: '/settings', icon: 'gear', label: 'Настройки', perm: 'settings.manage' },
 ];
+// Меню профиля справа вверху (как в Motowarsztat): настройки, интеграции, SMS и всё, что не нужно каждый день
+const USER_MENU = [
+  [{ to: '/account', icon: 'user', label: 'Мой аккаунт' },
+    { to: '/settings/params', icon: 'gear', label: 'Настройки', perm: 'settings.manage' },
+    { to: '/settings/integrations', icon: 'plug', label: 'Интеграции', perm: 'settings.manage' },
+    { to: '/settings/staff', icon: 'team', label: 'Сотрудники и доступы', perm: 'settings.manage' },
+    { to: '/sms', icon: 'chat', label: 'SMS', perm: 'sms.view' },
+    { to: '/settings/messages', icon: 'mail', label: 'Шаблоны SMS и e-mail', perm: 'settings.manage' },
+    { to: '/reminders', icon: 'bell', label: 'Запланированные напоминания', perm: 'sms.view' },
+    { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' }],
+  [{ to: '/changelog', icon: 'history', label: 'История изменений' }, { screen: true, icon: 'monitor', label: 'Настройки экрана' }],
+];
+
+function UserMenu({ app }) {
+  const [open, setOpen] = useState(false);
+  const [screen, setScreen] = useState(false);
+  const [dark, setDark] = useState(isDark());
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (!e.target.closest('.umenu')) setOpen(false); };
+    const esc = (e) => e.key === 'Escape' && setOpen(false);
+    setTimeout(() => addEventListener('click', close));
+    addEventListener('keydown', esc);
+    return () => { removeEventListener('click', close); removeEventListener('keydown', esc); };
+  }, [open]);
+  const item = (n) => n.screen
+    ? html`<button class="um-item" onClick=${() => { setOpen(false); setScreen(true); }}><${Icon} n=${n.icon} />${n.label}</button>`
+    : html`<a class="um-item" href=${'#' + n.to} onClick=${() => setOpen(false)}><${Icon} n=${n.icon} />${n.label}</a>`;
+  const groups = USER_MENU.map((g) => g.filter((n) => !n.perm || app.perms?.[n.perm])).filter((g) => g.length);
+  return html`<div class="umenu">
+    <button class="um-btn" onClick=${() => setOpen(!open)} aria-haspopup="menu" aria-expanded=${open} title=${app.user.name}>
+      <span class="um-name">${app.user.name}</span><${Icon} n="userc" /></button>
+    ${open && html`<div class="um-drop" role="menu">
+      <div class="um-head"><b>${app.user.name}</b><span class="muted small">${{ admin: 'Администратор', staff: 'Сотрудник', mechanic: 'Механик' }[app.user.role] || ''}</span></div>
+      ${groups.map((g) => html`${g.map(item)}<div class="um-sep"></div>`)}
+      <label class="um-item um-row"><${Icon} n="moon" /><span class="grow">Тёмный режим</span>
+        <span class="toggle"><input type="checkbox" checked=${dark} onChange=${(e) => { setDark(e.target.checked); setTheme(e.target.checked); }} /><i></i></span></label>
+      <div class="um-item um-row"><${Icon} n="globe" /><span class="grow">Язык</span><${LangSwitch} html=${html} compact /></div>
+      <div class="um-sep"></div>
+      <button class="um-item" onClick=${async () => { await api('logout', { body: {} }).catch(() => {}); location.reload(); }}><${Icon} n="logout" />Выйти</button>
+    </div>`}
+    ${screen && html`<${ScreenSettings} onClose=${() => { setScreen(false); setDark(isDark()); }} />`}
+  </div>`;
+}
 const RANK = { mechanic: 1, staff: 2, admin: 3 };
 
 function Login({ onDone }) {
@@ -51,7 +92,7 @@ function Login({ onDone }) {
     try { await api('login', { body: f }); onDone(); } catch (x) { setErr(x.message); }
   };
   return html`<div class="login"><form class="card" onSubmit=${submit}>
-    <img src="/logo.png" alt="Pulsecar" />
+    <img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar" />
     <h1 class="c">Панель сервиса</h1>
     <label class="f">Логин<input id="login" autocomplete="username" value=${f.login} onInput=${(e) => set({ ...f, login: e.target.value })} required /></label>
     <label class="f">Пароль<input id="password" type="password" autocomplete="current-password" value=${f.password} onInput=${(e) => set({ ...f, password: e.target.value })} required /></label>
@@ -96,17 +137,20 @@ function Shell({ app }) {
   else if (p0 === 'sms') page = html`<${Sms} />`;
   else if (p0 === 'suppliers' && p1 === 'clip') page = html`<${ClipPage} />`;
   else if (p0 === 'marketing') page = html`<${Marketing} />`;
+  else if (p0 === 'account') page = html`<${MyAccount} />`;
+  else if (p0 === 'reminders') page = html`<${Reminders} />`;
+  else if (p0 === 'changelog') page = html`<${Changelog} />`;
   else if (p0 === 'search') page = html`<${Search} q=${route.query.q || ''} key=${route.query.q} />`;
   else page = html`<div class="empty">Страница не найдена</div>`;
 
   const active = (to) => (to === '/' ? route.path === '/' : route.path.startsWith(to));
   return html`<div class="shell">
     <aside class=${'side' + (menu ? ' open' : '')}>
-      <div class="brand"><img src="/logo.png" alt="Pulsecar" /></div>
+      <div class="brand"><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar" /></div>
       ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
-        <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to}>
-          <${Icon} n=${n.icon} />${n.label}${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}
-      <div class="nav-foot">${app.settings.company_brand || 'Pulsecar'} · ${app.user.name}</div>
+        <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label}>
+          <${Icon} n=${n.icon} /><span class="nl">${n.label}</span>${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}
+      <div class="nav-foot">${app.settings.company_brand || 'Pulsecar'}</div>
     </aside>
     <div class="main">
       <div class="top">
@@ -115,9 +159,7 @@ function Shell({ app }) {
           <input type="search" placeholder="Поиск: клиент, телефон, номер авто, VIN, заказ…" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Поиск" />
         </form>
         <a class="btn primary" href="#/orders/new"><${Icon} n="plus" />Заказ</a>
-        <${LangSwitch} html=${html} compact />
-        <div class="user"><span>${app.user.name}</span>
-          <button class="icon-btn" title="Выйти" aria-label="Выйти" onClick=${async () => { await api('logout', { body: {} }).catch(() => {}); location.reload(); }}><${Icon} n="logout" /></button></div>
+        <${UserMenu} app=${app} />
       </div>
       <main class="content">${page}</main>
     </div>
@@ -141,6 +183,7 @@ function Root() {
   </${AppCtx.Provider}>`;
 }
 
+applyScreen();
 initI18n().finally(() => render(html`<${Root} />`, document.getElementById('root')));
 window.addEventListener('unhandledrejection', (e) => { if (e.reason?.message) console.warn(e.reason.message); });
 export { toast };
