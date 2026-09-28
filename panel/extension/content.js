@@ -207,7 +207,7 @@
     root.innerHTML = `<style>
       *{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
       .bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
-      .m{background:#fff;color:#1b1c1f;border-radius:14px;width:min(1060px,96vw);max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+      .m{background:#fff;color:#1b1c1f;border-radius:14px;width:min(1280px,97vw);max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)}
       .h{padding:18px 24px;border-bottom:1px solid #e6e6e9;display:flex;align-items:baseline;gap:10px}
       .h b{font-size:20px}.h span{color:#6b6e75;font-size:13px}
       .b{padding:18px 24px}.opts{border:1px solid #e6e6e9;border-radius:10px}
@@ -222,7 +222,7 @@
       .ok a{color:#0b6b3a;font-weight:600}
       h3{text-align:center;margin:16px 0 8px;font-size:18px}
       table{width:100%;border-collapse:collapse;font-size:14px}th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#6b6e75;text-align:left;padding:8px;border-bottom:2px solid #e6e6e9}
-      td{padding:6px 8px;border-bottom:1px solid #eee}td.r,th.r{text-align:right}input.i{width:100%}input.n{width:90px;text-align:right}
+      td{padding:6px 8px;border-bottom:1px solid #eee}td.r,th.r{text-align:right}input.i{width:100%}input.n{width:84px;text-align:right}input.pc{width:76px}input.n::-webkit-inner-spin-button,input.n::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}input.n{-moz-appearance:textfield}th.g,td.g{background:#f5f6f8}th.s,td.s{background:#effaf3}.hint{color:#8a8d94;font-size:12px;text-align:right;margin-top:6px}
       input.bad{border-color:#e34948;background:#fdecec}.sub{color:#8a8d94;font-size:12px}
       .f{padding:14px 24px;border-top:1px solid #e6e6e9;display:flex;justify-content:flex-end;gap:10px}
       button{font:600 14px system-ui,sans-serif;border-radius:8px;padding:10px 18px;cursor:pointer;border:0}
@@ -243,13 +243,17 @@
         </div>
         <div id="msg"></div>
         <h3>Список товаров</h3>
-        <table><thead><tr><th>#</th><th>Название</th><th>Код товара</th><th>Производитель</th><th class="r">Кол-во</th><th class="r">Закупка нетто</th><th class="r">Продажа брутто</th></tr></thead><tbody>
+        <table><thead><tr><th>#</th><th>Название</th><th>Код товара</th><th>Производитель</th><th class="r">Кол-во</th><th class="r g">Закупка нетто</th><th class="r g">Закупка брутто</th><th class="r s">Продажа нетто</th><th class="r s">Продажа брутто</th><th class="r s" title="Наценка на закупку: (продажа − закупка) / закупка">Наценка %</th></tr></thead><tbody>
         ${items.map((it, n) => `<tr><td>${n + 1}</td><td><input class="i" data-n="${n}" data-k="name" value="${esc(it.name)}">${it.product ? `<div class="sub">уже есть на складе: ${it.product.stock} шт.</div>` : ''}${it.source === 'api' ? '<div class="sub">цены из API Inter Cars</div>' : ''}</td>
           <td><input class="i" data-n="${n}" data-k="code" value="${esc(it.code)}"></td><td><input class="i" data-n="${n}" data-k="brand" value="${esc(it.brand || '')}"></td>
           <td class="r"><input class="i n" type="number" step="1" min="1" data-n="${n}" data-k="qty" value="${it.qty || 1}"></td>
-          <td class="r"><input class="i n" type="number" step="0.01" data-n="${n}" data-k="price_net" value="${it.price_net || 0}"></td>
-          <td class="r"><input class="i n" type="number" step="0.01" data-n="${n}" data-k="sell_gross" value="${it.sell_gross || 0}"></td></tr>`).join('')}
+          <td class="r g"><input class="i n p" type="number" step="0.01" data-n="${n}" data-k="price_net"></td>
+          <td class="r g"><input class="i n p" type="number" step="0.01" data-n="${n}" data-k="price_gross"></td>
+          <td class="r s"><input class="i n p" type="number" step="0.01" data-n="${n}" data-k="sell_net"></td>
+          <td class="r s"><input class="i n p" type="number" step="0.01" data-n="${n}" data-k="sell_gross"></td>
+          <td class="r s"><input class="i n pc p" type="number" step="0.1" data-n="${n}" data-k="markup"></td></tr>`).join('')}
         </tbody></table>
+        <div class="hint">Меняйте любое поле: нетто ↔ брутто пересчитываются по VAT, наценка % пересчитывает цену продажи, а новая цена продажи — наценку.</div>
       </div>
       <div class="f"><button class="c" id="cancel">Anuluj</button><button class="p" id="go"><i></i>Pobierz do Pulsecar</button></div>
     </div></div>`;
@@ -258,9 +262,32 @@
     const close = () => host.remove();
     $('cancel').onclick = close;
     root.querySelector('.bg').addEventListener('click', (e) => { if (e.target.classList.contains('bg')) close(); });
+    // цены: закупка и продажа в нетто и брутто + наценка %; всё хранится как price_net и sell_gross
+    const vatK = (it) => 1 + (Number(it.vat ?? 23) || 0) / 100;
+    const markupOf = (it) => (it.lockMarkup ? it.markupVal : it.price_net > 0 && it.sell_gross > 0 ? round2(((it.sell_gross / vatK(it)) / it.price_net - 1) * 100) : '');
+    const fill = (n, skip) => {
+      const it = items[n];
+      const vals = { price_net: it.price_net || 0, price_gross: round2((it.price_net || 0) * vatK(it)), sell_net: round2((it.sell_gross || 0) / vatK(it)), sell_gross: it.sell_gross || 0, markup: markupOf(it) };
+      root.querySelectorAll(`input.p[data-n="${n}"]`).forEach((inp) => { if (inp !== skip) inp.value = vals[inp.dataset.k] === '' ? '' : String(vals[inp.dataset.k]); });
+    };
+    items.forEach((it, n) => { it.price_net = round2(Number(it.price_net) || 0); it.sell_gross = round2(Number(it.sell_gross) || 0); fill(n); });
     root.querySelectorAll('input.i').forEach((inp) => inp.addEventListener('input', () => {
-      const it = items[Number(inp.dataset.n)];
-      it[inp.dataset.k] = inp.type === 'number' ? Number(inp.value) : inp.value;
+      const n = Number(inp.dataset.n), it = items[n], k = inp.dataset.k;
+      const v = inp.type === 'number' ? Number(String(inp.value).replace(',', '.')) || 0 : inp.value;
+      if (!inp.classList.contains('p')) it[k] = v;
+      else {
+        const keepMarkup = markupOf(it);
+        if (k === 'price_net') it.price_net = round2(v);
+        if (k === 'price_gross') it.price_net = round2(v / vatK(it));
+        if (k === 'sell_net') it.sell_gross = round2(v * vatK(it));
+        if (k === 'sell_gross') it.sell_gross = round2(v);
+        if (k === 'markup') it.sell_gross = round2(it.price_net * (1 + v / 100) * vatK(it));
+        // поменяли закупку при заданной наценке — цена продажи держит наценку
+        if ((k === 'price_net' || k === 'price_gross') && keepMarkup !== '' && it.lockMarkup) it.sell_gross = round2(it.price_net * (1 + keepMarkup / 100) * vatK(it));
+        if (k === 'markup') { it.lockMarkup = true; it.markupVal = v; }
+        if (k === 'sell_net' || k === 'sell_gross') it.lockMarkup = false;
+        fill(n, inp);
+      }
       validate();
     }));
     $('stock').addEventListener('change', () => { if ($('stock').checked) $('product').checked = true; validate(); });
