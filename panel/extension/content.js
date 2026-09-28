@@ -5,7 +5,7 @@
   window.__pulsecar = true;
 
   const host = location.hostname;
-  const SUPPLIER = /intercars/.test(host) ? 'intercars' : /hartphp/.test(host) ? 'hart' : /autopartner|apcat/.test(host) ? 'autopartner'
+  const SUPPLIER = /(^|\.)allegro\.pl$/.test(host) ? 'allegro' : /intercars/.test(host) ? 'intercars' : /hartphp/.test(host) ? 'hart' : /autopartner|apcat/.test(host) ? 'autopartner'
     : /inter-team/.test(host) ? 'interteam' : /motoprofil|profiauto/.test(host) ? 'motoprofil' : /gordon/.test(host) ? 'gordon' : /motorol/.test(host) ? 'motorol'
     : /rodon/.test(host) ? 'rodon' : /arge/.test(host) ? 'arge-krakow' : /elit/.test(host) ? 'elit' : /autoland/.test(host) ? 'autoland' : 'other';
   const api = (path, opts = {}) => new Promise((ok) => chrome.runtime.sendMessage({ type: 'api', path, ...opts }, ok));
@@ -156,6 +156,77 @@
     }
   }
 
+
+  // ── Allegro (allegro.pl и business.allegro.pl): цена оферты = закупка, продажу задаём наценкой % ──
+  const AL_MONEY = /(\d{1,3}(?:[  .]\d{3})*,\d{2})\s*zł/;
+  const alAdd = (root) => [...root.querySelectorAll('button')].find((b) => /dodaj do koszyka/i.test(b.innerText || ''));
+  const alRow = (root, label) => {
+    const re = new RegExp('^\\s*' + label + '\\s*:?\\s*', 'i');
+    const el = [...root.querySelectorAll('tr, li')].find((e) => e.childElementCount < 6 && re.test(T(e)) && T(e).length < 160);
+    return el ? T(el).replace(re, '').replace(/\s+/g, ' ').trim() : '';
+  };
+  /** цены из текста блока: «55,72 zł netto … 68,54 zł z 23% VAT» (Allegro Biznes) или просто «68,54 zł» (брутто) */
+  function alPrices(text) {
+    const t = text.replace(/ /g, ' ');
+    const g = t.match(/(\d{1,3}(?:[ .]\d{3})*,\d{2})\s*zł\s*(?:brutto,?|z)\s*(\d{1,2})\s*%\s*VAT/i);
+    if (g) { const vat = Number(g[2]); const gross = toNum(g[1]); return { vat, price_net: round2(gross / (1 + vat / 100)), gross }; }
+    const n = t.match(/(\d{1,3}(?:[ .]\d{3})*,\d{2})\s*zł\s*netto/i);
+    if (n) return { vat: 23, price_net: toNum(n[1]), gross: round2(toNum(n[1]) * 1.23) };
+    const m = t.match(AL_MONEY);
+    return m ? { vat: 23, price_net: round2(toNum(m[1]) / 1.23), gross: toNum(m[1]) } : null;
+  }
+  const alOfferId = (href) => (String(href || '').match(/offerId=(\d+)/) || String(href || '').match(/-(\d{8,})(?:[?#]|$)/) || [])[1] || null;
+
+  function alProductPage() {
+    if (!/\/(oferta|produkt)\//.test(location.pathname)) return null;
+    const btn = alAdd(document);
+    if (!btn) return null;
+    let box = btn; while (box.parentElement && !/zł/.test(T(box))) box = box.parentElement;
+    return { btn, box };
+  }
+  function parseAlProduct({ box }) {
+    const ld = [...document.querySelectorAll('script[type="application/ld+json"]')].map((x) => { try { return JSON.parse(x.textContent); } catch { return null; } })
+      .find((j) => j && j['@type'] === 'Product') || {};
+    let pr = alPrices(T(box));
+    if (!pr && ld.offers?.price) pr = { vat: 23, gross: Number(ld.offers.price), price_net: round2(Number(ld.offers.price) / 1.23) };
+    const name = T(document.querySelector('h1')) || ld.name || '';
+    const code = alRow(document, 'Numer katalogowy części') || alRow(document, 'Numer katalogowy') || ld.mpn || '';
+    const brand = alRow(document, 'Producent części') || (typeof ld.brand === 'string' ? ld.brand : ld.brand?.name) || null;
+    const qty = toNum(box.querySelector('input[type=number], input[inputmode=numeric]')?.value || '1') || 1;
+    return { supplier: SUPPLIER, sku: alOfferId(location.href) || ld.sku || null, code: code || null, name, brand, ean: ld.gtin || ld.gtin13 || null, qty,
+      vat: pr?.vat ?? 23, price_net: pr?.price_net || 0, sell_gross: 0, url: location.href.split('#')[0] };
+  }
+  function alCards() {
+    return [...document.querySelectorAll('article')].filter((a) => a.querySelector('h2 a[href], h3 a[href]') && /zł/.test(T(a)) && !a.closest('.pulsecar-host'));
+  }
+  function parseAlCard(card) {
+    const a = card.querySelector('h2 a[href], h3 a[href]');
+    const txt = T(card);
+    const pr = alPrices(txt);
+    const code = (txt.match(/Numer katalogowy części\s*:?\s*([^\n]+?)(?:\s{2,}|\n|$)/i) || [])[1] || null;
+    const brand = (txt.match(/Producent części\s*:?\s*([^\n]+?)(?:\s+Numer katalogowy|\s{2,}|\n|$)/i) || [])[1] || null;
+    return { supplier: SUPPLIER, sku: alOfferId(a?.href), code: code && code.trim(), name: T(a), brand: brand && brand.trim(), qty: 1,
+      vat: pr?.vat ?? 23, price_net: pr?.price_net || 0, sell_gross: 0, url: a?.href || null };
+  }
+  function decorateAl() {
+    const pg = alProductPage();
+    if (pg && !document.querySelector('.pulsecar-btn[data-al="p"]')) {
+      const b = makeBtn(() => { const cur = alProductPage(); openModal([parseAlProduct(cur || pg)]); });
+      b.dataset.al = 'p';
+      b.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1bf372;margin-right:10px"></span>Pobierz do Pulsecar';
+      b.style.cssText += ';display:flex;width:100%;box-sizing:border-box;margin:8px 0 0 0;padding:13px 12px;font-size:15px;letter-spacing:.3px';
+      const buy = [...pg.box.querySelectorAll('button')].filter((x) => /kup|dodaj do koszyka/i.test(x.innerText || '')).pop() || pg.btn;
+      buy.insertAdjacentElement('afterend', b);
+    }
+    for (const card of alCards()) {
+      if (card.querySelector('.pulsecar-btn')) continue;
+      const b = makeBtn(() => openModal([parseAlCard(card)]));
+      const add = alAdd(card);
+      if (add?.parentElement) { b.style.margin = '6px 0 0 0'; b.style.width = '100%'; b.style.boxSizing = 'border-box'; add.insertAdjacentElement('afterend', b); }
+      else card.appendChild(b);
+    }
+  }
+
   // ── Документ на странице (фактура, WZ, корзина, заказ): тип, номер, дата ─────
   function detectDoc() {
     const head = (location.href + ' ' + document.title).toLowerCase();
@@ -189,6 +260,12 @@
     return [...document.querySelectorAll('[role=row]')].map((r) => [...r.querySelectorAll('[role=cell],[role=gridcell],[role=columnheader]')].map((c) => T(c)).join('\t')).filter(Boolean).join('\n');
   }
   async function captureAndOpen(mode) {
+    if (SUPPLIER === 'allegro' && mode !== 'selection') {
+      const pg = alProductPage();
+      if (pg) return openModal([parseAlProduct(pg)]);
+      const cards = alCards();
+      if (cards.length) return openModal(cards.map(parseAlCard));
+    }
     if (SUPPLIER === 'intercars' && mode !== 'selection') {
       const pg = icProductPage();
       if (pg) return openModal([parseIcProduct(pg)], { doc: detectDoc() });
@@ -230,7 +307,10 @@
     const doc = ctx.doc || { kind: null, number: '', date: new Date().toISOString().slice(0, 10) };
     const docOn = !!doc.kind && items.length > 0 && can.docs;
     const KIND = [['invoice', 'Фактура'], ['wz', 'WZ'], ['cart', 'Корзина'], ['order', 'Заказ у поставщика']];
-    for (const it of items) if (!it.sell_gross && it.price_net) it.sell_gross = round2(it.price_net * 1.23 * (1 + markup / 100));
+    for (const it of items) if (!it.sell_gross && it.price_net) {
+      it.sell_gross = round2(it.price_net * (1 + (Number(it.vat ?? 23)) / 100) * (1 + markup / 100));
+      if (SUPPLIER === 'allegro') { it.lockMarkup = true; it.markupVal = markup; }
+    }
 
     const host = document.createElement('div');
     host.className = 'pulsecar-host';
@@ -269,7 +349,7 @@
           <div class="opt"><label><input type="checkbox" id="asDoc" ${docOn ? 'checked' : ''} ${can.docs ? '' : 'disabled'}>Документ поставщика</label>
             <div class="docf"><select id="dkind">${KIND.map(([k, l]) => `<option value="${k}" ${k === (doc.kind || 'invoice') ? 'selected' : ''}>${l}</option>`).join('')}</select>
             <input class="i" id="dnum" placeholder="номер документа" value="${esc(doc.number)}"><input class="i" id="ddate" type="date" value="${esc(doc.date)}"></div></div>
-          <div class="opt"><label><input type="checkbox" id="product" checked ${can.product || can.stock ? '' : 'disabled'}>Создать товар в картотеке</label><span class="sub">цена продажи = рекомендованная цена поставщика</span></div>
+          <div class="opt"><label><input type="checkbox" id="product" checked ${can.product || can.stock ? '' : 'disabled'}>Создать товар в картотеке</label><span class="sub">${SUPPLIER === 'allegro' ? 'цена оферты Allegro = закупка, продажа = закупка + наценка % (меняйте в колонке «Наценка»)' : 'цена продажи = рекомендованная цена поставщика'}</span></div>
           <div class="opt"><label><input type="checkbox" id="stock" ${can.stock ? '' : 'disabled'}>Оприходовать на склад (PZ)</label><span class="sub">когда деталь уже приехала</span></div>
           <div class="opt"><label><input type="checkbox" id="toOrder" ${can.order && orders.length ? '' : 'disabled'}>Добавить в заказ</label><select id="order">${optList(orders, last.lastOrder) || '<option value="">нет открытых заказов</option>'}</select></div>
           <div class="opt"><label><input type="checkbox" id="toQuote" ${can.quote && quotes.length ? '' : 'disabled'}>Добавить в выцену</label><select id="quote">${optList(quotes, last.lastQuote) || '<option value="">нет открытых выцен</option>'}</select></div>
@@ -388,9 +468,9 @@
   fab.style.cssText += ';position:fixed;right:18px;bottom:18px;z-index:2147483646;box-shadow:0 6px 20px rgba(0,0,0,.35)';
   fab.title = 'Забрать позиции с этой страницы в Pulsecar: корзину, фактуру, WZ, список деталей (или выделите строки мышкой)';
   if (!/pulsecar\.tech$/.test(host)) document.body.appendChild(fab);
-  if (SUPPLIER === 'intercars') {
+  if (SUPPLIER === 'intercars' || SUPPLIER === 'allegro') {
     let t = null;
-    const run = () => { clearTimeout(t); t = setTimeout(decorateIc, 400); };
+    const run = () => { clearTimeout(t); t = setTimeout(SUPPLIER === 'allegro' ? decorateAl : decorateIc, 400); };
     run();
     new MutationObserver((muts) => { if (muts.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && !n.classList?.contains('pulsecar-btn') && !n.classList?.contains('pulsecar-host')))) run(); })
       .observe(document.body, { childList: true, subtree: true });

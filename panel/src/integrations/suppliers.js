@@ -23,7 +23,7 @@ export const WHOLESALERS = [
   ['dancar', 'Dan-Car', 'dan-car.pl'], ['arge-krakow', 'Arge Kraków', 'arge.pl'], ['arge-krosno', 'Arge Krosno', 'arge.pl'], ['wojdyla', 'Auto Wojdyła', 'wojdyla.pl'],
   ['wazcar', 'Wazcar', 'wazcar.pl'], ['exact', 'Exact Rotating Electrics', ''], ['automar', 'Auto-Mar', ''], ['partsteam', 'Parts Team', ''], ['europarts', 'Euro Parts', ''],
   ['edpol', 'Edpol', 'edpol.pl'], ['dynex', 'Dynex', 'dynex.pl'], ['arisauto', 'Aris Auto', ''], ['tomala', 'Tomala', 'tomala.pl'], ['temot', 'Temot', 'temot.pl'],
-  ['motomax', 'Moto Max', ''], ['jarcar', 'JarCar', ''], ['motocar', 'MotoCar', ''], ['elit', 'Elit (LKQ)', 'elit.pl'], ['other', 'Другой поставщик', ''],
+  ['motomax', 'Moto Max', ''], ['jarcar', 'JarCar', ''], ['motocar', 'MotoCar', ''], ['elit', 'Elit (LKQ)', 'elit.pl'], ['allegro', 'Allegro', 'allegro.pl'], ['other', 'Другой поставщик', ''],
 ].map(([key, name, site, api]) => ({ key, name, site, api: api || null }));
 export const wholesaler = (key) => WHOLESALERS.find((w) => w.key === key) || { key, name: key, api: null };
 

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Pulsecar — запчасти от поставщика",
   "short_name": "Pulsecar",
-  "version": "1.2.4",
-  "description": "Кнопка «Pulsecar» на сайтах поставщиков: запчасть сразу в заказ, выцену или на склад, фактуры и WZ — в приход CRM Pulsecar. Печать чеков на фискальной кассе Novitus.",
+  "version": "1.3.0",
+  "description": "Кнопка «Pulsecar» на сайтах поставщиков и Allegro: запчасть сразу в заказ, выцену или на склад, фактуры и WZ — в приход CRM Pulsecar. Печать чеков на фискальной кассе Novitus.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -48,6 +48,8 @@
     "https://*.arge.pl/*",
     "https://*.elit.pl/*",
     "https://*.autoland.pl/*",
+    "https://allegro.pl/*",
+    "https://*.allegro.pl/*",
     "http://127.0.0.1/*"
   ],
   "content_scripts": [
@@ -68,7 +70,9 @@
         "https://*.rodon.pl/*",
         "https://*.arge.pl/*",
         "https://*.elit.pl/*",
-        "https://*.autoland.pl/*"
+        "https://*.autoland.pl/*",
+        "https://allegro.pl/*",
+        "https://*.allegro.pl/*"
       ],
       "js": [
         "guard.js"
@@ -92,7 +96,9 @@
         "https://*.rodon.pl/*",
         "https://*.arge.pl/*",
         "https://*.elit.pl/*",
-        "https://*.autoland.pl/*"
+        "https://*.autoland.pl/*",
+        "https://allegro.pl/*",
+        "https://*.allegro.pl/*"
       ],
       "js": [
         "content.js"
