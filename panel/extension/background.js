@@ -1,5 +1,7 @@
 // Pulsecar: фон расширения — запросы к CRM с ключом сотрудника (без CORS), проверка обновлений,
 // сайты поставщиков, включённые пользователем, и меню по правому клику.
+if (typeof importScripts === 'function') importScripts('i18n.js');
+if (!globalThis.pcT) Object.assign(globalThis, { pcT: (s) => s, pcOnLang: () => {}, pcI18nReady: Promise.resolve() });
 const DEF_PANEL = 'https://panel.pulsecar.tech';
 const VERSION = chrome.runtime.getManifest().version;
 
@@ -44,6 +46,7 @@ async function check() {
   // из Chrome Web Store (есть update_url) — Chrome обновляет сам, скачивать zip не нужно
   const STORE = !!chrome.runtime.getManifest().update_url;
   st.store = STORE;
+  if (st.connected) loadSrvI18n(c.panel);
   st.update = !STORE && !!(st.latest && newer(st.latest, VERSION));
   if (STORE && st.latest && newer(st.latest, VERSION)) chrome.runtime.requestUpdateCheck?.().catch?.(() => {});
   await chrome.storage.local.set({ status: st });
@@ -51,6 +54,24 @@ async function check() {
   chrome.action.setBadgeText({ text: !st.connected ? '!' : st.update ? '↑' : '' });
   return st;
 }
+
+// переводы сообщений CRM на польский (для ошибок сервера в окне расширения) — раз в сутки
+async function loadSrvI18n(panel) {
+  const { srvI18nAt = 0 } = await chrome.storage.local.get('srvI18nAt');
+  if (Date.now() - srvI18nAt < 86400000) return;
+  try {
+    const r = await fetch(panel + '/i18n/pl.json', { signal: AbortSignal.timeout(15000) });
+    if (r.ok) await chrome.storage.local.set({ srvI18n: await r.json(), srvI18nAt: Date.now() });
+  } catch {}
+}
+const trRes = (r) => (r && r.error ? { ...r, error: pcT(r.error) } : r);
+function menus() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: 'pulsecar-selection', title: pcT('Отправить выделенное в Pulsecar'), contexts: ['selection'] });
+    chrome.contextMenus.create({ id: 'pulsecar-page', title: pcT('Забрать позиции с этой страницы в Pulsecar'), contexts: ['page'] });
+  });
+}
+pcOnLang(() => menus());
 
 // ── сайты, где пользователь включил кнопку сам (любой поставщик, которого нет в списке) ──
 async function syncSites() {
@@ -60,14 +81,14 @@ async function syncSites() {
   const granted = [];
   for (const o of sites) if (await chrome.permissions.contains({ origins: [o + '/*'] })) granted.push(o + '/*');
   if (granted.length) {
-    await chrome.scripting.registerContentScripts([{ id: 'pulsecar-guard', matches: granted, js: ['guard.js'], runAt: 'document_start', persistAcrossSessions: true }, { id: 'pulsecar-sites', matches: granted, js: ['content.js'], runAt: 'document_idle', persistAcrossSessions: true }])
+    await chrome.scripting.registerContentScripts([{ id: 'pulsecar-guard', matches: granted, js: ['guard.js'], runAt: 'document_start', persistAcrossSessions: true }, { id: 'pulsecar-sites', matches: granted, js: ['i18n.js', 'content.js'], runAt: 'document_idle', persistAcrossSessions: true }])
       .catch((e) => console.warn('Pulsecar:', e.message));
   }
 }
 
 async function inject(tabId, mode) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['guard.js', 'content.js'] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['guard.js', 'i18n.js', 'content.js'] });
     await chrome.tabs.sendMessage(tabId, { type: 'pulsecar-capture', mode });
     return { ok: true };
   } catch (e) { return { error: 'На этой странице кнопку не запустить: ' + e.message }; }
@@ -146,7 +167,7 @@ async function fiscal(job) {
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'api') { api(msg.path, msg).then(reply); return true; }
   if (msg?.type === 'check') { check().then(reply); return true; }
-  if (msg?.type === 'capture') { inject(msg.tabId, msg.mode || 'page').then(reply); return true; }
+  if (msg?.type === 'capture') { inject(msg.tabId, msg.mode || 'page').then((r) => reply(trRes(r))); return true; }
   if (msg?.type === 'sites-changed') { syncSites().then(() => reply({ ok: true })); return true; }
   if (msg?.type === 'options') { chrome.runtime.openOptionsPage(); return false; }
   if (msg?.type === 'open') { conf().then((c) => chrome.tabs.create({ url: c.panel + (msg.hash || '') })); return false; }
@@ -162,14 +183,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'fiscal') {
     conf().then(async (c) => {
       if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel) return reply({ ok: false, error: 'Касса доступна только из CRM ' + c.panel });
-      reply(await fiscal(msg.job));
+      reply(trRes(await fiscal(msg.job)));
     });
     return true;
   }
   if (msg?.type === 'fiscal-allow') {
     const origin = printerOrigin(msg.url);
     if (origin) chrome.tabs.create({ url: chrome.runtime.getURL('options.html') + '#fiscal=' + encodeURIComponent(origin) });
-    reply({ ok: !!origin, error: origin ? null : 'Адрес кассы должен быть в локальной сети' });
+    reply({ ok: !!origin, error: origin ? null : pcT('Адрес кассы должен быть в локальной сети') });
     return false;
   }
   if (msg?.type === 'whoami') { chrome.storage.local.get('status').then(({ status }) => reply({ version: VERSION, connected: !!status?.connected, user: status?.user || null, panel: status?.panel || null })); return true; }
@@ -177,15 +198,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: 'pulsecar-selection', title: 'Отправить выделенное в Pulsecar', contexts: ['selection'] });
-    chrome.contextMenus.create({ id: 'pulsecar-page', title: 'Забрать позиции с этой страницы в Pulsecar', contexts: ['page'] });
-  });
+  await pcI18nReady;
+  menus();
   chrome.alarms.create('pulsecar-check', { periodInMinutes: 360 });
   await syncSites();
   await check();
 });
-chrome.runtime.onStartup.addListener(() => { check(); syncSites(); });
+chrome.runtime.onStartup.addListener(() => { check(); syncSites(); pcI18nReady.then(menus); });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'pulsecar-check') check(); });
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (!tab?.id) return;

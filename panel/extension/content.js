@@ -284,7 +284,7 @@
   // ── Окно «Pobierz do Pulsecar» (в Shadow DOM, стили сайта не мешают) ───────
   function toast(msg) {
     const d = document.createElement('div');
-    d.textContent = msg;
+    d.textContent = globalThis.pcT ? pcT(msg) : msg;
     d.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#111;color:#fff;border:1px solid #1bf372;border-radius:10px;padding:12px 16px;font:14px system-ui,sans-serif;max-width:420px;box-shadow:0 10px 30px rgba(0,0,0,.4)';
     document.body.appendChild(d);
     setTimeout(() => d.remove(), 6000);
@@ -296,6 +296,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   async function openModal(rawItems, ctx = {}) {
+    await globalThis.pcI18nReady;
     const hello = await api('ext/hello');
     if (hello.error) return hello.needSetup ? setupNeeded(hello.error) : toast(hello.error);
     const [prep, docs] = await Promise.all([api('ext/prepare', { method: 'POST', body: { items: rawItems } }), api('ext/orders')]);
@@ -322,7 +323,7 @@
       .bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
       .m{background:#fff;color:#1b1c1f;border-radius:14px;width:min(1280px,97vw);max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)}
       .h{padding:18px 24px;border-bottom:1px solid #e6e6e9;display:flex;align-items:baseline;gap:10px}
-      .h b{font-size:20px}.h span{color:#6b6e75;font-size:13px}
+      .h b{font-size:20px}.h span{color:#6b6e75;font-size:13px}.h .lang{margin-left:auto;display:flex;border:1px solid #e6e6e9;border-radius:8px;overflow:hidden}.h .lang button{border-radius:0;padding:5px 10px;font-size:12px;background:#fff;color:#6b6e75}.h .lang button.on{background:#111;color:#fff}
       .b{padding:18px 24px}.opts{border:1px solid #e6e6e9;border-radius:10px}
       .opt{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #eee;background:#f7f7f8}.opt:last-child{border-bottom:0}
       .opt label{display:flex;align-items:center;gap:10px;font-size:15px;min-width:280px;cursor:pointer}
@@ -343,7 +344,7 @@
       button:disabled{opacity:.5;cursor:default}
     </style>
     <div class="bg"><div class="m">
-      <div class="h"><b>Pobierz do Pulsecar</b><span>(${esc(hello.data.brand)} · ${esc(hello.data.name)})</span></div>
+      <div class="h"><b>Pobierz do Pulsecar</b><span>(${esc(hello.data.brand)} · ${esc(hello.data.name)})</span><span class="lang" title="Язык"><button type="button" data-l="ru">RU</button><button type="button" data-l="pl">PL</button></span></div>
       <div class="b">
         <div class="opts">
           <div class="opt"><label><input type="checkbox" id="asDoc" ${docOn ? 'checked' : ''} ${can.docs ? '' : 'disabled'}>Документ поставщика</label>
@@ -368,7 +369,7 @@
         </tbody></table>
         <div class="hint">Меняйте любое поле: нетто ↔ брутто пересчитываются по VAT, наценка % пересчитывает цену продажи, а новая цена продажи — наценку.</div>
       </div>
-      <div class="f"><button class="c" id="cancel">Anuluj</button><button class="p" id="go"><i></i>Pobierz do Pulsecar</button></div>
+      <div class="f"><button class="c" id="cancel">Отмена</button><button class="p" id="go"><i></i>Pobierz do Pulsecar</button></div>
     </div></div>`;
     document.documentElement.appendChild(host);
     // клавиши из окна — только нам: сайт поставщика не должен их ловить (Enter перезагружал страницу Inter Cars)
@@ -378,6 +379,12 @@
       if (t === 'keydown' && e.key === 'Escape') close();
     });
     const $ = (id) => root.getElementById(id);
+    // язык окна: RU / PL — переключается на лету, выбор запоминается
+    const paintLang = () => { pcTr(root); root.querySelectorAll('.lang button').forEach((b) => b.classList.toggle('on', b.dataset.l === pcLang())); };
+    root.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => { pcSetLang(b.dataset.l); paintLang(); }));
+    pcOnLang(paintLang);
+    new MutationObserver(() => pcTr(root)).observe(root, { childList: true, subtree: true });
+    paintLang();
     const close = () => host.remove();
     $('cancel').onclick = close;
     root.querySelector('.bg').addEventListener('click', (e) => { if (e.target.classList.contains('bg')) close(); });
@@ -425,8 +432,8 @@
       chrome.storage.local.set({ lastOrder: body.order_id || last.lastOrder || '', lastQuote: body.quote_id || last.lastQuote || '' });
       const d = r.data;
       const link = (hash, label) => `<a href="${r.panel}/#${hash}" target="_blank">${esc(label)}</a>`;
-      $('msg').innerHTML = `<div class="ok">Готово: ${[d.kind ? `${esc(d.kind)} ${esc(d.number || '')} сохранён(а) — ${link('/stock/suppliers', 'Склад → Поставщики')}` : '', d.products ? `товаров в картотеке: ${d.products}` : '', d.stock ? `приход ${esc(d.stock)}` : '',
-        d.order ? `в заказе ${link('/orders/' + body.order_id, d.order)}` : '', d.quote ? `в выцене ${link('/quotes/' + body.quote_id, d.quote)}` : ''].filter(Boolean).join(' · ')}</div>`;
+      $('msg').innerHTML = `<div class="ok">${pcT('Готово:')} ${[d.kind ? `${esc(pcT(d.kind))} ${esc(d.number || '')} ${pcT('сохранён(а) —')} ${link('/stock/suppliers', pcT('Склад → Поставщики'))}` : '', d.products ? pcT('товаров в картотеке: {n}', { n: d.products }) : '', d.stock ? pcT('приход {x}', { x: esc(d.stock) }) : '',
+        d.order ? `${pcT('в заказе')} ${link('/orders/' + body.order_id, d.order)}` : '', d.quote ? `${pcT('в выцене')} ${link('/quotes/' + body.quote_id, d.quote)}` : ''].filter(Boolean).join(' · ')}</div>`;
       $('go').textContent = 'Добавлено ✓';
       $('go').disabled = true;
       setTimeout(close, 6000);
@@ -466,7 +473,10 @@
   // ── запуск: кнопки у деталей Inter Cars (страницы меняются без перезагрузки) ──
   const fab = makeBtn(() => captureAndOpen('page'));
   fab.style.cssText += ';position:fixed;right:18px;bottom:18px;z-index:2147483646;box-shadow:0 6px 20px rgba(0,0,0,.35)';
-  fab.title = 'Забрать позиции с этой страницы в Pulsecar: корзину, фактуру, WZ, список деталей (или выделите строки мышкой)';
+  const FAB_TITLE = 'Забрать позиции с этой страницы в Pulsecar: корзину, фактуру, WZ, список деталей (или выделите строки мышкой)';
+  fab.title = FAB_TITLE;
+  globalThis.pcI18nReady?.then(() => { fab.title = pcT(FAB_TITLE); });
+  globalThis.pcOnLang?.(() => { fab.title = pcT(FAB_TITLE); });
   if (!/pulsecar\.tech$/.test(host)) document.body.appendChild(fab);
   if (SUPPLIER === 'intercars' || SUPPLIER === 'allegro') {
     let t = null;

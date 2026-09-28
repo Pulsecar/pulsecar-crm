@@ -4,16 +4,16 @@ $('save').onclick = async () => {
   const panel = $('panel').value.trim().replace(/\/+$/, '');
   const token = $('token').value.trim();
   await chrome.storage.sync.set({ panel, token });
-  $('st').className = ''; $('st').textContent = 'Проверяю…';
+  $('st').className = ''; $('st').textContent = pcT('Проверяю…');
   chrome.runtime.sendMessage({ type: 'api', path: 'ext/hello' }, (r) => {
-    if (r?.data) { $('st').className = 'ok'; $('st').textContent = `Подключено: ${r.data.brand} · ${r.data.name}. Откройте каталог Inter Cars — у деталей появится кнопка «Pulsecar».`; }
-    else { $('st').className = 'err'; $('st').textContent = r?.error || 'Нет ответа от CRM'; }
+    if (r?.data) { $('st').className = 'ok'; $('st').textContent = pcT(`Подключено: ${r.data.brand} · ${r.data.name}. Откройте каталог Inter Cars или Allegro — у деталей появится кнопка «Pulsecar».`); }
+    else { $('st').className = 'err'; $('st').textContent = pcT(r?.error || 'Нет ответа от CRM'); }
   });
 };
 
 const PRIVATE = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.)|^localhost$|\.local$|\.lan$/i;
 const fOrigin = () => { try { const u = new URL($('furl').value.trim()); return /^https?:$/.test(u.protocol) && PRIVATE.test(u.hostname) ? u.origin : null; } catch { return null; } };
-const fsay = (t, ok) => { $('fst').className = ok ? 'ok' : 'err'; $('fst').textContent = t; };
+const fsay = (t, ok) => { $('fst').className = ok ? 'ok' : 'err'; $('fst').textContent = pcT(t); };
 const h = new URLSearchParams(location.hash.slice(1));
 chrome.storage.local.get('fiscalUrl', ({ fiscalUrl }) => { $('furl').value = h.get('fiscal') || fiscalUrl || ''; if (h.get('fiscal')) $('fiscal').scrollIntoView(); });
 $('fallow').onclick = async () => {
@@ -30,5 +30,10 @@ $('ftest').onclick = async () => {
   try {
     const r = await fetch(o + '/api/v1', { signal: AbortSignal.timeout(8000) });
     fsay(r.ok ? 'Касса отвечает (NoviAPI) ✓' : 'Касса ответила ' + r.status, r.ok);
-  } catch (e) { fsay('Касса не отвечает: ' + e.message + (e.message.includes('permission') ? '' : '. Нажмите «Разрешить доступ», проверьте IP и что NoviAPI включён.'), false); }
+  } catch (e) { fsay('Касса не отвечает: ' + e.message + (e.message.includes('permission') ? '' : '. Нажмите «Разрешить доступ к кассе», проверьте IP и что NoviAPI включён.'), false); }
 };
+
+// язык: RU / PL
+const paintLang = () => { pcTr(document.body); document.title = pcT('Pulsecar — настройки расширения'); document.querySelectorAll('.lang button').forEach((b) => b.classList.toggle('on', b.dataset.l === pcLang())); document.documentElement.lang = pcLang(); };
+document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', async () => { await pcSetLang(b.dataset.l); paintLang(); }));
+pcI18nReady.then(paintLang);

@@ -20,8 +20,9 @@
   button:focus-visible,a.btn:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
   button:disabled{opacity:.5;cursor:default}
   footer{display:flex;gap:8px;padding:12px 16px}footer>*{flex:1}
+  .lang{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.lang button{border:0;border-radius:0;padding:3px 8px;font-size:11px;background:var(--soft);color:var(--muted)}.lang button.on{background:#111;color:#fff}
 </style></head><body>
-<header><img src="icons/icon48.png" alt=""><b>Pulsecar</b><span id="chip">…</span></header>
+<header><img src="icons/icon48.png" alt=""><b>Pulsecar</b><span id="chip">…</span><span class="lang"><button data-l="ru">RU</button><button data-l="pl">PL</button></span></header>
 <section id="tabbox">
   <div class="tab"><i id="tabdot"></i><span id="tabname">Проверяю вкладку…</span></div>
   <div class="btns">
@@ -42,5 +43,5 @@
   </dl>
 </section>
 <footer><button id="open">Открыть CRM</button><button id="recheck">Проверить</button><button id="opts">Настройки</button></footer>
-<script src="popup.js"></script>
+<script src="i18n.js"></script><script src="popup.js"></script>
 </body></html>
