@@ -26,6 +26,7 @@ import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
 import * as FIN from './finance.js';
 import * as DOC from './documents.js';
 import * as RPT from './reports.js';
+import { setActor, listAudit, entityList } from './audit.js';
 import * as FISCAL from './fiscal.js';
 import * as KSEF from './integrations/ksef.js';
 import { lookupNip } from './integrations/nip.js';
@@ -85,6 +86,7 @@ function who(req, min = 'mechanic') {
   if (!s) throw new HttpError(401, 'Войдите в панель.');
   if (min.includes('.')) { if (!can(s, min)) throw new HttpError(403, 'Недостаточно прав: ' + permLabel(min)); }
   else if ((RANK[s.role] || 0) < RANK[min]) throw new HttpError(403, 'Недостаточно прав.');
+  setActor(s, bearer ? 'extension' : 'crm');
   return s;
 }
 
@@ -965,6 +967,15 @@ crm.put('/me', (req, res) => {
   log('staff', s.id, 'self_update', Object.keys(d).filter((k) => k !== 'pass_hash').concat(d.pass_hash ? ['password'] : []), s.name);
   res.json({ ok: true });
 });
+// ── Журнал изменений ────────────────────────────────────────────────────────
+crm.get('/audit', (req, res) => {
+  const me = who(req);
+  // своя история объекта (заказ, клиент, авто) доступна всем, кто видит объект; общий журнал — по праву audit.view
+  const own = req.query.entity && req.query.id && ['orders', 'customers', 'cars'].includes(req.query.entity);
+  if (!own && !can(me, 'audit.view')) throw new HttpError(403, 'Недостаточно прав: журнал изменений');
+  res.json({ ...listAudit(req.query), entities: entityList(), staff: all('SELECT id, name FROM staff ORDER BY name') });
+});
+
 // ── Запланированные напоминания (SMS о визите) ──────────────────────────────
 crm.get('/reminders', (req, res) => {
   who(req, 'sms.view');

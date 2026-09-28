@@ -12,6 +12,7 @@ import Sales from './pages/sales.js';
 import Pos from './pages/pos.js';
 import Finance from './pages/finance.js';
 import Reports from './pages/reports.js';
+import AuditPage from './pages/audit.js';
 import Settings from './pages/settings.js';
 import Marketing from './pages/marketing.js';
 import Search from './pages/search.js';
@@ -43,11 +44,12 @@ const USER_MENU = [
     { to: '/settings/params', icon: 'gear', label: 'Настройки', perm: 'settings.manage' },
     { to: '/settings/integrations', icon: 'plug', label: 'Интеграции', perm: 'settings.manage' },
     { to: '/settings/staff', icon: 'team', label: 'Сотрудники и доступы', perm: 'settings.manage' },
+    { to: '/audit', icon: 'history', label: 'Журнал изменений', perm: 'audit.view' },
     { to: '/sms', icon: 'chat', label: 'SMS', perm: 'sms.view' },
     { to: '/settings/messages', icon: 'mail', label: 'Шаблоны SMS и e-mail', perm: 'settings.manage' },
     { to: '/reminders', icon: 'bell', label: 'Запланированные напоминания', perm: 'sms.view' },
     { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' }],
-  [{ to: '/changelog', icon: 'history', label: 'История изменений' }, { screen: true, icon: 'monitor', label: 'Настройки экрана' }],
+  [{ to: '/changelog', icon: 'file', label: 'Что нового в CRM' }, { screen: true, icon: 'monitor', label: 'Настройки экрана' }],
 ];
 
 function UserMenu({ app }) {
@@ -137,6 +139,7 @@ function Shell({ app }) {
   else if (p0 === 'sms') page = html`<${Sms} />`;
   else if (p0 === 'suppliers' && p1 === 'clip') page = html`<${ClipPage} />`;
   else if (p0 === 'marketing') page = html`<${Marketing} />`;
+  else if (p0 === 'audit') page = html`<${AuditPage} query=${route.query} key=${JSON.stringify(route.query)} />`;
   else if (p0 === 'account') page = html`<${MyAccount} />`;
   else if (p0 === 'reminders') page = html`<${Reminders} />`;
   else if (p0 === 'changelog') page = html`<${Changelog} />`;

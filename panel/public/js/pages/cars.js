@@ -2,6 +2,7 @@
 // форма: слева Aztec, тип, марка/модель/цвет, номер, год, владелец; справа первая регистрация, топливо, VIN, двигатель, объём, мощность kW/KM, пробег, описание.
 import { html, useState, useEffect, useData, go, qs, Loading, ErrorBox, Badge, Icon, Pager, useDebounced, zl, num, fdate, carName, Picker, api, act, toast } from '../lib.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
+import { ObjectHistory } from './audit.js';
 
 export const VEHICLE_TYPES = [['Samochód osobowy', 'Легковой автомобиль'], ['Samochód dostawczy', 'Фургон / доставка'], ['Samochód ciężarowy', 'Грузовик'], ['Motocykl', 'Мотоцикл'],
   ['Motorower', 'Мопед'], ['Autobus', 'Автобус'], ['Ciągnik', 'Трактор'], ['Przyczepa', 'Прицеп'], ['Kamper', 'Кемпер'], ['Inny', 'Другой']];
@@ -121,7 +122,7 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
   </form>`;
 }
 
-const TABS = [['data', 'Данные авто'], ['files', 'Файлы'], ['orders', 'История заказов'], ['jobs', 'История работ'], ['mileage', 'Пробеги'], ['storage', 'Хранение']];
+const TABS = [['data', 'Данные авто'], ['files', 'Файлы'], ['orders', 'История заказов'], ['jobs', 'История работ'], ['mileage', 'Пробеги'], ['storage', 'Хранение'], ['history', 'История изменений']];
 
 export function CarNew({ query = {} }) {
   const cid = Number(query.customer_id) || null;
@@ -177,5 +178,6 @@ export function CarPage({ id, query = {} }) {
             <td class="r sub">${miles[i + 1] ? '+' + num(x.m - miles[i + 1].m) : ''}</td></tr>`)}</tbody></table>` : html`<div class="empty">Пробег ещё не записывался</div>`)}
       ${tab === 'storage' && (k.storage.length ? html`<table class="tbl"><tbody>${k.storage.map((s) => html`<tr>
           <td><b>${s.number}</b></td><td>${s.description || s.kind}</td><td>${s.location || ''}</td><td class="sub">с ${fdate(s.date_in)}${s.date_out ? ' · выдано ' + fdate(s.date_out) : ''}</td></tr>`)}</tbody></table>` : html`<div class="empty">Шины этого авто не хранятся</div>`)}
+      ${tab === 'history' && html`<${ObjectHistory} entity="cars" id=${k.id} />`}
     </div>`;
 }

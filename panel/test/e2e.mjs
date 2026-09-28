@@ -253,6 +253,17 @@ try {
   ok(await req('/crm-api/me', { method: 'PUT', body: { current_password: 'test-pass-123', new_password: 'test-pass-123' } }), 'pw');
   const rem = ok(await req('/crm-api/reminders'), 'reminders');
   assert.ok(Array.isArray(rem.rows) && typeof rem.hours === 'number');
+  // журнал изменений: кто, когда, было → стало
+  const au = ok(await req(`/crm-api/audit?entity=customers&id=${nc.id}`), 'audit');
+  const upd = au.rows.find((r) => r.action === 'update' && r.changes.some((c) => c.field === 'Фамилия' && c.from === 'Nowak' && c.to === 'Kowalska'));
+  assert.ok(upd, JSON.stringify(au.rows.slice(0, 3)));
+  assert.equal(upd.staff, 'Администратор');
+  assert.ok(au.rows.some((r) => r.action === 'create'));
+  const aall = ok(await req('/crm-api/audit?entity=orders&id=' + co.id), 'audit order');
+  assert.ok(aall.rows.some((r) => r.entity === 'order_items') && aall.rows.some((r) => r.entity === 'receipts'));
+  const st = ok(await req('/crm-api/audit?entity=staff'), 'audit staff');
+  assert.ok(!JSON.stringify(st.rows).includes('pass_hash'));
+  console.log('✓ журнал изменений: создание, «было → стало», автор, позиции и оплаты заказа, пароли не пишутся');
   console.log('✓ меню профиля: свои данные и пароль, запланированные напоминания');
 
   // 10. удаление аккаунта в приложении

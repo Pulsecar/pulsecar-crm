@@ -4,6 +4,7 @@ import {
   html, useState, useEffect, useData, api, act, go, qs, useApp, Loading, ErrorBox, Badge, Icon, Modal, Pager, useDebounced,
   zl, num, fdate, fdt, carName, toast,
 } from '../lib.js';
+import { ObjectHistory } from './audit.js';
 
 export const COUNTRIES = [['PL', '🇵🇱', 'Польша'], ['UA', '🇺🇦', 'Украина'], ['DE', '🇩🇪', 'Германия'], ['LT', '🇱🇹', 'Литва'], ['CZ', '🇨🇿', 'Чехия'], ['SK', '🇸🇰', 'Словакия'],
   ['BY', '🇧🇾', 'Беларусь'], ['GB', '🇬🇧', 'Великобритания'], ['NL', '🇳🇱', 'Нидерланды'], ['FR', '🇫🇷', 'Франция'], ['IT', '🇮🇹', 'Италия'], ['ES', '🇪🇸', 'Испания']];
@@ -115,7 +116,7 @@ export function CustomerEditor({ c = {}, cars = [], onSaved, onCancel }) {
   </form>`;
 }
 
-const TABS = [['data', 'Данные клиента'], ['cars', 'Автомобили'], ['orders', 'Заказы'], ['quotes', 'Выцены'], ['sales', 'Продажи'], ['storage', 'Хранение'], ['sms', 'История SMS'], ['points', 'Pulse Points']];
+const TABS = [['data', 'Данные клиента'], ['cars', 'Автомобили'], ['orders', 'Заказы'], ['quotes', 'Выцены'], ['sales', 'Продажи'], ['storage', 'Хранение'], ['sms', 'История SMS'], ['points', 'Pulse Points'], ['history', 'История изменений']];
 
 export function CustomerNew() {
   return html`<div class="crumbs"><a href="#/customers">Клиенты</a></div>
@@ -181,6 +182,7 @@ export function CustomerPage({ id, query = {} }) {
           <td class="sub nowrap">${fdate(t.created_at)}</td><td>${{ earn: 'Начисление', redeem: 'Списание', bonus: 'Бонус', adjust: 'Корректировка' }[t.type]} <span class="sub">${t.order_no || t.note || ''}</span></td>
           <td class="r ${t.points < 0 ? 'neg' : 'pos'}">${t.points > 0 ? '+' : ''}${num(t.points)}</td></tr>`)}</tbody></table>`
           : html`<div class="muted">${c.registered_at ? 'Операций пока нет' : 'Клиент ещё не установил приложение — предложите: баллы 0,5 за 1 zł и +50 за регистрацию.'}</div>`}`}
+      ${tab === 'history' && html`<${ObjectHistory} entity="customers" id=${c.id} />`}
     </div>
     ${adj && html`<${Modal} title="Корректировка баллов" onClose=${() => setAdj(null)} foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api(`customers/${c.id}/adjust`, { body: adj }), 'Готово'); setAdj(null); reload(); }}>Сохранить</button>`}>
       <label class="f">Баллы (+ начислить, − списать)<input type="number" value=${adj.points} onInput=${(e) => setAdj({ ...adj, points: e.target.value })} /></label>

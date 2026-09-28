@@ -10,6 +10,7 @@ import { CustomerEditor } from './customers.js';
 import { CarEditor } from './cars.js';
 import { ScanBox } from '../scan.js';
 import { ReceiptBox } from '../fiscal.js';
+import { ObjectHistory } from './audit.js';
 
 
 // ── Список ────────────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ export function OrderPage({ id }) {
     ${tab === 'pay' && html`<${Payments} o=${o} reload=${reload} />`}
     ${tab === 'plan' && html`<${Plan} o=${o} />`}
     ${tab === 'check' && html`<${Checklists} o=${o} />`}
-    ${tab === 'log' && html`<div class="card"><table class="tbl"><tbody>${o.activity.map((a) => html`<tr><td class="nowrap sub">${fdt(a.created_at)}</td><td>${ACTION[a.action] || a.action} ${a.action === 'status' ? html`<b>${JSON.parse(a.details || '""')}</b>` : ''}</td><td class="sub">${a.staff || ''}</td></tr>`)}</tbody></table></div>`}`;
+    ${tab === 'log' && html`<div class="card"><${ObjectHistory} entity="orders" id=${o.id} /></div>`}`;
 }
 const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', proforma: 'Выставлена Pro forma', to_order: 'Создан заказ из выцены', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
 

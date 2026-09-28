@@ -1,4 +1,5 @@
 import express from 'express';
+import { initAudit, auditContext } from './audit.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { config } from './config.js';
@@ -23,6 +24,10 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'same-origin');
   next();
 });
+
+// журнал изменений: у каждого запроса свой автор
+initAudit();
+app.use(auditContext);
 
 // API мобильного приложения
 app.use('/api', (req, res, next) => {
