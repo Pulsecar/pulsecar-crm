@@ -23,6 +23,7 @@
     // e-Catalog Inter Cars (pl.e-cat.intercars.eu): одна деталь = tbody.listingcollapsed__item
     const exact = [...document.querySelectorAll('tbody.listingcollapsed__item, .listingcollapsed__item, .producttile, .productdetails')].filter((c) => c.querySelector('.js-quantity__amount--new, [data-product-code]'));
     if (exact.length) return exact.filter((c) => !exact.some((o) => o !== c && o.contains(c)));
+    if (document.querySelector('.layoutproductdetails[data-product-code]')) return []; // страница товара — своя кнопка
     const labels = [...document.querySelectorAll('body *')].filter((el) => el.childElementCount <= 4 && el.textContent.length < 400 && IC_CODE.test(el.textContent)
       && ![...el.children].some((c) => IC_CODE.test(c.textContent)));
     const cards = new Set();
@@ -44,11 +45,15 @@
   function icPrices(card) {
     const r = { wNet: 0, wGross: 0, dNet: 0, dGross: 0 };
     for (const q of card.querySelectorAll('.quantity')) {
+      // цена за 1 л / 1 шт. (масла, жидкости) и таблицы оптовых скидок — не цена товара
+      if (q.closest('.productprice__unitvalue, .pricing__tablecell, [class*=unitvalue], [class*=pricing__table]') || /unitprice/.test(q.className)) continue;
       const a = q.querySelector('[class*=quantity__amount--new], [class*=quantity__amount]');
       const v = toNum(T(a || q));
       if (!v) continue;
       const cls = q.className;
-      const whole = /__wholesale/.test(cls) && !/productretailprice/.test(q.parentElement?.className || '');
+      const retail = !!q.closest('[class*=productretailprice]');
+      const whole = /__wholesale/.test(cls) && !retail;
+      if (!whole && !retail) continue;
       const gross = /__gross/.test(cls), net = /__net/.test(cls);
       if (!gross && !net) continue;
       const k = (whole ? 'w' : 'd') + (gross ? 'Gross' : 'Net');
@@ -74,7 +79,7 @@
       const qty = toNum(card.querySelector('input.js-order-item-count, input[name=quantity]')?.value || '1') || 1;
       return {
         supplier: SUPPLIER, sku, code: exactCode || sku, name: exactName || exactCode, brand: (img?.title || img?.alt || '').trim() || null, qty, vat: 23,
-        price_net: byCls.price_net || amounts[0] || 0, sell_gross: byCls.sell_gross || (amounts.length >= 4 ? amounts[3] : 0),
+        price_net: byCls.price_net || amounts[0] || 0, sell_gross: byCls.sell_gross || (!byCls.price_net && amounts.length >= 4 ? amounts[3] : 0),
       };
     }
     // «38,49» и «PLN» бывают в разных элементах — склеиваем в одну строку
@@ -113,7 +118,33 @@
     return b;
   }
 
+  // ── Inter Cars: страница самого товара (…/p/КОД) — кнопка под «В корзину», как у MotoWarsztat ──
+  function icProductPage() {
+    const root = document.querySelector('.layoutproductdetails[data-product-code]');
+    const box = root && root.querySelector('.buybox.js-product-buybox, .buybox');
+    return root && box ? { root, box } : null;
+  }
+  function parseIcProduct({ root, box }) {
+    const sku = root.dataset.productCode || null;
+    const p = icPrices(box);
+    const code = T(root.querySelector('.productinfo__name--new, [class*=productinfo__name]')) || T(document.querySelector('h1')) || sku;
+    const name = T(root.querySelector('.productname--productinfo--new, .productname')) || code;
+    const img = root.querySelector('img.productinfo__manufacturerimg, [class*=manufacturerimg]');
+    const qty = toNum(box.querySelector('input.js-order-item-count, input[name=quantity]')?.value || '1') || 1;
+    return { supplier: SUPPLIER, sku, code, name, brand: (img?.alt || img?.title || '').trim() || null, qty, vat: 23, price_net: p.price_net, sell_gross: p.sell_gross };
+  }
+  function decorateIcProduct() {
+    const pg = icProductPage();
+    if (!pg || pg.box.querySelector('.pulsecar-btn')) return;
+    const b = makeBtn(() => { const cur = icProductPage(); openModal([parseIcProduct(cur || pg)]); });
+    b.innerHTML = '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#1bf372;margin-right:10px"></span>Pobierz do Pulsecar';
+    b.style.cssText += ';display:flex;width:100%;box-sizing:border-box;margin:8px 0 0 0;padding:14px 12px;font-size:16px;font-weight:500;border-radius:2px';
+    const slot = pg.box.querySelector('.buybox__rowaddtocart') || pg.box.querySelector('.productaddtocart');
+    if (slot) slot.insertAdjacentElement('afterend', b); else pg.box.appendChild(b);
+  }
+
   function decorateIc() {
+    decorateIcProduct();
     for (const card of icCards()) {
       if (card.querySelector('.pulsecar-btn') || card.closest('.pulsecar-host')) continue;
       const b = makeBtn(() => openModal([parseIcCard(card)]));
@@ -159,6 +190,8 @@
   }
   async function captureAndOpen(mode) {
     if (SUPPLIER === 'intercars' && mode !== 'selection') {
+      const pg = icProductPage();
+      if (pg) return openModal([parseIcProduct(pg)], { doc: detectDoc() });
       const cards = icCards();
       if (cards.length) return openModal(cards.map(parseIcCard), { doc: detectDoc() });
     }
