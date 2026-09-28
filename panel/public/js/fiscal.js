@@ -113,7 +113,9 @@ export function FiscalCard() {
   const app = useApp();
   const f = app.features.fiscal;
   const [busy, setBusy] = useState('');
-  if (!f || f.driver !== 'novitus') return null;
+  if (!f || f.driver !== 'novitus') return app.perms?.['settings.manage'] ? html`<div class="card" style="margin-bottom:12px"><div class="row">
+    <div class="grow"><b>Фискальная касса (drukarka fiskalna)</b><div class="sub">Не подключена — чеки по заказам печатаются на кассе Novitus через расширение Pulsecar</div></div>
+    <a class="btn sm primary" href="#/settings/integrations">Подключить фискальную кассу</a></div></div>` : null;
   const run = async (kind) => {
     setBusy(kind);
     try {

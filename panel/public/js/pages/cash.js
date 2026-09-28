@@ -18,10 +18,12 @@ export default function Cash() {
   const canEdit = app.perms['cash.edit'];
   return html`
     <div class="page-head"><h1>Касса</h1>
-      ${canEdit && html`<div class="actions">
+      <div class="actions">
+        ${app.perms['settings.manage'] && html`<button class="btn" onClick=${() => setEdit({ name: '', kind: 'cash', opening: 0 })}><${Icon} n="plus" />Новая касса</button>`}
+      ${canEdit && html`
         <button class="btn" onClick=${() => setTr({ from: regs.find((r) => r.kind === 'cash')?.id || '', to: regs.find((r) => r.kind === 'bank')?.id || '', amount: '', note: '' })}><${Icon} n="arrows" />Перенос между кассами</button>
         <button class="btn" onClick=${() => setDoc({ direction: 'out', amount: '', note: '', register_id: reg || regs.find((r) => r.kind === 'cash')?.id })}>Расход KW</button>
-        <button class="btn primary" onClick=${() => setDoc({ direction: 'in', amount: '', note: '', register_id: reg || regs.find((r) => r.kind === 'cash')?.id })}>Приход KP</button></div>`}</div>
+        <button class="btn primary" onClick=${() => setDoc({ direction: 'in', amount: '', note: '', register_id: reg || regs.find((r) => r.kind === 'cash')?.id })}>Приход KP</button>`}</div></div>
     <${FiscalCard} />
     <div class="reg-grid">
       ${regs.map((r) => html`<button class=${'reg' + (String(reg) === String(r.id) ? ' on' : '')} onClick=${() => setReg(String(reg) === String(r.id) ? '' : r.id)}>

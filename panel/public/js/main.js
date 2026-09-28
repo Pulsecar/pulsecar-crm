@@ -43,6 +43,8 @@ const USER_MENU = [
   [{ to: '/account', icon: 'user', label: 'Мой аккаунт' },
     { to: '/settings/params', icon: 'gear', label: 'Настройки', perm: 'settings.manage' },
     { to: '/settings/integrations', icon: 'plug', label: 'Интеграции', perm: 'settings.manage' },
+    { to: '/cash', icon: 'cash', label: 'Кассы (наличные, терминал, банк)', perm: 'settings.manage' },
+    { to: '/stock/suppliers', icon: 'plug', label: 'Расширение Chrome и поставщики', perm: 'settings.manage' },
     { to: '/settings/staff', icon: 'team', label: 'Сотрудники и доступы', perm: 'settings.manage' },
     { to: '/audit', icon: 'history', label: 'Журнал изменений', perm: 'audit.view' },
     { to: '/sms', icon: 'chat', label: 'SMS', perm: 'sms.view' },
