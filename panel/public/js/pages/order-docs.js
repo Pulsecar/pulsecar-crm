@@ -33,7 +33,7 @@ export function SalesDocs({ o, reload }) {
   const [corr, setCorr] = useState(null);
   const hasVat = o.sales_docs?.some((d) => d.kind === 'vat');
   const open = (kind) => setForm({
-    kind, payment_method: o.payments?.find((p) => p.method !== 'points')?.method || app.settings.payment_method_default || 'cash', due_days: app.settings.payment_term_days || 0,
+    kind, payment_method: o.payments?.find((p) => p.method !== 'points')?.method || o.customer?.payment_method || app.settings.payment_method_default || 'cash', due_days: o.customer?.payment_term_days ?? app.settings.payment_term_days ?? 0,
     issue_date: new Date().toISOString().slice(0, 10), buyer: { name: o.customer?.company || o.customer?.name || '', nip: o.customer?.nip || '', street: o.customer?.street || '', postcode: o.customer?.postcode || '', city: o.customer?.city || '' }, notes: '',
   });
   const issue = async () => {

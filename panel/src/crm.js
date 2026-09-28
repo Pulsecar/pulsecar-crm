@@ -180,13 +180,29 @@ crm.get('/customers/:id', (req, res) => {
     loyalty: loyaltySummary(c.id),
     transactions: all('SELECT * FROM transactions WHERE customer_id = ? ORDER BY id DESC LIMIT 100', c.id),
     storage: all('SELECT * FROM storage WHERE customer_id = ? ORDER BY id DESC', c.id),
+    sales: all(`SELECT d.id, d.kind, d.number, d.issue_date, d.total_gross, d.paid, d.ksef_status, d.ksef_number, o.number order_no, o.id order_id FROM sales_docs d
+      LEFT JOIN orders o ON o.id = d.order_id WHERE o.customer_id = ? ${c.nip ? "OR json_extract(d.buyer, '$.nip') = ?" : ''} ORDER BY d.issue_date DESC, d.id DESC`, c.id, ...(c.nip ? [c.nip] : [])),
+    receipts: all(`SELECT r.id, r.number, r.total, r.status, r.created_at, o.number order_no, o.id order_id FROM receipts r JOIN orders o ON o.id = r.order_id WHERE o.customer_id = ? ORDER BY r.id DESC`, c.id),
+    sms: all('SELECT id, phone, kind, text, status, created_at, staff FROM sms_log WHERE customer_id = ? ORDER BY id DESC LIMIT 200', c.id),
   });
 });
 
-const CUST_FIELDS = ['name', 'company', 'nip', 'email', 'street', 'postcode', 'city', 'notes', 'discount_labor', 'discount_parts', 'marketing_consent'];
+const CUST_FIELDS = ['name', 'company', 'nip', 'email', 'street', 'postcode', 'city', 'notes', 'discount_labor', 'discount_parts', 'marketing_consent',
+  'kind', 'first_name', 'last_name', 'country', 'default_car_id', 'payment_method', 'payment_term_days'];
 function custData(b) {
   const o = {};
   for (const k of CUST_FIELDS) if (b[k] !== undefined) o[k] = b[k] === '' ? null : b[k];
+  if (o.kind !== undefined) o.kind = o.kind === 'company' ? 'company' : 'person';
+  if (o.kind === 'person') { o.company = null; o.nip = null; }
+  if (o.country !== undefined) o.country = String(o.country || 'PL').toUpperCase().slice(0, 2) || 'PL';
+  if (o.payment_method !== undefined && !['cash', 'card', 'transfer', null].includes(o.payment_method)) o.payment_method = null;
+  if (o.payment_term_days !== undefined && o.payment_term_days !== null) o.payment_term_days = Math.max(0, Math.min(365, Math.trunc(Number(o.payment_term_days)) || 0));
+  if (o.nip) o.nip = String(o.nip).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  // имя для списков: «Имя Фамилия», у фирмы без контактного лица — название фирмы
+  if (b.first_name !== undefined || b.last_name !== undefined) {
+    const full = [b.first_name, b.last_name].map((x) => String(x || '').trim()).filter(Boolean).join(' ');
+    o.name = full || (o.kind === 'company' ? String(b.company || '').trim() || null : null);
+  }
   if (b.phone !== undefined) {
     o.phone = b.phone ? normPhone(b.phone) : null;
     if (b.phone && !o.phone) throw new HttpError(400, 'Неверный номер телефона');
@@ -248,13 +264,15 @@ crm.get('/cars/:id', (req, res) => {
     owner: k.customer_id ? one('SELECT * FROM customers WHERE id = ?', k.customer_id) : null,
     orders: orders.map((o) => ({ ...o, items: items.filter((i) => i.order_id === o.id) })),
     storage: all('SELECT * FROM storage WHERE car_id = ? ORDER BY id DESC', k.id),
+    files: all(`SELECT f.id, f.name, f.mime, f.size, f.created_at, o.id order_id, o.number order_no FROM order_files f JOIN orders o ON o.id = f.order_id WHERE o.car_id = ? ORDER BY f.id DESC`, k.id),
   });
 });
-const CAR_FIELDS = ['customer_id', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'notes',
+const CAR_FIELDS = ['customer_id', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'notes', 'mileage_unit',
   'first_reg', 'engine_no', 'category', 'mass_kg', 'seats', 'reg_doc', 'inspection_until', 'insurance_until', 'key_no', 'paint_code', 'vehicle_type'];
 function carData(b) {
   const o = {};
   for (const k of CAR_FIELDS) if (b[k] !== undefined) o[k] = b[k] === '' ? null : b[k];
+  if (o.mileage_unit !== undefined) o.mileage_unit = o.mileage_unit === 'mi' ? 'mi' : 'km';
   if (b.plate !== undefined) o.plate = normPlate(b.plate) || null;
   if (b.vin !== undefined) {
     o.vin = String(b.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null;

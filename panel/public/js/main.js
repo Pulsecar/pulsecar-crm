@@ -2,8 +2,8 @@ import { html, render, useState, useEffect, api, useRoute, go, AppCtx, Toasts, I
 import Dashboard from './pages/dashboard.js';
 import { OrdersList, OrderPage, NewOrder } from './pages/orders.js';
 import Calendar from './pages/calendar.js';
-import { CustomersList, CustomerPage } from './pages/customers.js';
-import { CarsList, CarPage } from './pages/cars.js';
+import { CustomersList, CustomerPage, CustomerNew } from './pages/customers.js';
+import { CarsList, CarPage, CarNew } from './pages/cars.js';
 import Stock from './pages/stock.js';
 import Purchases from './pages/purchases.js';
 import Storage from './pages/storage.js';
@@ -82,8 +82,8 @@ function Shell({ app }) {
     const kind = p0 === 'quotes' ? 'quote' : 'order';
     page = p1 === 'new' ? html`<${NewOrder} kind=${kind} query=${route.query} />` : p1 ? html`<${OrderPage} id=${p1} key=${p1} />` : html`<${OrdersList} kind=${kind} query=${route.query} />`;
   } else if (p0 === 'calendar') page = html`<${Calendar} query=${route.query} />`;
-  else if (p0 === 'customers') page = p1 ? html`<${CustomerPage} id=${p1} key=${p1} />` : html`<${CustomersList} />`;
-  else if (p0 === 'cars') page = p1 ? html`<${CarPage} id=${p1} key=${p1} />` : html`<${CarsList} />`;
+  else if (p0 === 'customers') page = p1 === 'new' ? html`<${CustomerNew} />` : p1 ? html`<${CustomerPage} id=${p1} key=${p1 + (route.query.tab || '')} query=${route.query} />` : html`<${CustomersList} />`;
+  else if (p0 === 'cars') page = p1 === 'new' ? html`<${CarNew} query=${route.query} key=${route.query.customer_id || 'new'} />` : p1 ? html`<${CarPage} id=${p1} key=${p1 + (route.query.tab || '')} query=${route.query} />` : html`<${CarsList} />`;
   else if (p0 === 'stock') page = html`<${Stock} sub=${p1} id=${route.parts[2]} />`;
   else if (p0 === 'purchases') page = html`<${Purchases} />`;
   else if (p0 === 'storage') page = html`<${Storage} />`;

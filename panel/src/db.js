@@ -373,6 +373,15 @@ addColumn('orders', 'accept_doc', 'TEXT');           // какой докуме�
 // Данные авто из техпаспорта (Aztec) и по номеру
 for (const [c, t] of [['first_reg', 'TEXT'], ['engine_no', 'TEXT'], ['category', 'TEXT'], ['mass_kg', 'INTEGER'], ['seats', 'INTEGER'],
   ['reg_doc', 'TEXT'], ['inspection_until', 'TEXT'], ['insurance_until', 'TEXT'], ['key_no', 'TEXT'], ['paint_code', 'TEXT'], ['vehicle_type', 'TEXT']]) addColumn('cars', c, t);
+// Карточка клиента и авто как в Motowarsztat: osoba prywatna / firma, имя и фамилия отдельно, страна,
+// авто по умолчанию, способ и срок оплаты; у авто — единица пробега (km / mi)
+for (const [c, t] of [['kind', "TEXT NOT NULL DEFAULT 'person'"], ['first_name', 'TEXT'], ['last_name', 'TEXT'], ['country', "TEXT NOT NULL DEFAULT 'PL'"],
+  ['default_car_id', 'INTEGER'], ['payment_method', 'TEXT'], ['payment_term_days', 'INTEGER']]) addColumn('customers', c, t);
+addColumn('cars', 'mileage_unit', "TEXT NOT NULL DEFAULT 'km'");
+if (!getSetting('customers_kind_migrated')) {
+  run("UPDATE customers SET kind = 'company' WHERE COALESCE(company,'') <> '' OR COALESCE(nip,'') <> ''");
+  setSetting('customers_kind_migrated', '1');
+}
 db.exec(`CREATE TABLE IF NOT EXISTS sms_log (
   id INTEGER PRIMARY KEY, phone TEXT NOT NULL, customer_id INTEGER, order_id INTEGER,
   kind TEXT, text TEXT NOT NULL, provider TEXT, status TEXT NOT NULL,   -- sent | failed | logged (нет провайдера)

@@ -15,7 +15,7 @@ const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 's
 });
 srv.stdout.on('data', (d) => (out += d));
 srv.stderr.on('data', (d) => process.stderr.write(d));
-await new Promise((r) => setTimeout(r, 1300));
+for (let i = 0; i < 60; i++) { try { await fetch(BASE + "/"); break; } catch { await new Promise((r) => setTimeout(r, 250)); } }
 
 const jars = { admin: '', mech: '' };
 let who = 'admin';
@@ -221,6 +221,19 @@ try {
   const sl = ok(await req('/crm-api/sales?from=2020-01-01&to=2030-12-31&type=receipt'), 'sales');
   assert.ok(sl.rows.some((r) => r.number === '1279'));
   console.log('✓ фискальная касса: чек из заказа (PTU, NIP, оплаты), номер JPKID в заказе и в «Продажах»');
+
+  // 9d. карточка клиента и авто как в Motowarsztat
+  const nc = ok(await req('/crm-api/customers', { body: { kind: 'company', company: 'AI CARS SP. Z O.O.', nip: '521-414-19-30', first_name: 'Anna', last_name: 'Nowak', country: 'PL', payment_method: 'transfer', payment_term_days: 14, phone: '+48 600 999 888' } }), 'company');
+  const ncar = ok(await req('/crm-api/cars', { body: { customer_id: nc.id, plate: 'wx 12345', vehicle_type: 'Samochód osobowy', mileage_unit: 'mi', power_kw: 110 } }), 'car');
+  ok(await req('/crm-api/customers/' + nc.id, { method: 'PUT', body: { default_car_id: ncar.id, first_name: 'Anna', last_name: 'Kowalska' } }), 'upd');
+  const ncd = ok(await req('/crm-api/customers/' + nc.id), 'get');
+  assert.equal(ncd.kind, 'company'); assert.equal(ncd.nip, '5214141930'); assert.equal(ncd.name, 'Anna Kowalska'); assert.equal(ncd.payment_term_days, 14);
+  assert.equal(ncd.default_car_id, ncar.id); assert.ok(Array.isArray(ncd.sales) && Array.isArray(ncd.sms));
+  const nck = ok(await req('/crm-api/cars/' + ncar.id), 'car get');
+  assert.equal(nck.mileage_unit, 'mi'); assert.equal(nck.plate, 'WX12345'); assert.ok(Array.isArray(nck.files));
+  ok(await req('/crm-api/customers/' + nc.id, { method: 'PUT', body: { kind: 'person', first_name: 'Anna', last_name: 'Kowalska' } }), 'to person');
+  assert.equal(ok(await req('/crm-api/customers/' + nc.id), 'get2').nip, null);
+  console.log('✓ клиент (частное лицо / фирма, имя и фамилия, срок оплаты, авто по умолчанию) и авто (km/mi) как в Motowarsztat');
 
   // 10. удаление аккаунта в приложении
   ok(await req('/api/me/delete', { body: {}, token: sess.token }), 'delete');

@@ -82,7 +82,7 @@ const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 's
   env: { ...process.env, NODE_ENV: 'test', PORT, DB_PATH: DB, ADMIN_PASSWORD: 'test-pass-123', SESSION_SECRET: 'k'.repeat(40), PUBLIC_URL: BASE, KSEF_BASE: `http://localhost:${MOCK}/v2`, NIP_API_BASE: `http://localhost:${MOCK}` },
 });
 srv.stdout.on('data', (d) => (out += d)); srv.stderr.on('data', (d) => process.stderr.write(d));
-await new Promise((r) => setTimeout(r, 1300));
+for (let i = 0; i < 60; i++) { try { await fetch(BASE + "/"); break; } catch { await new Promise((r) => setTimeout(r, 250)); } }
 let cookie = '';
 async function req(path, { body, method } = {}) {
   const r = await fetch(BASE + path, { method: method || (body ? 'POST' : 'GET'), redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });

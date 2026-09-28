@@ -85,7 +85,7 @@ h3 { font-size: 14px; margin: 0 0 8px; font-weight: 600; color: var(--muted); te
 .icon-btn:hover { color: var(--text); background: var(--surface3); }
 .icon-btn svg { width: 16px; height: 16px; }
 
-label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+label.f, div.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
 input, select, textarea { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: 14px/1.3 inherit; font-family: inherit; min-width: 0; width: 100%; }
 textarea { resize: vertical; min-height: 64px; }
 input:focus, select:focus, textarea:focus, .btn:focus-visible, .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -338,3 +338,36 @@ a.btn.disabled{pointer-events:none;opacity:.5}
 .lang-switch{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;cursor:pointer;width:auto}
 .top .lang-switch{margin-left:auto}
 .top .lang-switch + .user{margin-left:10px}
+
+/* Формы клиента и авто как в Motowarsztat */
+.mwf-tabs { margin: -4px 0 14px; }
+.mwf-tabs button:disabled { opacity: .45; cursor: default; }
+.mwf { display: flex; flex-direction: column; gap: 12px; }
+.mwf-kind { display: flex; justify-content: center; }
+.mwf-kind .seg { margin: 0; }
+.mwf-kind .seg button { border: 0; background: var(--surface2); color: var(--muted); padding: 7px 16px; font: 600 13px inherit; font-family: inherit; cursor: pointer; }
+.mwf-kind .seg button.on { background: var(--accent); color: var(--on-accent); }
+.mwf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.mwf-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mwf .g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mwf .g3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.ig { display: flex; align-items: stretch; border: 1px solid var(--border2); border-radius: 8px; background: var(--bg); overflow: hidden; min-height: 38px; }
+.ig:focus-within { border-color: var(--accent); }
+.ig > input, .ig > select, .ig .ig-val { flex: 1; min-width: 0; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.ig .ig-val { display: flex; align-items: center; padding: 0 12px; font-weight: 600; }
+.ig .addon { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 12px; background: var(--surface2); color: var(--muted); border: 0; border-left: 1px solid var(--border2); border-radius: 0; font-size: 13px; white-space: nowrap; min-height: 0; }
+.ig .addon:first-child { border-left: 0; border-right: 1px solid var(--border2); }
+.ig select.addon { display: block; width: 86px; padding: 0 4px 0 10px; color: var(--text); font-size: 14px; }
+.ig .addon.btn { cursor: pointer; margin: 0; }
+.ig .addon.btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.ig > .btn:last-child:not(.addon) { border-radius: 0; border: 0; border-left: 1px solid var(--border2); margin: 0; }
+.ig input.r { text-align: right; }
+.ig.aztec .aztec-btn { flex: 1; text-align: left; background: transparent; border: 0; color: var(--muted); padding: 0 12px; font: inherit; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.ig.aztec .aztec-btn svg { display: none; }
+.ig.aztec .aztec-btn:hover { color: var(--text); }
+.mwf-consent { justify-content: space-between; width: 100%; }
+.mwf-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+@media (max-width: 900px) { .mwf-cols { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .mwf .g2, .mwf .g3 { grid-template-columns: 1fr; } }
+.ig .addon svg { width: 16px; height: 16px; }
+div.f .ac input, div.f .ig { font-size: 14px; color: var(--text); }

@@ -85,7 +85,7 @@ const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 's
 });
 srv.stdout.on('data', (d) => (out += d));
 srv.stderr.on('data', (d) => process.stderr.write(d));
-await new Promise((r) => setTimeout(r, 1300));
+for (let i = 0; i < 60; i++) { try { await fetch(BASE + "/"); break; } catch { await new Promise((r) => setTimeout(r, 250)); } }
 
 let cookie = '';
 async function req(path, { body, form, method } = {}) {

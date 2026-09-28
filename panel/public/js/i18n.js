@@ -50,7 +50,7 @@ const mine = new WeakMap(); // текст, который поставили м�
 function walk(node) {
   if (node.nodeType === 3) {
     const v = node.data;
-    if (mine.get(node) === v || !CYR.test(v) || node.parentElement?.closest('[data-no-i18n]')) return;
+    if (mine.get(node) === v || !CYR.test(v) || node.parentElement?.tagName === 'TEXTAREA' || node.parentElement?.closest('[data-no-i18n]')) return;
     const t = tr(v);
     mine.set(node, t);
     if (t !== v) node.data = t;
@@ -58,11 +58,12 @@ function walk(node) {
   }
   if (node.nodeType !== 1) return;
   const tag = node.tagName;
-  if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || node.isContentEditable || node.closest?.('[data-no-i18n]')) return;
+  if (tag === 'SCRIPT' || tag === 'STYLE' || node.isContentEditable || node.closest?.('[data-no-i18n]')) return;
   for (const a of ATTRS) {
     const v = node.getAttribute(a);
     if (v && CYR.test(v)) { const t = tr(v); if (t !== v) node.setAttribute(a, t); }
   }
+  if (tag === 'TEXTAREA') return; // текст, который вводит пользователь, не трогаем
   if ((tag === 'INPUT' && (node.type === 'button' || node.type === 'submit')) && CYR.test(node.value)) node.value = tr(node.value);
   for (let c = node.firstChild; c; c = c.nextSibling) walk(c);
 }
