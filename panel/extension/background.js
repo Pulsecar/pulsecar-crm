@@ -41,7 +41,11 @@ async function check() {
     company: hello.data?.company || hello.data?.brand || null, nip: hello.data?.nip || null,
     error: hello.data ? null : hello.error || ver.error || null, needSetup: !!hello.needSetup,
   };
-  st.update = !!(st.latest && newer(st.latest, VERSION));
+  // из Chrome Web Store (есть update_url) — Chrome обновляет сам, скачивать zip не нужно
+  const STORE = !!chrome.runtime.getManifest().update_url;
+  st.store = STORE;
+  st.update = !STORE && !!(st.latest && newer(st.latest, VERSION));
+  if (STORE && st.latest && newer(st.latest, VERSION)) chrome.runtime.requestUpdateCheck?.().catch?.(() => {});
   await chrome.storage.local.set({ status: st });
   chrome.action.setBadgeBackgroundColor({ color: st.connected ? '#f0b429' : '#e34948' });
   chrome.action.setBadgeText({ text: !st.connected ? '!' : st.update ? '↑' : '' });

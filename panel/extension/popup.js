@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 const send = (m) => new Promise((ok) => chrome.runtime.sendMessage(m, ok));
 const BUILTIN = chrome.runtime.getManifest().content_scripts.find((c) => c.js.includes('content.js')).matches;
 const NAMES = [[/intercars/, 'Inter Cars'], [/hartphp/, 'Hart'], [/autopartner|apcat/, 'Auto Partner'], [/inter-team/, 'Inter-Team'], [/motoprofil|profiauto/, 'Moto-Profil'],
-  [/gordon/, 'Gordon'], [/motorol/, 'Motorol'], [/rodon/, 'Rodon'], [/arge/, 'Arge'], [/elit/, 'Elit'], [/autoland/, 'Auto Land']];
+  [/gordon/, 'Gordon'], [/motorol/, 'Motorol'], [/rodon/, 'Rodon'], [/arge/, 'Arge'], [/elit/, 'Elit'], [/autoland/, 'Auto Land'], [/allegro/, 'Allegro']];
 const ROLE = { admin: 'администратор', staff: 'сотрудник', mechanic: 'механик' };
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString('pl-PL') : '—');
 const globMatch = (pat, url) => new RegExp('^' + pat.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$').test(url);

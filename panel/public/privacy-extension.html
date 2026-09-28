@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polityka prywatności – rozszerzenie Pulsecar</title>
+<style>
+  :root { --bg:#f6f7f8; --card:#fff; --ink:#1b1c1f; --muted:#5f636b; --line:#e3e5e8; --accent:#0a8f45; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121315; --card:#1b1c1f; --ink:#ececee; --muted:#a3a7ae; --line:#2c2e33; --accent:#1bf372; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:780px; margin:0 auto; padding:32px 16px 64px; }
+  article { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px 24px; margin-bottom:20px; }
+  h1 { font-size:26px; margin:0 0 4px; } h2 { font-size:18px; margin:26px 0 6px; }
+  .muted { color:var(--muted); font-size:14px; } a { color:var(--accent); }
+  ul { padding-left:20px; } li { margin:4px 0; }
+  nav a { margin-right:14px; font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="#pl">Polski</a><a href="#en">English</a></nav>
+
+  <article id="pl">
+    <h1>Polityka prywatności rozszerzenia Pulsecar</h1>
+    <div class="muted">Obowiązuje od 28.09.2026 · rozszerzenie Chrome „Pulsecar – części z hurtowni i Allegro do CRM”</div>
+
+    <h2>Do czego służy rozszerzenie</h2>
+    <p>Rozszerzenie jest narzędziem dla pracowników warsztatów korzystających z systemu CRM Pulsecar. Na stronach hurtowni motoryzacyjnych (np. Inter Cars) i Allegro dodaje przycisk „Pobierz do Pulsecar”, który przenosi dane wybranej części do CRM warsztatu: do kartoteki towarów, na magazyn, do zlecenia lub wyceny. Opcjonalnie drukuje paragony na kasie fiskalnej Novitus w sieci lokalnej warsztatu.</p>
+
+    <h2>Jakie dane przetwarza</h2>
+    <ul>
+      <li><b>Dane części ze strony, którą użytkownik ogląda</b> – nazwa, numer katalogowy, producent, EAN, ilość i ceny. Są odczytywane wyłącznie po kliknięciu przycisku przez użytkownika i wysyłane tylko do CRM Pulsecar warsztatu.</li>
+      <li><b>Ustawienia połączenia</b> – adres CRM i klucz pracownika. Są zapisane lokalnie w przeglądarce (chrome.storage) i służą do autoryzacji zapytań do CRM.</li>
+      <li><b>Dane paragonu</b> – pozycje i kwoty zlecenia, wysyłane z CRM do kasy fiskalnej w sieci lokalnej, tylko gdy użytkownik zleci wydruk.</li>
+    </ul>
+
+    <h2>Czego rozszerzenie nie robi</h2>
+    <ul>
+      <li>Nie zbiera historii przeglądania, haseł, danych logowania ani danych płatniczych.</li>
+      <li>Nie wysyła danych ze stron, na których użytkownik nie kliknął przycisku Pulsecar – na stronach hurtowni i Allegro jedynie lokalnie, w przeglądarce, znajduje miejsce na przycisk.</li>
+      <li>Nie sprzedaje, nie udostępnia ani nie przekazuje danych podmiotom trzecim, reklamodawcom ani brokerom danych.</li>
+      <li>Nie używa danych do reklam, profilowania ani oceny zdolności kredytowej.</li>
+      <li>Dane trafiają wyłącznie na konto warsztatu w CRM Pulsecar (panel.pulsecar.tech), do którego pracownik jest podłączony, i są tam przetwarzane w ramach usługi CRM.</li>
+      <li>Nie pobiera ani nie wykonuje zdalnego kodu.</li>
+    </ul>
+
+    <h2>Uprawnienia</h2>
+    <p>Dostęp do stron hurtowni i Allegro jest potrzebny, aby wyświetlić przycisk przy częściach i odczytać ich dane po kliknięciu. Dostęp do adresów w sieci lokalnej (opcjonalny, na żądanie użytkownika) służy wyłącznie do połączenia z kasą fiskalną warsztatu. Użytkownik może w każdej chwili dodać inne strony hurtowni lub odebrać uprawnienia w ustawieniach rozszerzenia.</p>
+
+    <h2>Przechowywanie i usuwanie</h2>
+    <p>Ustawienia połączenia są przechowywane w przeglądarce do czasu odłączenia lub odinstalowania rozszerzenia. Dane przeniesione do CRM są przechowywane w CRM warsztatu zgodnie z jego zasadami; administratorem tych danych jest warsztat.</p>
+
+    <h2>Kontakt</h2>
+    <p>Pytania dotyczące prywatności: <a href="mailto:admin@pulsecar.pl">admin@pulsecar.pl</a></p>
+  </article>
+
+  <article id="en">
+    <h1>Pulsecar extension privacy policy</h1>
+    <div class="muted">Effective 28 Sep 2026 · Chrome extension “Pulsecar – części z hurtowni i Allegro do CRM”</div>
+
+    <h2>What the extension does</h2>
+    <p>The extension is a tool for staff of car repair shops using the Pulsecar CRM. On automotive wholesaler websites (e.g. Inter Cars) and Allegro it adds a “Pobierz do Pulsecar” button that transfers the selected part to the shop's CRM: product catalogue, stock, a repair order or a quote. Optionally it prints receipts on a Novitus fiscal printer in the shop's local network.</p>
+
+    <h2>Data processed</h2>
+    <ul>
+      <li><b>Part data from the page the user is viewing</b> – name, part number, manufacturer, EAN, quantity and prices. Read only when the user clicks the button and sent only to the shop's Pulsecar CRM.</li>
+      <li><b>Connection settings</b> – CRM address and staff key, stored locally in the browser (chrome.storage) and used to authorise requests to the CRM.</li>
+      <li><b>Receipt data</b> – order items and amounts sent from the CRM to the fiscal printer in the local network, only when the user requests a printout.</li>
+    </ul>
+
+    <h2>What the extension does not do</h2>
+    <ul>
+      <li>It does not collect browsing history, passwords, login or payment data.</li>
+      <li>It sends no data from pages where the user has not clicked the Pulsecar button – on wholesaler and Allegro pages it only locates, locally in the browser, where to place the button.</li>
+      <li>It does not sell, share or transfer data to third parties, advertisers or data brokers.</li>
+      <li>It does not use data for advertising, profiling or creditworthiness.</li>
+      <li>Data goes only to the shop's account in the Pulsecar CRM (panel.pulsecar.tech) that the staff member is connected to, and is processed there as part of the CRM service.</li>
+      <li>It does not download or execute remote code.</li>
+    </ul>
+
+    <h2>Permissions</h2>
+    <p>Access to wholesaler and Allegro pages is needed to show the button next to parts and read their data on click. Access to local network addresses (optional, granted by the user) is used only to reach the shop's fiscal printer. The user can add other wholesaler sites or revoke permissions at any time in the extension settings.</p>
+
+    <h2>Retention and deletion</h2>
+    <p>Connection settings stay in the browser until the extension is disconnected or uninstalled. Data transferred to the CRM is stored in the shop's CRM under its own rules; the shop is the controller of that data.</p>
+
+    <h2>Contact</h2>
+    <p>Privacy questions: <a href="mailto:admin@pulsecar.pl">admin@pulsecar.pl</a></p>
+  </article>
+</main>
+</body>
+</html>
