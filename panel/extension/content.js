@@ -40,7 +40,30 @@
     return [...cards];
   }
 
+  /** Цены Inter Cars по разметке: productpricetoggle__wholesale — цена для сервиса (закупка), без него — «Cena detal.» (для клиента) */
+  function icPrices(card) {
+    const r = { wNet: 0, wGross: 0, dNet: 0, dGross: 0 };
+    for (const q of card.querySelectorAll('.quantity')) {
+      const a = q.querySelector('[class*=quantity__amount--new], [class*=quantity__amount]');
+      const v = toNum(T(a || q));
+      if (!v) continue;
+      const cls = q.className;
+      const whole = /__wholesale/.test(cls) && !/productretailprice/.test(q.parentElement?.className || '');
+      const gross = /__gross/.test(cls), net = /__net/.test(cls);
+      if (!gross && !net) continue;
+      const k = (whole ? 'w' : 'd') + (gross ? 'Gross' : 'Net');
+      if (!r[k]) r[k] = v;
+    }
+    const price_net = r.wNet || (r.wGross ? round2(r.wGross / 1.23) : 0);
+    const sell_gross = r.dGross || (r.dNet ? round2(r.dNet * 1.23) : 0);
+    return { price_net, sell_gross };
+  }
+
   function parseIcCard(card) {
+    // карточка могла быть перерисована сайтом — берём живую по коду IC
+    const code0 = card.querySelector('[data-product-code]')?.dataset.productCode;
+    if (code0 && !document.contains(card)) card = document.querySelector(`[data-product-code="${CSS.escape(code0)}"]`)?.closest('tbody, .listingcollapsed__item, .producttile, .productdetails') || card;
+    const byCls = icPrices(card);
     const amounts = [...card.querySelectorAll('.js-quantity__amount--new')].map((e) => toNum(T(e)));
     const exactName = T(card.querySelector('.productname'));
     const exactCode = T(card.querySelector('.activenumber'));
@@ -51,10 +74,11 @@
       const qty = toNum(card.querySelector('input.js-order-item-count, input[name=quantity]')?.value || '1') || 1;
       return {
         supplier: SUPPLIER, sku, code: exactCode || sku, name: exactName || exactCode, brand: (img?.title || img?.alt || '').trim() || null, qty, vat: 23,
-        price_net: amounts[0] || 0, sell_gross: amounts.length >= 4 ? amounts[3] : 0,
+        price_net: byCls.price_net || amounts[0] || 0, sell_gross: byCls.sell_gross || (amounts.length >= 4 ? amounts[3] : 0),
       };
     }
-    const text = T(card);
+    // «38,49» и «PLN» бывают в разных элементах — склеиваем в одну строку
+    const text = T(card).replace(/(\d)\s*\n\s*(PLN|zł|zl)\b/gi, '$1 $2');
     const sku = (IC_CODE.exec(text) || [])[1] || null;
     const lines = text.split('\n').map((s) => s.trim()).filter(Boolean);
     const codeLike = (s) => /^[A-Z0-9][A-Z0-9 .\-/]{2,34}$/i.test(s) && /\d/.test(s) && s !== sku;
@@ -75,7 +99,7 @@
     const gross = pageGross();
     return {
       supplier: SUPPLIER, sku, code, name, brand: brandImg || null, qty: qtyInput ? toNum(qtyInput.value) || 1 : 1, vat: 23,
-      price_net: client ? round2(gross ? client / 1.23 : client) : 0, sell_gross: rec ? round2(gross ? rec : rec * 1.23) : 0,
+      price_net: byCls.price_net || (client ? round2(gross ? client / 1.23 : client) : 0), sell_gross: byCls.sell_gross || (rec ? round2(gross ? rec : rec * 1.23) : 0),
     };
   }
 

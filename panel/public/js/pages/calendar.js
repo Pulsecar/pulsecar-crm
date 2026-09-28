@@ -121,6 +121,7 @@ export default function Calendar({ query }) {
           ${!pending.length ? html`<div class="empty small">${"Всё распределено"}</div>` : null}</div>
       </aside>`}
 
+      ${!left && drag?.type === 'appt' && html`<div class="hg-drop-strip" onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>Отпустите здесь, чтобы убрать из графика</div>`}
       <div class="hg-main">
       ${view === 'day' ? html`
       <div class="cal" style=${`grid-template-columns:52px repeat(${stations.length}, minmax(230px,1fr))`}>

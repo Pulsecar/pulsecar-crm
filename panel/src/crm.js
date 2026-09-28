@@ -1113,6 +1113,19 @@ crm.post('/ext/pick', (req, res) => {
   })).filter((i) => i.name);
   if (!items.length) throw new HttpError(400, 'Нет товаров');
   if (!b.product && !b.stock && !b.order_id && !b.quote_id) throw new HttpError(400, 'Выберите, куда добавить: склад, заказ или выцена');
+  // товар уже есть в картотеке — берём его цены, если со страницы они не прочитались
+  for (const i of items) {
+    if (i.price_net > 0 && i.sell_gross > 0) continue;
+    const p = (i.sku && one('SELECT purchase_price, sell_price FROM products WHERE supplier_sku = ?', i.sku)) || (i.code && one('SELECT purchase_price, sell_price FROM products WHERE code = ?', i.code));
+    if (p) { i.price_net ||= Number(p.purchase_price) || 0; i.sell_gross ||= Number(p.sell_price) || 0; }
+  }
+  const ver = String(req.headers['x-pulsecar-ext'] || '0');
+  const old = ver.split('.').map(Number).reduce((a, n, k) => a + (n || 0) * [10000, 100, 1][k], 0) < 10201;
+  if ((b.order_id || b.quote_id) && items.every((i) => !(i.price_net > 0) && !(i.sell_gross > 0))) {
+    throw new HttpError(400, old
+      ? `Цены со страницы не прочитались — у вас старая версия расширения (${ver === '0' ? 'до 1.1' : ver}). Обновите до 1.2.1: CRM → Склад → Поставщики → «Скачать расширение», распакуйте поверх старой папки и нажмите ⟳ в chrome://extensions.`
+      : 'Цены со страницы не прочитались — впишите закупку и продажу в окне вручную.');
+  }
   if (b.stock && !(P['stock.docs'] || P['suppliers.receive'])) throw new HttpError(403, 'Нет права на приход на склад');
   if (b.order_id && !P['orders.jobs']) throw new HttpError(403, 'Нет права добавлять запчасти в заказ');
   if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять выцены');

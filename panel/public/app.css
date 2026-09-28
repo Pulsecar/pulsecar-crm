@@ -499,3 +499,4 @@ html.side-mini .nav-item .count { position: absolute; top: 2px; right: 2px; }
 .hg-load, .hg-num { flex: none; }
 .cal-ev .hg-line { font-size: 11.5px; }
 .cal-ev > * { flex-shrink: 0; }
+.hg-drop-strip { position: fixed; left: 0; top: 0; bottom: 0; width: 260px; z-index: 50; display: grid; place-items: center; text-align: center; padding: 20px; background: color-mix(in srgb, var(--warn) 18%, var(--surface)); border-right: 2px dashed var(--warn); color: var(--warn); font-weight: 600; }
