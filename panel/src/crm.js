@@ -377,7 +377,19 @@ crm.post('/orders', (req, res) => {
     }
     if (carId && !customerId) customerId = one('SELECT customer_id FROM cars WHERE id = ?', carId)?.customer_id || null;
     linkCar(carId, customerId);
-    return createOrder({ ...b, customer_id: customerId, car_id: carId }, s.name);
+    const oid = createOrder({ ...b, customer_id: customerId, car_id: carId }, s.name);
+    // заказ сразу в терминарз (как в Motowarsztat): пост, время, длительность
+    if (b.appointment && (b.appointment.start_at || b.appointment.station_id)) {
+      if (!can(s, 'calendar.edit')) throw new HttpError(403, 'Недостаточно прав: ' + permLabel('calendar.edit'));
+      const o = one('SELECT number, complaint FROM orders WHERE id = ?', oid);
+      const d = apptData({ ...b.appointment, order_id: oid, customer_id: customerId, car_id: carId, mechanic_id: b.appointment.mechanic_id || b.mechanic_id || null,
+        title: b.appointment.title || o.complaint?.slice(0, 120) || o.number });
+      d.status = d.station_id && d.start_at ? 'planned' : 'request';
+      d.source = 'crm';
+      if (b.appointment_id) { checkOverlap(d, Number(b.appointment_id)); update('appointments', Number(b.appointment_id), d); }
+      else { checkOverlap(d); insert('appointments', d); }
+    }
+    return oid;
   });
   if (b.appointment_id) run('UPDATE appointments SET order_id = ?, customer_id = COALESCE(customer_id, (SELECT customer_id FROM orders WHERE id = ?)), car_id = COALESCE(car_id, (SELECT car_id FROM orders WHERE id = ?)), status = CASE WHEN status = \'request\' THEN \'planned\' ELSE status END WHERE id = ?', id, id, id, Number(b.appointment_id));
   res.json({ id });
@@ -544,17 +556,41 @@ crm.delete('/orders/:id', (req, res) => {
 });
 
 // ── Терминарз ──────────────────────────────────────────────────────────────
+/** Часы работ заказа: работы в нормо-часах (не «szt/usł») */
+const LABOR_H = `SUM(CASE WHEN i.kind = 'labor' AND lower(COALESCE(i.unit,'')) NOT GLOB '*szt*' AND lower(COALESCE(i.unit,'')) NOT GLOB '*us*' THEN i.qty ELSE 0 END)`;
+function orderJobs(ids) {
+  if (!ids.length) return {};
+  const out = {};
+  for (const i of all(`SELECT order_id, name, qty, unit, kind, done FROM order_items WHERE kind = 'labor' AND order_id IN (${ids.map(() => '?').join(',')}) ORDER BY pos, id`, ...ids)) (out[i.order_id] ||= []).push(i);
+  return out;
+}
 crm.get('/appointments', (req, res) => {
   who(req, 'calendar.view');
   const from = String(req.query.from || today());
   const to = String(req.query.to || from);
-  const base = `SELECT a.*, c.name customer_name, c.phone customer_phone, k.make, k.model, k.plate, o.number order_number,
-      st.name status_name, st.color status_color, s.name mechanic_name
+  const base = `SELECT a.*, COALESCE(CASE WHEN c.kind = 'company' THEN c.company END, c.name) customer_name, c.phone customer_phone, k.make, k.model, k.plate, o.number order_number, o.kind order_kind, o.complaint order_complaint, o.total order_total,
+      st.name status_name, st.color status_color, s.name mechanic_name,
+      (SELECT COUNT(*) FROM appointments x WHERE x.order_id = a.order_id AND a.order_id IS NOT NULL AND x.status NOT IN ('cancelled') AND x.start_at IS NOT NULL) part_total,
+      (SELECT COUNT(*) FROM appointments x WHERE x.order_id = a.order_id AND a.order_id IS NOT NULL AND x.status NOT IN ('cancelled') AND x.start_at IS NOT NULL AND (x.start_at < a.start_at OR (x.start_at = a.start_at AND x.id <= a.id))) part_no
     FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id LEFT JOIN cars k ON k.id = a.car_id
     LEFT JOIN orders o ON o.id = a.order_id LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN staff s ON s.id = a.mechanic_id`;
+  const rows = all(`${base} WHERE a.start_at IS NOT NULL AND a.station_id IS NOT NULL AND substr(a.start_at,1,10) BETWEEN ? AND ? AND a.status <> 'cancelled' ORDER BY a.start_at`, from, to);
+  const unassigned = all(`${base} WHERE (a.station_id IS NULL OR a.start_at IS NULL) AND a.status IN ('request','planned') ORDER BY a.id DESC LIMIT 100`);
+  // «Неназначенные элементы» как в Motowarsztat: открытые заказы, которые ещё не (полностью) в графике
+  const orders = all(`SELECT o.id, o.number, o.complaint, o.created_at, o.pickup_at, o.customer_id, o.car_id, o.mechanic_id, st.name status_name, st.color status_color,
+      COALESCE(CASE WHEN c.kind = 'company' THEN c.company END, c.name) customer_name, c.phone customer_phone, k.make, k.model, k.plate,
+      (SELECT ${LABOR_H} FROM order_items i WHERE i.order_id = o.id) hours,
+      (SELECT COUNT(*) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'labor') jobs,
+      (SELECT COALESCE(SUM(duration_min),0) FROM appointments a WHERE a.order_id = o.id AND a.status NOT IN ('cancelled','no_show') AND a.start_at IS NOT NULL AND a.station_id IS NOT NULL) planned_min
+    FROM orders o LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id
+    WHERE o.kind = 'order' AND COALESCE(st.is_final, 0) = 0 ORDER BY o.id DESC LIMIT 300`)
+    .map((o) => ({ ...o, hours: Math.round((o.hours || 0) * 100) / 100 }))
+    .filter((o) => o.planned_min === 0 || o.planned_min < Math.round((o.hours || 0) * 60));
+  const jobs = orderJobs([...new Set([...rows, ...unassigned].map((a) => a.order_id).filter(Boolean).concat(orders.map((o) => o.id)))]);
   res.json({
-    rows: all(`${base} WHERE a.start_at IS NOT NULL AND a.station_id IS NOT NULL AND substr(a.start_at,1,10) BETWEEN ? AND ? AND a.status <> 'cancelled' ORDER BY a.start_at`, from, to),
-    unassigned: all(`${base} WHERE (a.station_id IS NULL OR a.start_at IS NULL) AND a.status IN ('request','planned') ORDER BY a.id DESC LIMIT 100`),
+    rows: rows.map((a) => ({ ...a, jobs: jobs[a.order_id] || [] })),
+    unassigned: unassigned.map((a) => ({ ...a, jobs: jobs[a.order_id] || [] })),
+    orders: orders.map((o) => ({ ...o, jobs: jobs[o.id] || [] })),
   });
 });
 const APPT_FIELDS = ['station_id', 'order_id', 'customer_id', 'car_id', 'mechanic_id', 'title', 'note', 'start_at', 'duration_min', 'status', 'contact_name', 'contact_phone', 'preferred'];
@@ -578,6 +614,18 @@ function checkOverlap(a, ignoreId) {
 crm.post('/appointments', (req, res) => {
   const s = who(req, 'calendar.edit');
   const d = apptData(req.body || {});
+  // заказ перетащили в график: клиент, авто и длительность — из заказа (оставшиеся часы работ)
+  if (d.order_id) {
+    const o = one(`SELECT o.*, (SELECT ${LABOR_H} FROM order_items i WHERE i.order_id = o.id) hours,
+        (SELECT COALESCE(SUM(duration_min),0) FROM appointments a WHERE a.order_id = o.id AND a.status NOT IN ('cancelled','no_show') AND a.start_at IS NOT NULL) planned FROM orders o WHERE o.id = ?`, Number(d.order_id));
+    if (!o) throw new HttpError(404, 'Заказ не найден');
+    d.customer_id ??= o.customer_id; d.car_id ??= o.car_id; d.mechanic_id ??= o.mechanic_id; d.title ??= o.number;
+    if (!d.duration_min) {
+      const rest = Math.round((o.hours || 0) * 60) - (o.planned || 0);
+      const step = Number(getSetting('slot_min', '30')) || 30;
+      d.duration_min = Math.min(8 * 60, Math.max(step, Math.ceil((rest > 0 ? rest : 60) / step) * step));
+    }
+  }
   d.status ||= d.station_id && d.start_at ? 'planned' : 'request';
   d.source ||= 'crm';
   checkOverlap(d);

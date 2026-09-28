@@ -1,154 +1,297 @@
+// Терминарз как harmonogram в Motowarsztat: слева «Неназначенные» (заказы с часами работ и заявки),
+// справа посты с загрузкой «4.5/9 ч»; заказы перетаскиваются на пост и время, карточки двигаются и растягиваются.
 import {
-  html, useState, useEffect, useData, api, act, go, useApp, Icon, Modal, Picker, ConfirmButton, todayStr, addDays, fdate, fdt, carName, toast,
+  html, useState, useEffect, useRef, useData, api, act, go, useApp, Icon, Modal, Picker, ConfirmButton, todayStr, addDays, fdate, fdt, carName, toast,
 } from '../lib.js';
+import { CustomerCarPicker } from './orders.js';
 
-const SLOT_PX = 28;
+const SLOT_PX = 30;
 const DAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const DAYS_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+const MONTHS1 = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-const STATUS = { request: 'Заявка', planned: 'Запланировано', arrived: 'Клиент приехал', no_show: 'Не приехал', cancelled: 'Отменено' };
+const STATUS = { request: 'Заявка', planned: 'Запланировано', arrived: 'Клиент приехал', no_show: 'Не приехал', cancelled: 'Отменено', block: 'Блокировка' };
+const h1 = (n) => `${Math.round(n * 100) / 100}`.replace('.', ',') + ' ч';
+const store = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const keep = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+const isHours = (j) => !/szt|шт|us[lł]|kpl/i.test(j.unit || '');
 
 export default function Calendar({ query }) {
   const app = useApp();
   const [date, setDate] = useState(query.date || todayStr());
-  const [view, setView] = useState('day');
-  const [edit, setEdit] = useState(null);
-  const [dragId, setDragId] = useState(null);
-  const [overSlot, setOverSlot] = useState(null);
+  const [view, setView] = useState(store('pc_cal_view', 'day'));
+  const [left, setLeft] = useState(store('pc_cal_left', '1') === '1');
+  const [edit, setEdit] = useState(null);      // запись в графике
+  const [create, setCreate] = useState(null);  // новый заказ в график
+  const [drag, setDrag] = useState(null);      // { type: 'appt' | 'order', id }
+  const [over, setOver] = useState(null);
+  const [q, setQ] = useState('');
   const linkOrder = query.order ? Number(query.order) : null;
-  const { data: linked } = useData(linkOrder ? 'orders/' + linkOrder : null, [linkOrder]);
-  const range = view === 'day' ? [date, date] : [weekStart(date), addDays(weekStart(date), 6)];
-  const { data, reload } = useData(`appointments?from=${range[0]}&to=${range[1]}`);
+  const range = view === 'day' ? [date, date] : view === 'week' ? [weekStart(date), addDays(weekStart(date), 6)] : monthRange(date);
+  const { data, reload } = useData(`appointments?from=${range[0]}&to=${range[1]}`, [range[0], range[1]]);
   const start = toMin(app.settings.hours_start || '08:00');
   const end = toMin(app.settings.hours_end || '18:00');
   const step = Number(app.settings.slot_min || 30);
   const slots = [];
   for (let m = start; m < end; m += step) slots.push(m);
   const stations = app.stations;
+  const canEdit = app.perms['calendar.edit'];
+  useEffect(() => keep('pc_cal_view', view), [view]);
+  useEffect(() => keep('pc_cal_left', left ? '1' : '0'), [left]);
 
-  const move = async (id, stationId, time) => {
-    await act(() => api('appointments/' + id, { method: 'PUT', body: { station_id: stationId, start_at: `${date} ${hhmm(time)}` } }), 'Перенесено');
-    reload();
+  const put = async (id, body, msg) => { try { await act(() => api('appointments/' + id, { method: 'PUT', body }), msg); } finally { reload(); } };
+  const dropOn = async (stationId, time, day = date) => {
+    const d = drag; setDrag(null); setOver(null);
+    if (!d || !canEdit) return;
+    const at = `${day} ${hhmm(time)}`;
+    if (d.type === 'appt') return put(d.id, { station_id: stationId, start_at: at }, 'Перенесено');
+    try { await act(() => api('appointments', { body: { order_id: d.id, station_id: stationId, start_at: at } }), 'Заказ в графике'); } finally { reload(); }
   };
-  const newAt = (stationId, time) => setEdit({
-    station_id: stationId, start_at: `${date} ${hhmm(time)}`, duration_min: 60, title: linked ? `${linked.number}` : '',
-    order_id: linkOrder, customer_id: linked?.customer_id || null, car_id: linked?.car_id || null,
-    _customer: linked?.customer || null, _car: linked?.car || null,
-  });
+  const unschedule = async () => {
+    const d = drag; setDrag(null); setOver(null);
+    if (!d || d.type !== 'appt' || !canEdit) return;
+    const a = [...(data?.rows || [])].find((x) => x.id === d.id);
+    if (a?.order_id) { await act(() => api('appointments/' + a.id, { method: 'DELETE' }), 'Убрано из графика'); reload(); } else put(d.id, { station_id: null, start_at: null, status: 'request' }, 'Возвращено в неназначенные');
+  };
+  const newAt = (stationId, time, day = date) => {
+    if (!canEdit) return;
+    if (linkOrder) return (async () => { await act(() => api('appointments', { body: { order_id: linkOrder, station_id: stationId, start_at: `${day} ${hhmm(time)}` } }), 'Заказ в графике'); go('/orders/' + linkOrder); })();
+    setCreate({ station_id: stationId, date: day, time: hhmm(time) });
+  };
+  // растягивание карточки за нижний край — меняем длительность
+  const resize = (e, a) => {
+    e.preventDefault(); e.stopPropagation();
+    const y0 = e.clientY, d0 = a.duration_min, el = e.currentTarget.parentElement;
+    let dur = d0;
+    const mv = (ev) => { dur = Math.max(step, Math.round((d0 + ((ev.clientY - y0) / SLOT_PX) * step) / step) * step); el.style.height = `${(dur / step) * SLOT_PX - 3}px`; };
+    const up = () => { removeEventListener('mousemove', mv); removeEventListener('mouseup', up); if (dur !== d0) put(a.id, { duration_min: dur }, `Длительность: ${h1(dur / 60)}`); };
+    addEventListener('mousemove', mv); addEventListener('mouseup', up);
+  };
+
   const d = new Date(date + 'T12:00:00');
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const shift = (n) => setDate(view === 'day' ? addDays(date, n) : view === 'week' ? addDays(date, 7 * n) : addMonths(date, n));
+  const title = view === 'day' ? `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} (${DAYS_FULL[d.getDay()]})`
+    : view === 'week' ? `${fdate(range[0])} — ${fdate(range[1])}` : `${MONTHS1[d.getMonth()]} ${d.getFullYear()}`;
+  const rows = data?.rows || [];
+  const ql = q.trim().toLowerCase();
+  const match = (x) => !ql || [x.number, x.order_number, x.customer_name, x.contact_name, x.plate, x.make, x.model, x.title, x.complaint].some((v) => String(v || '').toLowerCase().includes(ql));
+  const pending = [...(data?.orders || []).map((o) => ({ ...o, _t: 'order' })), ...(data?.unassigned || []).map((a) => ({ ...a, _t: 'appt' }))].filter(match);
 
   return html`
-    <div class="page-head"><h1>Терминарз</h1>
-      <div class="actions"><div class="pill-tabs"><button class=${view === 'day' ? 'on' : ''} onClick=${() => setView('day')}>День</button><button class=${view === 'week' ? 'on' : ''} onClick=${() => setView('week')}>Неделя</button></div>
-        <button class="btn primary" onClick=${() => setEdit({ station_id: null, start_at: null, duration_min: 60, title: '', status: 'request' })}><${Icon} n="plus" />Заявка без времени</button></div></div>
-    ${linked && html`<div class="card" style="margin-bottom:12px;border-color:var(--accent)">Выберите пост и время для заказа <b>${linked.number}</b> (${linked.customer?.name || ''} · ${carName(linked.car)}) — нажмите на свободный слот. <a href="#/calendar">Отмена</a></div>`}
-
-    ${data?.unassigned?.length ? html`<h3>Не распределено · перетащите на пост</h3><div class="unassigned">${data.unassigned.map((a) => html`
-      <div class="u-card" draggable="true" onDragStart=${() => setDragId(a.id)} onDragEnd=${() => setDragId(null)} onClick=${() => setEdit(a)}>
-        <b>${a.customer_name || a.contact_name || a.title || 'Заявка'}</b>
-        <div class="muted">${a.contact_phone || a.customer_phone || ''}</div>
-        <div>${a.title || ''}</div>${a.note ? html`<div class="muted">${a.note}</div>` : ''}
-        ${a.preferred ? html`<div class="pos">Желаемо: ${a.preferred}</div>` : ''}
-        <div class="faint">${a.source === 'app' ? 'из приложения' : a.source || ''} · ${fdate(a.created_at)}</div>
-      </div>`)}</div>` : ''}
-
-    <div class="cal-bar">
-      <button class="btn" onClick=${() => setDate(addDays(date, view === 'day' ? -1 : -7))}><${Icon} n="left" /></button>
-      <button class="btn" onClick=${() => setDate(todayStr())}>Сегодня</button>
-      <button class="btn" onClick=${() => setDate(addDays(date, view === 'day' ? 1 : 7))}><${Icon} n="right" /></button>
-      <div class="date">${view === 'day' ? `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} (${DAYS[d.getDay()]})` : `${fdate(range[0])} — ${fdate(range[1])}`}</div>
-      <input type="date" value=${date} onInput=${(e) => e.target.value && setDate(e.target.value)} style="width:160px" aria-label="Дата" />
+    <div class="page-head"><h1>Терминарз</h1></div>
+    ${linkOrder && html`<div class="card" style="margin-bottom:12px;border-color:var(--accent)">Нажмите на свободное время на посту — заказ встанет в график. <a href="#/calendar">Отмена</a></div>`}
+    <div class="hg-bar">
+      <button class=${'btn' + (left ? ' on' : '')} onClick=${() => setLeft(!left)}>Неназначенные <span class="chip">${pending.length}</span><${Icon} n=${left ? 'left' : 'right'} /></button>
+      <div class="btn-group"><button class="btn" onClick=${() => shift(-1)} aria-label="Назад"><${Icon} n="left" /></button>
+        <button class="btn" onClick=${() => setDate(todayStr())}>Сегодня</button>
+        <button class="btn" onClick=${() => shift(1)} aria-label="Вперёд"><${Icon} n="right" /></button></div>
+      <button class="btn" title="Обновить" onClick=${reload}><${Icon} n="history" /></button>
+      <input type="date" class="hg-date" value=${date} onInput=${(e) => e.target.value && setDate(e.target.value)} aria-label="Дата" />
+      <div class="hg-title">${title}</div>
+      <div class="btn-group">${[['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) => html`<button class=${'btn' + (view === k ? ' primary' : '')} onClick=${() => setView(k)}>${l}</button>`)}</div>
+      ${canEdit && html`<button class="btn primary" onClick=${() => setCreate({ station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="plus" />Добавить</button>`}
+      ${app.perms['settings.manage'] && html`<a class="btn" href="#/settings/stations" title="Посты и часы работы"><${Icon} n="gear" /></a>`}
     </div>
 
-    ${view === 'day' ? html`
-    <div class="cal" style=${`grid-template-columns:56px repeat(${stations.length}, minmax(170px,1fr))`}>
-      <div class="cal-col-head" style="left:0;position:sticky;z-index:4"></div>
-      ${stations.map((s) => {
-        const busy = (data?.rows || []).filter((a) => a.station_id === s.id).reduce((t, a) => t + a.duration_min, 0);
-        return html`<div class="cal-col-head"><i style=${'background:' + (s.color || '#1BF372')}></i>${s.name}<span class="faint" style="margin-left:auto">${Math.round(busy / 6) / 10}/${(end - start) / 60} ч</span></div>`;
-      })}
-      <div class="cal-time">${slots.map((m) => html`<div style=${`height:${SLOT_PX}px;line-height:${SLOT_PX}px`}>${m % 60 === 0 ? hhmm(m) : ''}</div>`)}</div>
-      ${stations.map((s) => html`<div class="cal-col">
-        ${slots.map((m) => {
-          const key = s.id + ':' + m;
-          return html`<div class=${'cal-slot' + ((m + step) % 60 === 0 ? ' hour' : '') + (overSlot === key ? ' drop' : '')} style=${`height:${SLOT_PX}px`}
-            onClick=${() => newAt(s.id, m)}
-            onDragOver=${(e) => { e.preventDefault(); setOverSlot(key); }} onDragLeave=${() => setOverSlot(null)}
-            onDrop=${(e) => { e.preventDefault(); setOverSlot(null); if (dragId) move(dragId, s.id, m); }} title=${hhmm(m)}></div>`;
-        })}
-        ${date === todayStr() && nowMin > start && nowMin < end ? html`<div class="cal-now" style=${`top:${((nowMin - start) / step) * SLOT_PX}px`}></div>` : ''}
-        ${(data?.rows || []).filter((a) => a.station_id === s.id).map((a) => {
-          const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX;
-          const h = Math.max(SLOT_PX - 2, (a.duration_min / step) * SLOT_PX - 2);
-          return html`<div class=${'cal-ev' + (a.status === 'request' ? ' request' : '')} draggable="true"
-              onDragStart=${() => setDragId(a.id)} onDragEnd=${() => setDragId(null)} onClick=${() => setEdit(a)}
-              style=${`top:${top}px;height:${h}px;border-left-color:${a.status_color || s.color || 'var(--accent)'};${a.status === 'arrived' ? 'background:#1d2a22' : ''}${a.status === 'no_show' ? 'opacity:.5' : ''}`}>
-            <b>${a.start_at.slice(11)} ${a.customer_name || a.contact_name || a.title || ''}</b>
-            <div>${carName(a)} ${a.plate || ''}</div>
-            ${h > 50 ? html`<div class="muted">${a.order_number || ''} ${a.status_name ? '· ' + a.status_name : ''}</div>` : ''}
-            ${h > 70 && a.title ? html`<div class="muted">${a.title}</div>` : ''}
-          </div>`;
-        })}
-      </div>`)}
-    </div>` : html`
-    <div class="week">${[0, 1, 2, 3, 4, 5, 6].map((i) => {
-      const day = addDays(range[0], i);
-      const evs = (data?.rows || []).filter((a) => a.start_at.startsWith(day));
-      return html`<div class=${'day' + (day === todayStr() ? ' today' : '')}>
-        <h4><a href="#" onClick=${(e) => { e.preventDefault(); setDate(day); setView('day'); }}>${DAYS[new Date(day + 'T12:00').getDay()]} ${fdate(day).slice(0, 5)}</a> <span class="faint">${evs.length || ''}</span></h4>
-        ${evs.map((a) => html`<div class="ev" style=${'border-left-color:' + (stations.find((s) => s.id === a.station_id)?.color || 'var(--accent)')} onClick=${() => setEdit(a)}>
-          <b>${a.start_at.slice(11)}</b> ${a.customer_name || a.contact_name || a.title}<div class="muted">${carName(a)} ${a.plate || ''}</div></div>`)}
-      </div>`;
-    })}</div>`}
+    <div class=${'hg' + (left ? '' : ' no-left')}>
+      ${left && html`<aside class=${'hg-left' + (drag?.type === 'appt' ? ' droppable' : '')} onDragOver=${(e) => drag?.type === 'appt' && e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>
+        <div class="hg-left-head"><b>Неназначенные элементы</b><span class="chip">${pending.length}</span></div>
+        <input type="search" placeholder="Поиск: номер, клиент, авто…" value=${q} onInput=${(e) => setQ(e.target.value)} />
+        ${drag?.type === 'appt' && html`<div class="hg-hint">Отпустите здесь, чтобы убрать из графика</div>`}
+        <div class="hg-list">${pending.map((x) => x._t === 'order' ? html`
+          <div class="hg-card" draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'order', id: x.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>
+            <div class="row"><${Icon} n="wrench" /><a href=${'#/orders/' + x.id} class="grow"><b>${x.number}</b></a>
+              <span class="small">${h1(Math.max(0, (x.hours || 0) - x.planned_min / 60) || x.hours || 0)}</span>${x.jobs?.length ? html`<span class="chip">${x.jobs.length}</span>` : ''}
+              ${canEdit && html`<button class="icon-btn sm" title="Поставить в график" onClick=${() => setCreate({ order: x, station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="cal" /></button>`}</div>
+            ${x.customer_name && html`<div class="hg-line"><${Icon} n="user" />${x.customer_name}</div>`}
+            ${(x.make || x.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(x)} ${x.plate ? html`<span class="plate">${x.plate}</span>` : ''}</div>`}
+            ${x.status_name && html`<div class="hg-status"><i style=${'background:' + (x.status_color || 'var(--muted)')}></i>${x.status_name}${x.planned_min ? html` · <span class="muted">в графике ${h1(x.planned_min / 60)}</span>` : ''}</div>`}
+          </div>` : html`
+          <div class="hg-card req" draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: x.id })} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${() => setEdit(x)}>
+            <div class="row"><${Icon} n="cal" /><b class="grow">${x.order_number || x.title || 'Заявка'}</b><span class="small">${h1((x.duration_min || 60) / 60)}</span></div>
+            ${x.note && html`<div class="hg-note">${x.note}</div>`}
+            ${(x.customer_name || x.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${x.customer_name || x.contact_name} <span class="muted">${x.customer_phone || x.contact_phone || ''}</span></div>`}
+            ${(x.make || x.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(x)} ${x.plate || ''}</div>`}
+            ${x.preferred && html`<div class="hg-line pos">Желаемо: ${x.preferred}</div>`}
+            <div class="faint small">${x.source === 'app' ? 'из приложения' : x.source === 'site' ? 'с сайта' : 'заявка'} · ${fdate(x.created_at)}</div>
+          </div>`)}
+          ${!pending.length ? html`<div class="empty small">${"Всё распределено"}</div>` : null}</div>
+      </aside>`}
 
-    ${edit && html`<${ApptModal} a=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); if (linkOrder) go('/orders/' + linkOrder); }} />`}`;
+      <div class="hg-main">
+      ${view === 'day' ? html`
+      <div class="cal" style=${`grid-template-columns:52px repeat(${stations.length}, minmax(230px,1fr))`}>
+        <div class="cal-col-head corner"></div>
+        ${stations.map((s, i) => {
+          const busy = rows.filter((a) => a.station_id === s.id && a.status !== 'block').reduce((t, a) => t + a.duration_min, 0) / 60;
+          const cap = Number(s.max_hours_day) || (end - start) / 60;
+          const pct = Math.min(100, (busy / cap) * 100);
+          const col = pct >= 100 ? 'var(--danger)' : pct >= 70 ? 'var(--warn)' : 'var(--accent)';
+          return html`<div class="cal-col-head hg-head"><div class="row"><span class="hg-num" style=${'background:' + (s.color || 'var(--info)')}>${i + 1}</span><b class="grow hg-name" title=${s.name}>${s.name}</b>
+            <span class="hg-load" style=${`color:${col};border-color:${col}`}>${String(Math.round(busy * 10) / 10).replace('.', ',')}/${String(cap).replace('.', ',')} ч</span></div>
+            <div class="hg-bar-load"><i style=${`width:${pct}%;background:${col}`}></i></div></div>`;
+        })}
+        <div class="cal-time">${slots.map((m) => html`<div style=${`height:${SLOT_PX}px;line-height:${SLOT_PX}px`}>${m % 60 === 0 || step >= 60 ? hhmm(m) : hhmm(m)}</div>`)}</div>
+        ${stations.map((s) => html`<div class="cal-col">
+          ${slots.map((m) => {
+            const key = s.id + ':' + m;
+            return html`<div class=${'cal-slot' + ((m + step) % 60 === 0 ? ' hour' : '') + (over === key ? ' drop' : '')} style=${`height:${SLOT_PX}px`}
+              onClick=${() => newAt(s.id, m)}
+              onDragOver=${(e) => { if (!drag) return; e.preventDefault(); if (over !== key) setOver(key); }}
+              onDrop=${(e) => { e.preventDefault(); dropOn(s.id, m); }} title=${hhmm(m)}></div>`;
+          })}
+          ${date === todayStr() && nowMin > start && nowMin < end ? html`<div class="cal-now" style=${`top:${((nowMin - start) / step) * SLOT_PX}px`}></div>` : ''}
+          ${rows.filter((a) => a.station_id === s.id).map((a) => {
+            const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX;
+            const h = Math.max(SLOT_PX - 3, (a.duration_min / step) * SLOT_PX - 3);
+            if (a.status === 'block') return html`<div class="cal-ev block" style=${`top:${top}px;height:${h}px`} onClick=${() => setEdit(a)}>
+              <b><${Icon} n="x" /> ${a.title || 'Занято'}</b>${canEdit && html`<i class="hg-resize" onMouseDown=${(e) => resize(e, a)}></i>`}</div>`;
+            return html`<div class=${'cal-ev' + (a.status === 'request' ? ' request' : '') + (a.status === 'arrived' ? ' arrived' : '') + (a.status === 'no_show' ? ' noshow' : '') + (drag?.id === a.id && drag.type === 'appt' ? ' dragging' : '')}
+                draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${() => setEdit(a)}
+                style=${`top:${top}px;height:${h}px;border-left-color:${a.status_color || s.color || 'var(--accent)'}`}>
+              <div class="row"><${Icon} n=${a.order_id ? 'wrench' : 'cal'} /><b class="grow">${a.order_number || a.title || 'Запись'}</b>
+                ${a.part_total > 1 ? html`<span class="chip">${a.part_no}/${a.part_total}</span>` : ''}</div>
+              ${(a.customer_name || a.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${a.customer_name || a.contact_name}</div>`}
+              ${(a.make || a.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(a)} ${a.plate || ''}</div>`}
+              ${h > SLOT_PX * 1.5 ? html`<div class="hg-jobs">${(a.jobs || []).map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}
+                ${!a.jobs?.length && (a.order_complaint || a.note) ? html`<div class="muted">${a.order_complaint || a.note}</div>` : ''}</div>` : ''}
+              ${canEdit && html`<i class="hg-resize" title="Потяните, чтобы изменить длительность" onMouseDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}
+            </div>`;
+          })}
+        </div>`)}
+      </div>` : view === 'week' ? html`
+      <div class="week">${[0, 1, 2, 3, 4, 5, 6].map((i) => {
+        const day = addDays(range[0], i);
+        const evs = rows.filter((a) => a.start_at.startsWith(day));
+        const busy = evs.filter((a) => a.status !== 'block').reduce((t, a) => t + a.duration_min, 0) / 60;
+        return html`<div class=${'day' + (day === todayStr() ? ' today' : '') + (over === 'w' + day ? ' drop' : '')}
+            onDragOver=${(e) => { if (!drag) return; e.preventDefault(); setOver('w' + day); }} onDrop=${(e) => { e.preventDefault(); const s0 = stations[0]; if (s0) dropOn(drag?.type === 'appt' ? rows.find((x) => x.id === drag.id)?.station_id || s0.id : s0.id, drag?.type === 'appt' ? toMin(rows.find((x) => x.id === drag.id)?.start_at.slice(11) || hhmm(start)) : start, day); }}>
+          <h4><a href="#" onClick=${(e) => { e.preventDefault(); setDate(day); setView('day'); }}>${DAYS[new Date(day + 'T12:00').getDay()]} ${fdate(day).slice(0, 5)}</a> <span class="faint">${busy ? h1(busy) : ''}</span></h4>
+          ${evs.map((a) => html`<div class=${'ev' + (a.status === 'block' ? ' block' : '')} draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: a.id })} onDragEnd=${() => { setDrag(null); setOver(null); }}
+              style=${'border-left-color:' + (a.status_color || stations.find((s) => s.id === a.station_id)?.color || 'var(--accent)')} onClick=${() => setEdit(a)}>
+            <b>${a.start_at.slice(11)}</b> ${a.order_number || a.title || ''}<div class="muted">${a.customer_name || a.contact_name || ''}</div><div class="muted">${carName(a)} ${a.plate || ''}</div></div>`)}
+        </div>`;
+      })}</div>` : html`
+      <div class="month">${DAYS.slice(1).concat(DAYS[0]).map((n) => html`<div class="mh">${n}</div>`)}
+        ${monthDays(date).map((day) => {
+          const evs = rows.filter((a) => a.start_at.startsWith(day) && a.status !== 'block');
+          const busy = evs.reduce((t, a) => t + a.duration_min, 0) / 60;
+          const cap = stations.reduce((t, s) => t + (Number(s.max_hours_day) || (end - start) / 60), 0) || 1;
+          return html`<div class=${'md' + (day.slice(0, 7) !== date.slice(0, 7) ? ' other' : '') + (day === todayStr() ? ' today' : '')} onClick=${() => { setDate(day); setView('day'); }}>
+            <b>${Number(day.slice(8))}</b>${evs.length ? html`<div class="small">${evs.length} зак. · ${h1(busy)}</div><div class="hg-bar-load"><i style=${`width:${Math.min(100, (busy / cap) * 100)}%`}></i></div>` : ''}</div>`;
+        })}</div>`}
+      </div>
+    </div>
+
+    ${edit && html`<${ApptModal} a=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}
+    ${create && html`<${NewOrderModal} init=${create} onClose=${() => setCreate(null)} onSaved=${() => { setCreate(null); reload(); }} />`}`;
 }
 
-function weekStart(s) {
-  const d = new Date(s + 'T12:00:00');
-  const dow = (d.getDay() + 6) % 7;
-  return addDays(s, -dow);
+function weekStart(s) { const d = new Date(s + 'T12:00:00'); return addDays(s, -((d.getDay() + 6) % 7)); }
+function addMonths(s, n) { const d = new Date(s + 'T12:00:00'); d.setDate(1); d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; }
+function monthDays(s) { const first = s.slice(0, 8) + '01'; const st = weekStart(first); return Array.from({ length: 42 }, (_, i) => addDays(st, i)); }
+function monthRange(s) { const days = monthDays(s); return [days[0], days[41]]; }
+
+// ── Новый заказ сразу в график (или блокировка: отпуск, перерыв) ─────────────
+function NewOrderModal({ init, onClose, onSaved }) {
+  const app = useApp();
+  const [mode, setMode] = useState(init.order ? 'existing' : 'order');
+  const [cc, setCc] = useState({ customer: null, car: null });
+  const [f, setF] = useState({ station_id: init.station_id || '', date: init.date, time: init.time || app.settings.hours_start || '09:00', duration_min: init.order ? '' : 60, complaint: '', mechanic_id: '', title: '', open: store('pc_cal_open', '0') === '1' });
+  const [busy, setBusy] = useState(false);
+  const set = (p) => setF((v) => ({ ...v, ...p }));
+  const slot = { station_id: f.station_id ? Number(f.station_id) : null, start_at: f.date && f.time ? `${f.date} ${f.time}` : null, duration_min: f.duration_min ? Number(f.duration_min) : undefined, mechanic_id: f.mechanic_id || null };
+  const save = async () => {
+    setBusy(true);
+    try {
+      if (mode === 'block') {
+        if (!f.title.trim()) return toast('Впишите причину: отпуск, перерыв…', 'error');
+        await act(() => api('appointments', { body: { ...slot, duration_min: Number(f.duration_min) || 60, title: f.title, status: 'block' } }), 'Время заблокировано');
+      } else if (mode === 'existing') {
+        await act(() => api('appointments', { body: { ...slot, order_id: init.order.id } }), 'Заказ в графике');
+      } else {
+        if (!cc.customer && !cc.newCustomer?.name && !cc.newCustomer?.phone && !cc.car) return toast('Выберите клиента или авто', 'error');
+        const r = await act(() => api('orders', { body: { kind: 'order', customer_id: cc.customer?.id, car_id: cc.car?.id, new_customer: cc.customer ? null : cc.newCustomer,
+          complaint: f.complaint, mechanic_id: f.mechanic_id || null, source: 'crm', appointment: { ...slot, duration_min: Number(f.duration_min) || 60, title: f.complaint.slice(0, 120) || undefined } } }), 'Заказ создан и поставлен в график');
+        keep('pc_cal_open', f.open ? '1' : '0');
+        if (f.open) { onClose(); go('/orders/' + r.id); return; }
+      }
+      onSaved();
+    } catch {} finally { setBusy(false); }
+  };
+  return html`<${Modal} xl title=${mode === 'block' ? 'Блокировка времени' : mode === 'existing' ? 'Заказ ' + init.order.number + ' в график' : 'Новый заказ в терминарз'} onClose=${onClose}
+    foot=${html`${mode === 'order' && html`<label class="check" style="margin-right:auto"><input type="checkbox" checked=${f.open} onChange=${(e) => set({ open: e.target.checked })} />Открыть заказ после создания</label>`}
+      <button class="btn" onClick=${onClose}>Отмена</button><button class="btn primary" disabled=${busy} onClick=${save}>${mode === 'block' ? 'Заблокировать' : mode === 'existing' ? 'Поставить в график' : 'Создать заказ'}</button>`}>
+    ${!init.order && html`<div class="seg sel">${[['order', 'Заказ'], ['block', 'Блокировка (отпуск, перерыв)']].map(([k, l]) => html`<button type="button" class=${mode === k ? 'on' : ''} onClick=${() => setMode(k)}>${l}</button>`)}</div>`}
+    <div class="grid g4">
+      <label class="f">Пост<select value=${f.station_id} onChange=${(e) => set({ station_id: e.target.value })}><option value="">Не назначен</option>${app.stations.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+      <label class="f">Дата<input type="date" value=${f.date} onInput=${(e) => set({ date: e.target.value })} /></label>
+      <label class="f">Время<input type="time" step="900" value=${f.time} onInput=${(e) => set({ time: e.target.value })} /></label>
+      <label class="f">Длительность<select value=${f.duration_min} onChange=${(e) => set({ duration_min: e.target.value })}>
+        ${mode === 'existing' ? html`<option value="">По часам работ (${h1(Math.max(0.5, (init.order.hours || 1) - (init.order.planned_min || 0) / 60))})</option>` : ''}
+        ${[30, 60, 90, 120, 180, 240, 300, 360, 480, 540].map((m) => html`<option value=${m}>${h1(m / 60)}</option>`)}</select></label>
+    </div>
+    ${mode === 'order' && html`<div class="grid g2 mw-top">
+        <section class="mw-panel"><header>Автомобиль</header><${CustomerCarPicker} only="car" value=${cc} onChange=${setCc} /></section>
+        <section class="mw-panel"><header>Клиент</header><${CustomerCarPicker} only="customer" value=${cc} onChange=${setCc} /></section></div>
+      <div class="grid g2"><label class="f">Что делаем (видит клиент)<textarea rows="2" value=${f.complaint} placeholder="Замена масла, диагностика, геометрия…" onInput=${(e) => set({ complaint: e.target.value })}></textarea></label>
+        <label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label></div>
+      <div class="muted small">Работы и товары добавите в заказе. Длительность в графике потом можно растянуть мышкой.</div>`}
+    ${mode === 'block' && html`<label class="f">Причина<input value=${f.title} placeholder="Андрей — отпуск, обед, пост на ремонте…" onInput=${(e) => set({ title: e.target.value })} /></label>`}
+    ${mode === 'existing' && html`<div class="card" style="background:var(--surface2)"><b>${init.order.number}</b> · ${init.order.customer_name || ''} · ${carName(init.order)} ${init.order.plate || ''}
+      <div class="hg-jobs" style="margin-top:6px">${(init.order.jobs || []).map((j) => html`<div><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}</div></div>`}
+  </${Modal}>`;
 }
 
+// ── Карточка записи в графике ───────────────────────────────────────────────
 function ApptModal({ a, onClose, onSaved }) {
   const app = useApp();
+  const canEdit = app.perms['calendar.edit'];
   const [f, set] = useState({
     id: a.id, station_id: a.station_id ?? '', date: (a.start_at || '').slice(0, 10), time: (a.start_at || '').slice(11, 16), duration_min: a.duration_min || 60,
     title: a.title || '', note: a.note || '', status: a.status || 'planned', mechanic_id: a.mechanic_id || '',
-    customer_id: a.customer_id || null, car_id: a.car_id || null, order_id: a.order_id || null,
-    contact_name: a.contact_name || '', contact_phone: a.contact_phone || '',
+    car_id: a.car_id || null, contact_name: a.contact_name || '', contact_phone: a.contact_phone || '',
   });
-  const [cust, setCust] = useState(a._customer || (a.customer_id ? { id: a.customer_id, name: a.customer_name, phone: a.customer_phone } : null));
+  const [cust, setCust] = useState(a.customer_id ? { id: a.customer_id, name: a.customer_name, phone: a.customer_phone } : null);
   const { data: cdata } = useData(cust?.id ? 'customers/' + cust.id : null, [cust?.id]);
-  const save = async () => {
-    const body = {
-      station_id: f.station_id ? Number(f.station_id) : null, start_at: f.date && f.time ? `${f.date} ${f.time}` : null, duration_min: Number(f.duration_min) || 60,
+  const body = () => {
+    const b = { station_id: f.station_id ? Number(f.station_id) : null, start_at: f.date && f.time ? `${f.date} ${f.time}` : null, duration_min: Number(f.duration_min) || 60,
       title: f.title, note: f.note, status: f.status, mechanic_id: f.mechanic_id || null, customer_id: cust?.id || null, car_id: f.car_id || null,
-      order_id: f.order_id || null, contact_name: f.contact_name || null, contact_phone: f.contact_phone || null,
-    };
-    if (body.station_id && body.start_at && body.status === 'request') body.status = 'planned';
-    await act(() => (f.id ? api('appointments/' + f.id, { method: 'PUT', body }) : api('appointments', { body })), 'Сохранено');
-    onSaved();
+      contact_name: f.contact_name || null, contact_phone: f.contact_phone || null };
+    if (b.station_id && b.start_at && b.status === 'request') b.status = 'planned';
+    return b;
   };
-  const toOrder = () => {
-    const p = new URLSearchParams({ appointment_id: f.id, note: [f.title, f.note].filter(Boolean).join('. ') });
-    if (cust?.id) p.set('customer_id', cust.id); else { p.set('name', f.contact_name); p.set('phone', f.contact_phone); }
-    if (f.car_id) p.set('car_id', f.car_id);
-    go('/orders/new?' + p.toString());
+  const save = async () => { await act(() => api('appointments/' + f.id, { method: 'PUT', body: body() }), 'Сохранено'); onSaved(); };
+  // заявка → полноценный заказ, запись остаётся в графике и привязывается к заказу
+  const toOrder = async () => {
+    await act(() => api('appointments/' + f.id, { method: 'PUT', body: body() }));
+    const r = await act(() => api('orders', { body: { kind: 'order', appointment_id: f.id, customer_id: cust?.id || null, car_id: f.car_id || null,
+      new_customer: cust ? null : (f.contact_name || f.contact_phone ? { name: f.contact_name, phone: f.contact_phone } : null),
+      complaint: [f.title, f.note].filter(Boolean).join('. '), mechanic_id: f.mechanic_id || null } }), 'Заказ создан');
+    onClose(); go('/orders/' + r.id);
   };
-  return html`<${Modal} title=${f.id ? 'Запись' : 'Новая запись'} onClose=${onClose} wide foot=${html`
-      ${f.id && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('appointments/' + f.id, { method: 'DELETE' }), 'Отменено'); onSaved(); }}>Отменить запись</${ConfirmButton}>`}
+  const isBlock = a.status === 'block';
+  return html`<${Modal} wide title=${isBlock ? 'Блокировка' : a.order_number ? 'Заказ ' + a.order_number : 'Заявка / запись'} onClose=${onClose} foot=${html`
+      ${canEdit && html`<${ConfirmButton} cls="btn danger" label=${a.order_id ? 'Убрать из графика?' : 'Точно?'} onConfirm=${async () => { await act(() => api('appointments/' + f.id, { method: 'DELETE' }), a.order_id ? 'Убрано из графика — заказ в «Неназначенных»' : 'Удалено'); onSaved(); }}>${a.order_id ? 'Убрать из графика' : isBlock ? 'Удалить блокировку' : 'Отменить запись'}</${ConfirmButton}>`}
       <span style="flex:1"></span>
-      ${f.order_id ? html`<a class="btn" href=${'#/orders/' + f.order_id} onClick=${onClose}>Открыть заказ</a>` : f.id ? html`<button class="btn" onClick=${toOrder}>Создать заказ</button>` : ''}
-      <button class="btn primary" onClick=${save}>Сохранить</button>`}>
+      ${a.order_id ? html`<a class="btn" href=${'#/orders/' + a.order_id} onClick=${onClose}>Открыть заказ</a>` : !isBlock && canEdit ? html`<button class="btn" onClick=${toOrder}>Создать заказ</button>` : ''}
+      ${canEdit && html`<button class="btn primary" onClick=${save}>Сохранить</button>`}`}>
     <div class="grid g4">
-      <label class="f">Пост<select value=${f.station_id} onChange=${(e) => set({ ...f, station_id: e.target.value })}><option value="">Не распределено</option>${app.stations.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+      <label class="f">Пост<select value=${f.station_id} onChange=${(e) => set({ ...f, station_id: e.target.value })}><option value="">Не назначен</option>${app.stations.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
       <label class="f">Дата<input type="date" value=${f.date} onInput=${(e) => set({ ...f, date: e.target.value })} /></label>
       <label class="f">Время<input type="time" step="900" value=${f.time} onInput=${(e) => set({ ...f, time: e.target.value })} /></label>
-      <label class="f">Длительность<select value=${f.duration_min} onChange=${(e) => set({ ...f, duration_min: Number(e.target.value) })}>${[30, 60, 90, 120, 180, 240, 300, 360, 480].map((m) => html`<option value=${m}>${m < 60 ? m + ' мин' : m / 60 + ' ч'}</option>`)}</select></label>
+      <label class="f">Длительность<select value=${f.duration_min} onChange=${(e) => set({ ...f, duration_min: Number(e.target.value) })}>${[...new Set([30, 60, 90, 120, 180, 240, 300, 360, 480, 540, Number(f.duration_min)])].sort((x, y) => x - y).map((m) => html`<option value=${m}>${h1(m / 60)}</option>`)}</select></label>
     </div>
+    ${isBlock ? html`<label class="f">Причина<input value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} /></label>` : a.order_id ? html`
+      <div class="card" style="background:var(--surface2)"><div class="row"><b class="grow">${a.order_number}</b>${a.status_name && html`<span class="badge" style=${`border-color:${a.status_color};color:${a.status_color}`}>${a.status_name}</span>`}</div>
+        <div class="muted">${a.customer_name || ''} ${a.customer_phone || ''} · ${carName(a)} ${a.plate || ''}</div>
+        ${a.order_complaint && html`<div style="margin-top:6px">${a.order_complaint}</div>`}
+        ${a.jobs?.length ? html`<div class="hg-jobs" style="margin-top:6px">${a.jobs.map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}</div>` : ''}</div>
+      <div class="grid g2"><label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+        <label class="f">Статус записи<select value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${['planned', 'arrived', 'no_show'].map((k) => html`<option value=${k}>${STATUS[k]}</option>`)}</select></label></div>` : html`
     <div class="grid g2">
       <div class="stack"><h3>Клиент</h3>
         ${cust ? html`<div class="row"><b class="grow">${cust.name || ''} <span class="muted">${cust.phone || ''}</span></b><button class="btn sm" onClick=${() => setCust(null)}>Сменить</button></div>`
@@ -163,11 +306,12 @@ function ApptModal({ a, onClose, onSaved }) {
         <label class="f">Заметка<textarea rows="2" value=${f.note} onInput=${(e) => set({ ...f, note: e.target.value })}></textarea></label>
         <div class="grid g2">
           <label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
-          <label class="f">Статус<select value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${Object.entries(STATUS).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>
+          <label class="f">Статус<select value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${['request', 'planned', 'arrived', 'no_show'].map((k) => html`<option value=${k}>${STATUS[k]}</option>`)}</select></label>
         </div>
       </div>
     </div>
     ${a.preferred ? html`<div class="pos small">Клиент просил: ${a.preferred}</div>` : ''}
     ${a.source === 'app' ? html`<div class="muted small">Заявка из приложения · ${fdt(a.created_at)}</div>` : ''}
+    <div class="muted small">«Создать заказ» превратит заявку в заказ — запись останется в графике и будет связана с заказом.</div>`}
   </${Modal}>`;
 }

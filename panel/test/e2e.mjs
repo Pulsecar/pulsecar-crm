@@ -246,6 +246,24 @@ try {
   assert.ok(q1.id);
   console.log('✓ клиент (частное лицо / фирма, имя и фамилия, срок оплаты, авто по умолчанию) и авто (km/mi) как в Motowarsztat');
 
+  // 9f. терминарз как в Motowarsztat: неназначенные заказы → на пост, длительность из часов работ; заказ сразу в график
+  const hg0 = ok(await req('/crm-api/appointments?from=2026-10-05&to=2026-10-05'), 'hg');
+  const un = hg0.orders.find((o) => o.jobs.length);
+  assert.ok(un, 'есть неназначенный заказ с работами');
+  const ap = ok(await req('/crm-api/appointments', { body: { order_id: un.id, station_id: 2, start_at: '2026-10-05 09:00' } }), 'drop order');
+  const hg1 = ok(await req('/crm-api/appointments?from=2026-10-05&to=2026-10-05'), 'hg1');
+  const ev = hg1.rows.find((a) => a.id === ap.id);
+  assert.equal(ev.order_id, un.id); assert.ok(ev.duration_min >= 30); assert.ok(ev.jobs.length && ev.order_number);
+  assert.ok(!hg1.orders.some((o) => o.id === un.id), 'заказ ушёл из неназначенных');
+  ok(await req('/crm-api/appointments/' + ap.id, { method: 'PUT', body: { duration_min: 150 } }), 'resize');
+  const no = ok(await req('/crm-api/orders', { body: { kind: 'order', customer_id: nc.id, complaint: 'Geometria', appointment: { station_id: 3, start_at: '2026-10-05 10:00', duration_min: 60 } } }), 'order into schedule');
+  const hg2 = ok(await req('/crm-api/appointments?from=2026-10-05&to=2026-10-05'), 'hg2');
+  assert.ok(hg2.rows.some((a) => a.order_id === no.id && a.station_id === 3));
+  assert.equal((await req('/crm-api/orders', { body: { kind: 'order', customer_id: nc.id, appointment: { station_id: 3, start_at: '2026-10-05 10:30', duration_min: 60 } } })).status, 409);
+  ok(await req('/crm-api/appointments/' + ap.id, { method: 'DELETE' }), 'unschedule');
+  assert.ok(ok(await req('/crm-api/appointments?from=2026-10-05&to=2026-10-05'), 'hg3').orders.some((o) => o.id === un.id));
+  console.log('✓ терминарз: заказ из «Неназначенных» на пост (часы из работ), растягивание, заказ сразу в график, пересечение отклонено, снятие с графика');
+
   // 9e. меню профиля: мой аккаунт, напоминания
   ok(await req('/crm-api/me', { method: 'PUT', body: { name: 'Администратор', phone: '+48600000001', email: 'admin@pulsecar.pl' } }), 'me upd');
   assert.equal(ok(await req('/crm-api/me'), 'me').user.email, 'admin@pulsecar.pl');
