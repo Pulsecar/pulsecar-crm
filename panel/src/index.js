@@ -66,7 +66,9 @@ app.get('/vendor/preact-htm.js', (_req, res) => res.sendFile(join(root, 'node_mo
 app.get('/vendor/html5-qrcode.min.js', (_req, res) => res.sendFile(join(root, 'node_modules/html5-qrcode/html5-qrcode.min.js')));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get(/^\/admin(\/.*)?$/, (_req, res) => res.redirect('/'));
-app.use(express.static(join(root, 'public'), { index: 'index.html', maxAge: '1h' }));
+// код панели (js/css/переводы) — всегда проверять свежесть (ETag), чтобы после обновления сразу была новая версия
+app.use(express.static(join(root, 'public'), { index: 'index.html', maxAge: '1h',
+  setHeaders: (res, path) => { if (/\.(js|mjs|css|json|html)$/.test(path) && !/[\\/]vendor[\\/]/.test(path)) res.setHeader('Cache-Control', 'no-cache'); } }));
 // SPA: все остальные пути — index.html
 app.get(/^\/(?!api|crm-api|vendor|ical|hooks|k\/|rezerwacja).*/, (_req, res) => res.sendFile(join(root, 'public/index.html')));
 
