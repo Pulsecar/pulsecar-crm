@@ -1752,6 +1752,7 @@ crm.get('/sms', (req, res) => {
   const p = [];
   if (q) { cond.push('(l.phone LIKE ? OR l.text LIKE ? OR c.name LIKE ?)'); p.push(like(q.replace(/[^\d+]/g, '') || q), like(q), like(q)); }
   if (req.query.status) { cond.push('l.status = ?'); p.push(String(req.query.status)); }
+  if (req.query.order) { cond.push('(l.order_id = ? OR (l.customer_id = ? AND l.order_id IS NULL))'); p.push(Number(req.query.order), Number(req.query.customer) || -1); }
   const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
   const total = one(`SELECT COUNT(*) n FROM sms_log l LEFT JOIN customers c ON c.id = l.customer_id ${where}`, ...p).n;
   const rows = all(`SELECT l.*, c.name customer_name, o.number order_number FROM sms_log l LEFT JOIN customers c ON c.id = l.customer_id
@@ -1922,7 +1923,8 @@ crm.post('/sales-docs/:id/correct', async (req, res) => {
     const net = round2(gross / (1 + l.vat / 100));
     return { ...l, qty, gross, net, vat_amt: round2(gross - net), unit_net: qty ? round2(net / qty) : 0 };
   });
-  const d = DOC.createSaleDoc({ kind: 'correction', orderId: orig.order_id, buyer: JSON.parse(orig.buyer || '{}'), lines, corrects_id: orig.id, reason: String(b.reason).slice(0, 300), payment_method: orig.payment_method, paid: 0, notes: b.notes }, s.name);
+  const nb = b.buyer && String(b.buyer.name || '').trim() ? { ...JSON.parse(orig.buyer || '{}'), ...b.buyer } : JSON.parse(orig.buyer || '{}');
+  const d = DOC.createSaleDoc({ kind: 'correction', orderId: orig.order_id, buyer: nb, lines, corrects_id: orig.id, reason: String(b.reason).slice(0, 300), payment_method: orig.payment_method, paid: 0, notes: b.notes }, s.name);
   if (orig.order_id) log('order', orig.order_id, 'invoice', `${d.number} (korekta ${orig.number})`, s.name);
   let ks = null, warning = orig.ksef ? 'Исходная фактура в Fakturownia: корректу нужно также провести в Fakturownia.' : null;
   if (orig.ksef_status && KSEF.ksefEnabled() && (cfg('ksef')?.autoSend ?? true)) {

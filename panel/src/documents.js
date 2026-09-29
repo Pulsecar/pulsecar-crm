@@ -353,7 +353,7 @@ export function createSaleDoc({ kind, orderId, buyer, issue_date, sale_date, pay
     ext_id: ext?.id ? String(ext.id) : null, ext_url: ext?.url || null, ksef: ext ? 1 : 0, created_by: staffName || null,
   });
   // оплаты заказа → разбивка на фактуре (наличные / карта / BLIK / перевод), в пределах суммы документа
-  if (o && kind !== 'proforma') {
+  if (o && kind === 'vat') {
     const by = all(`SELECT method, ROUND(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 2) amount FROM payments WHERE order_id = ? AND method <> 'points' AND transfer_id IS NULL GROUP BY method HAVING amount > 0 ORDER BY amount DESC`, o.id);
     let left = paidAmt; const split = [];
     for (const p of by) { const a = round2(Math.min(p.amount, left)); if (a > 0) { split.push({ method: p.method, amount: a }); left = round2(left - a); } }

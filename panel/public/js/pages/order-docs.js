@@ -1,5 +1,6 @@
 // Документы заказа: печать (протоколы, спецификация, карта механика, kosztorys), фактуры VAT / Pro forma / корректы,
 // приём авто (схема повреждений, фото и файлы, подписи клиента)
+import { CorrectionModal } from './sales.js';
 import { html, useState, useRef, api, act, go, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast, METHOD } from '../lib.js';
 
 const PRINTS = [['intake', 'Протокол приёма', 'Protokół przyjęcia'], ['estimate', 'Kosztorys / выцена', 'Kosztorys'], ['spec', 'Спецификация заказа', 'Specyfikacja'],
@@ -43,19 +44,7 @@ export function SalesDocs({ o, reload }) {
     setForm(null); reload();
     window.open('/crm-api/print/sale/' + r.id, '_blank', 'noopener');
   };
-  const correct = async () => {
-    const r = await act(() => api(`sales-docs/${corr.id}/correct`, { body: { reason: corr.reason, lines: corr.lines.map((l) => ({ qty: Number(l.qty), unit_gross: Number(l.unit_gross) })) } }));
-    toast(`Корректа ${r.number} выставлена`); if (r.warning) toast(r.warning, 'error');
-    setCorr(null); reload();
-  };
-  const startCorr = async (d) => {
-    const doc = await fetch('/crm-api/print/sale/' + d.id); // проверка доступа
-    if (!doc.ok) return toast('Нет доступа', 'error');
-    const r = await api('sales-docs?q=' + encodeURIComponent(d.number));
-    const full = r.rows.find((x) => x.id === d.id);
-    setCorr({ id: d.id, number: d.number, reason: '', lines: (o.items || []).map((i) => ({ name: i.name, qty: i.qty, unit_gross: Math.round(i.price * (1 - (i.discount || 0) / 100) * 100) / 100 })), total: full?.total_gross });
-  };
-  const newTotal = corr ? corr.lines.reduce((s, l) => s + Number(l.qty || 0) * Number(l.unit_gross || 0), 0) : 0;
+  const startCorr = (d) => setCorr(d.id);
   return html`<div class="card">
     <h2>Документы продажи</h2>
     ${o.sales_docs?.length ? html`<table class="tbl" style="margin-bottom:10px"><tbody>${o.sales_docs.map((d) => html`<tr>
@@ -86,14 +75,7 @@ export function SalesDocs({ o, reload }) {
       <div class="muted small" style="margin-top:8px">Позиции берутся из заказа: ${o.items.length} шт. Номер — по настройке нумерации (${form.kind === 'vat' ? 'FV' : 'PRO'}).</div>
     </${Modal}>`}
 
-    ${corr && html`<${Modal} wide title=${'Корректа к ' + corr.number} onClose=${() => setCorr(null)} foot=${html`<span class="muted small" style="margin-right:auto">Было ${zl(corr.total)} → станет ${zl(newTotal)}</span><button class="btn" onClick=${() => setCorr(null)}>Отмена</button><button class="btn primary" onClick=${correct} disabled=${!corr.reason.trim()}>Выставить корректу</button>`}>
-      <table class="tbl"><thead><tr><th>Позиция</th><th class="r">Кол-во</th><th class="r">Цена брутто за ед.</th></tr></thead><tbody>
-        ${corr.lines.map((l, i) => html`<tr><td>${l.name}</td>
-          <td class="r"><input class="inline-input num qty" type="number" step="0.01" value=${l.qty} onInput=${(e) => { const L = [...corr.lines]; L[i] = { ...l, qty: e.target.value }; setCorr({ ...corr, lines: L }); }} /></td>
-          <td class="r"><input class="inline-input num price" type="number" step="0.01" value=${l.unit_gross} onInput=${(e) => { const L = [...corr.lines]; L[i] = { ...l, unit_gross: e.target.value }; setCorr({ ...corr, lines: L }); }} /></td></tr>`)}</tbody></table>
-      <div class="row" style="margin-top:10px"><button class="btn sm" onClick=${() => setCorr({ ...corr, lines: corr.lines.map((l) => ({ ...l, qty: 0 })) })}>Корректа до нуля</button></div>
-      <label class="f" style="margin-top:10px">Причина корректы (обязательно)<input value=${corr.reason} onInput=${(e) => setCorr({ ...corr, reason: e.target.value })} placeholder="np. Rabat udzielony po wystawieniu faktury / zwrot towaru" /></label>
-    </${Modal}>`}
+    ${corr && html`<${CorrectionModal} docId=${corr} onClose=${() => setCorr(null)} onDone=${() => { setCorr(null); reload(); }} />`}
   </div>`;
 }
 

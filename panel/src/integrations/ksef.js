@@ -180,6 +180,13 @@ export function buildFa3(d, S = Object.fromEntries(all('SELECT key, value FROM s
     rows = [...OL.map((l, i) => lineXml(l, i + 1, true)), ...L.map((l, i) => lineXml(l, OL.length + i + 1))].join('');
     kor = `<PrzyczynaKorekty>${x(d.reason || 'Korekta')}</PrzyczynaKorekty><TypKorekty>2</TypKorekty><DaneFaKorygowanej><DataWystFaKorygowanej>${orig.issue_date}</DataWystFaKorygowanej>`
       + `<NrFaKorygowanej>${x(orig.number)}</NrFaKorygowanej>${orig.ksef_number ? `<NrKSeF>1</NrKSeF><NrKSeFFaKorygowanej>${x(orig.ksef_number)}</NrKSeFFaKorygowanej>` : '<NrKSeFN>1</NrKSeFN>'}</DaneFaKorygowanej>`;
+    // корректа данных покупателя: в Podmiot2K — данные с исходной фактуры, в Podmiot2 — исправленные
+    const ob = JSON.parse(orig.buyer || '{}');
+    if (['name', 'nip', 'street', 'postcode', 'city'].some((k) => String(ob[k] || '').trim() !== String(b[k] || '').trim())) {
+      const oNip = digits(ob.nip);
+      kor += `<Podmiot2K><DaneIdentyfikacyjne>${oNip && validNip(oNip) ? `<NIP>${oNip}</NIP>` : '<BrakID>1</BrakID>'}<Nazwa>${x(ob.name || 'Klient detaliczny')}</Nazwa></DaneIdentyfikacyjne>`
+        + `${ob.street || ob.city ? addrXml(ob.street, [ob.postcode, ob.city].filter(Boolean).join(' ')) : ''}</Podmiot2K>`;
+    }
   } else {
     const by = sums(L);
     totals = { rates: ratesXml(by), gross: Object.values(by).reduce((s, v) => s + v.gross, 0) };

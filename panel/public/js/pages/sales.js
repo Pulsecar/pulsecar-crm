@@ -174,11 +174,46 @@ export function InvoiceForm({ kind, doc, onClose, onDone }) {
   </${Modal}>`;
 }
 
+const REASONS_K = ['Rabat udzielony po wystawieniu faktury', 'Zwrot towaru', 'Błędna cena', 'Błędna ilość', 'Błędne dane nabywcy', 'Pomyłka w pozycji'];
+/** Корректа к фактуре VAT: позиции исходной фактуры (кол-во, цена брутто) и/или данные покупателя */
+export function CorrectionModal({ docId, onClose, onDone }) {
+  const { data: d } = useData('sales-docs/' + docId, [docId]);
+  const [c, set] = useState(null);
+  useEffect(() => { if (d && !c) set({ reason: '', lines: (d.items || []).map((l) => ({ name: l.name, qty: l.qty, unit_gross: l.qty ? r2(l.gross / l.qty) : 0, q0: l.qty, p0: l.qty ? r2(l.gross / l.qty) : 0 })), buyerOn: false, buyer: { name: '', nip: '', street: '', postcode: '', city: '', ...d.buyer } }); }, [d]);
+  if (!d || !c) return html`<${Modal} title="Корректа" onClose=${onClose}><${Loading} /></${Modal}>`;
+  const newTotal = r2(c.lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_gross) || 0), 0));
+  const linesChanged = c.lines.some((l) => Number(l.qty) !== Number(l.q0) || Math.abs(Number(l.unit_gross) - l.p0) > 0.001);
+  const buyerChanged = c.buyerOn && ['name', 'nip', 'street', 'postcode', 'city'].some((k) => String(c.buyer[k] || '').trim() !== String(d.buyer?.[k] || '').trim());
+  const why = !c.reason.trim() ? 'Укажите причину корректы (можно выбрать ниже)' : !linesChanged && !buyerChanged ? 'Ничего не изменено: поменяйте количество, цену или данные покупателя' : '';
+  const setL = (i, patch) => { const L = [...c.lines]; L[i] = { ...L[i], ...patch }; set({ ...c, lines: L }); };
+  const save = async () => {
+    const r = await act(() => api(`sales-docs/${d.id}/correct`, { body: { reason: c.reason, lines: c.lines.map((l) => ({ qty: Number(l.qty), unit_gross: Number(l.unit_gross) })), buyer: buyerChanged ? c.buyer : undefined } }));
+    toast(`Корректа ${r.number} выставлена${r.ksef_number ? ' · KSeF ' + r.ksef_number : ''}`); if (r.warning) toast(r.warning, 'error');
+    onDone(r.id);
+  };
+  return html`<${Modal} wide title=${'Корректа к ' + d.number} onClose=${onClose} foot=${html`<span class="muted small" style="margin-right:auto">Было ${zl(d.total_gross)} → станет ${zl(newTotal)}${why ? html`<br /><span class="neg">${why}</span>` : ''}</span>
+      <button class="btn" onClick=${onClose}>Отмена</button><button class="btn primary" onClick=${save} disabled=${!!why} title=${why}>Выставить корректу</button>`}>
+    <label class="f">Причина корректы (обязательно)<input value=${c.reason} onInput=${(e) => set({ ...c, reason: e.target.value })} placeholder="np. Rabat udzielony po wystawieniu faktury / zwrot towaru" /></label>
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin:6px 0 12px">${REASONS_K.map((t) => html`<button class=${'btn sm' + (c.reason === t ? ' primary' : '')} onClick=${() => set({ ...c, reason: t, buyerOn: t === 'Błędne dane nabywcy' ? true : c.buyerOn })}>${t}</button>`)}</div>
+    <table class="tbl"><thead><tr><th>Позиция</th><th class="r">Было</th><th class="r">Кол-во</th><th class="r">Цена брутто за ед.</th><th class="r">Сумма</th></tr></thead><tbody>
+      ${c.lines.map((l, i) => html`<tr class=${Number(l.qty) !== Number(l.q0) || Math.abs(Number(l.unit_gross) - l.p0) > 0.001 ? 'chg' : ''}><td>${l.name}</td><td class="r sub nowrap">${l.q0} × ${zl(l.p0)}</td>
+        <td class="r"><input class="inline-input num qty" type="number" step="0.01" value=${l.qty} onInput=${(e) => setL(i, { qty: e.target.value })} /></td>
+        <td class="r"><input class="inline-input num price" type="number" step="0.01" value=${l.unit_gross} onInput=${(e) => setL(i, { unit_gross: e.target.value })} /></td>
+        <td class="r nowrap">${zl((Number(l.qty) || 0) * (Number(l.unit_gross) || 0))}</td></tr>`)}</tbody></table>
+    <div class="row" style="margin-top:10px;gap:8px"><button class="btn sm" onClick=${() => set({ ...c, lines: c.lines.map((l) => ({ ...l, qty: 0 })) })}>Корректа до нуля</button>
+      <button class="btn sm" onClick=${() => set({ ...c, lines: c.lines.map((l) => ({ ...l, qty: l.q0, unit_gross: l.p0 })) })}>Вернуть как было</button>
+      <label class="check" style="margin-left:auto"><input type="checkbox" checked=${c.buyerOn} onChange=${(e) => set({ ...c, buyerOn: e.target.checked })} />Исправить данные покупателя</label></div>
+    ${c.buyerOn && html`<div class="inv-car" style="margin-top:8px"><div class="grid g3">${[['name', 'Название / имя'], ['nip', 'NIP'], ['street', 'Улица'], ['postcode', 'Индекс'], ['city', 'Город']].map(([k, l]) => html`<label class="f">${l}<input value=${c.buyer[k] || ''} onInput=${(e) => set({ ...c, buyer: { ...c.buyer, [k]: e.target.value } })} /></label>`)}</div>
+      <div class="muted small">Было: ${[d.buyer?.name, d.buyer?.nip && 'NIP ' + d.buyer.nip, d.buyer?.street, [d.buyer?.postcode, d.buyer?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</div></div>`}
+  </${Modal}>`;
+}
+
 /** Карточка документа: просмотр, «Редактировать» (пока фактура не в KSeF), печать/PDF, отправка в KSeF */
 export function SaleDocPage({ id }) {
   const app = useApp();
   const { data: d, error, reload } = useData('sales-docs/' + id, [id]);
   const [edit, setEdit] = useState(false);
+  const [corr, setCorr] = useState(false);
   if (error) return html`<${ErrorBox} error=${error} />`;
   if (!d) return html`<${Loading} />`;
   const st = d.kind !== 'proforma' ? KS[d.ksef_status] : null;
@@ -190,13 +225,14 @@ export function SaleDocPage({ id }) {
       ${st ? html`<span class="badge" style=${`border-color:${st[1]};color:${st[1]}`}>${st[0]}</span>` : d.kind !== 'proforma' ? html`<span class="sub">${d.ext_url ? 'через Fakturownia' : 'не в KSeF'}</span>` : ''}
       <div class="actions">
         ${d.editable && html`<button class="btn" onClick=${() => setEdit(true)}><${Icon} n="edit" />Редактировать</button>`}
+        ${d.kind === 'vat' && !d.ext_id && html`<button class="btn" onClick=${() => setCorr(true)}>Корректа</button>`}
         ${d.kind === 'proforma' && !d.vat_id && !d.order_has_vat && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`sales-docs/${d.id}/to-vat`, { body: {} })); toast(`${r.number} выставлена${r.ksef_number ? ' · KSeF ' + r.ksef_number : ''}`); if (r.warning) toast(r.warning, 'error'); go('/sales/' + r.id); }}><${Icon} n="file" />Выставить фактуру VAT</button>`}
         ${(d.kind === 'vat' || d.kind === 'correction') && app.features.ksef && d.ksef_status !== 'accepted' && !d.ext_url && html`<button class="btn" onClick=${async () => { const x = await act(() => api(`sales-docs/${d.id}/ksef`, { body: {} })); toast(x.ksef_number ? 'KSeF: ' + x.ksef_number : 'Статус: ' + (x.ksef_status || '—'), x.ksef_status === 'rejected' ? 'error' : 'ok'); reload(); }}>Отправить в KSeF</button>`}
         ${d.ksef_number && html`<a class="btn" href=${'/crm-api/sales-docs/' + d.id + '/upo'}>UPO</a>`}
         <a class="btn primary" href=${d.ext_url || '/crm-api/print/sale/' + d.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать / PDF</a></div></div>
     ${d.vat_id ? html`<div class="small" style="margin:-8px 0 12px">На основании этой Pro forma выставлена <a href=${'#/sales/' + d.vat_id}>${d.vat_no}</a></div>` : ''}
     ${d.proforma_id ? html`<div class="small" style="margin:-8px 0 12px">Выставлена на основании <a href=${'#/sales/' + d.proforma_id}>${d.proforma_no}</a></div>` : ''}
-    ${!d.editable && d.kind !== 'correction' && html`<div class="muted small" style="margin:-8px 0 12px">Фактура уже в KSeF${d.ext_id ? ' / Fakturownia' : ''} — изменить её можно только корректой (в заказе: «Документы продажи» → «Корректа»).</div>`}
+    ${!d.editable && d.kind !== 'correction' && html`<div class="muted small" style="margin:-8px 0 12px">Фактура уже в KSeF${d.ext_id ? ' / Fakturownia' : ''} — изменить её можно только корректой (кнопка «Корректа» выше).</div>`}
     ${d.ksef_error && html`<div class="card" style="border-color:var(--danger);margin-bottom:12px"><b style="color:var(--danger)">KSeF:</b> ${d.ksef_error}</div>`}
     <div class="grid g3" style="margin-bottom:12px">
       <div class="card"><h3 class="small muted">Покупатель</h3><b>${b.name || '—'}</b><div>${[b.street, [b.postcode, b.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</div>${b.nip ? html`<div class="sub">NIP ${b.nip}</div>` : ''}</div>
@@ -214,5 +250,6 @@ export function SaleDocPage({ id }) {
       <tfoot><tr><td colspan="5">Итого</td><td class="r nowrap">${zl(d.total_net)}</td><td class="c sub">${zl(d.total_vat)}</td><td class="r nowrap"><b>${zl(d.total_gross)}</b></td></tr></tfoot></table></div></div>
     ${d.notes && html`<div class="card" style="margin-top:12px"><span class="muted small">Примечание:</span> ${d.notes}</div>`}
     ${d.corrections?.length ? html`<div class="card" style="margin-top:12px"><h3 class="small muted">Корректы</h3>${d.corrections.map((x) => html`<div><a href=${'#/sales/' + x.id}>${x.number}</a> <span class="sub">${fdate(x.issue_date)} · ${zl(x.total_gross)}</span></div>`)}</div>` : ''}
+    ${corr && html`<${CorrectionModal} docId=${d.id} onClose=${() => setCorr(false)} onDone=${(id) => { setCorr(false); go('/sales/' + id); }} />`}
     ${edit && html`<${InvoiceForm} kind=${d.kind} doc=${d} onClose=${() => setEdit(false)} onDone=${() => { setEdit(false); reload(); }} />`}`;
 }

@@ -120,6 +120,12 @@ try {
   for (const s of ['<RodzajFaktury>KOR</RodzajFaktury>', `<NrKSeFFaKorygowanej>${fv.ksef_number}</NrKSeFFaKorygowanej>`, '<StanPrzed>1</StanPrzed>', '<P_15>-61.50</P_15>', '<PrzyczynaKorekty>Zwrot filtra</PrzyczynaKorekty>'])
     assert.ok(x2.includes(s), 'в корректе нет ' + s);
   assert.equal(Object.keys(state.sessions).length, 1, 'сессия переиспользуется');
+  // корректа данных покупателя: Podmiot2K с данными исходной фактуры
+  const fk2 = ok(await req(`/crm-api/sales-docs/${fv.id}/correct`, { body: { reason: 'Błędne dane nabywcy', buyer: { name: 'Firma Testowa sp. z o.o.', nip: '7010000005', street: 'ul. Nowa 1', postcode: '02-222', city: 'Warszawa' } } }), 'fk buyer');
+  assert.equal(fk2.ksef_status, 'accepted', JSON.stringify(fk2));
+  const xk = state.xml[state.xml.length - 1];
+  assert.ok(xk.includes('<Podmiot2K>') && xk.includes('ul. Testowa 5') && xk.includes('ul. Nowa 1'), 'Podmiot2K в корректе данных');
+  if (process.env.FA3_XSD) { const fs = await import('node:fs'); fs.writeFileSync('/tmp/fa3-kor.xml', xk); }
   // фактура без заказа: цена нетто, авто в «DodatkowyOpis», смешанная оплата; после KSeF — только корректа
   const ff = ok(await req('/crm-api/sales-docs', { body: { kind: 'vat', buyer: { name: 'Firma Testowa sp. z o.o.', nip: '7010000005', street: 'ul. Testowa 5', postcode: '02-222', city: 'Warszawa' },
     payment_method: 'mixed', pay_split: [{ method: 'cash', amount: 100 }, { method: 'blik', amount: 23 }],

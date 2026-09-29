@@ -166,7 +166,7 @@ export function OrderPage({ id }) {
     reload();
   };
   const tabs = [['main', 'Основное'], ['items', 'Работы и товары'], ['files', 'Файлы и подписи' + (o.files?.length ? ' · ' + o.files.length : '')],
-    ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата и документы' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['plan', 'Терминарз'], ['check', 'Чек-листы']]), ['log', 'История']];
+    ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата и документы' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['contact', 'Связь с клиентом'], ['plan', 'Терминарз'], ['check', 'Чек-листы']]), ['log', 'История']];
   return html`
     <div class="crumbs"><a href=${isQuote ? '#/quotes' : '#/orders'}>${isQuote ? 'Выцены' : 'Заказы'}</a></div>
     <div class="order-head">
@@ -181,6 +181,10 @@ export function OrderPage({ id }) {
         </div>
       </div>
       <div class="row">
+        <button class="btn" title="Открыть электронную карту (ссылка копируется для клиента)" onClick=${async () => {
+          const w = window.open('', '_blank');
+          try { const r = await api(`orders/${o.id}/card`, { body: {} }); navigator.clipboard?.writeText(r.url).catch(() => {}); if (w) w.location = r.url; else location.href = r.url; toast('Ссылка на карту скопирована'); }
+          catch (e) { w?.close(); toast(e.message, 'error'); } }}><${Icon} n="file" />${isQuote ? 'Электронная выцена' : 'Электронная карта заказа'}</button>
         <${DocsMenu} o=${o} />
         ${isQuote && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/to-order`, { body: {} }), 'Заказ создан'); go('/orders/' + r.id); }}>Превратить в заказ</button>`}
         ${app.perms['orders.delete'] && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
@@ -203,6 +207,7 @@ export function OrderPage({ id }) {
     ${tab === 'files' && html`<${Intake} o=${o} reload=${reload} />`}
     ${tab === 'pay' && html`<${Payments} o=${o} reload=${reload} />`}
     ${tab === 'plan' && html`<${Plan} o=${o} />`}
+    ${tab === 'contact' && html`<${Contact} o=${o} reload=${reload} /><${ContactLog} o=${o} />`}
     ${tab === 'check' && html`<${Checklists} o=${o} />`}
     ${tab === 'log' && html`<div class="card"><${ObjectHistory} entity="orders" id=${o.id} /></div>`}`;
 }
@@ -257,6 +262,7 @@ function Payments({ o, reload }) {
     </div>
 
     <div class="stack">
+      ${app.perms['invoices.create'] ? html`<${SalesDocs} o=${o} reload=${reload} />` : ''}
       <div class="card">
         <h2>Pulse Points</h2>
         ${o.loyalty.length ? html`<div class="stack small" style="margin-bottom:10px">${o.loyalty.map((t) => html`<div>${t.type === 'earn' ? 'Начислено' : t.type === 'redeem' ? 'Списано' : t.type}: <b class=${t.points < 0 ? 'neg' : 'pos'}>${t.points > 0 ? '+' : ''}${t.points}</b> ${t.amount_pln ? '· ' + zl(t.amount_pln) : ''}</div>`)}</div>` : ''}
@@ -270,8 +276,6 @@ function Payments({ o, reload }) {
           : html`<button class="btn" onClick=${() => setScanOpen(true)} disabled=${!(o.total > 0)}><${Icon} n="qr" />Оплатить баллами — сканировать QR клиента</button>`}
       </div>
 
-      <${Contact} o=${o} reload=${reload} />
-      ${app.perms['invoices.create'] ? html`<${SalesDocs} o=${o} reload=${reload} />` : ''}
         </div>
 
     ${scanOpen && html`<${Modal} title="QR клиента" onClose=${() => setScanOpen(false)}><${ScanBox} onResult=${onScan} /></${Modal}>`}
@@ -321,6 +325,17 @@ export function SmsCounter({ text }) {
   return html`<div class="muted small">${t.length} знаков · ${parts} SMS${gsm ? '' : ' (есть спецсимволы — 70 знаков на SMS)'}</div>`;
 }
 
+/** История связи с клиентом по заказу: SMS (позже — WhatsApp, Telegram, Instagram, звонки) */
+function ContactLog({ o }) {
+  const app = useApp();
+  const { data } = useData(app.perms['sms.view'] ? `sms?order=${o.id}&customer=${o.customer_id || ''}` : null, [o.id]);
+  if (!app.perms['sms.view']) return '';
+  const ST = { sent: ['отправлено', 'pos'], failed: ['ошибка', 'neg'], logged: ['только в журнале', 'muted'] };
+  return html`<div class="card" style="margin-top:14px"><h2>История сообщений</h2>
+    ${data?.rows?.length ? html`<table class="tbl"><tbody>${data.rows.map((m) => html`<tr><td class="nowrap sub">${fdt(m.created_at)}</td><td class="nowrap"><span class="chip">SMS</span></td>
+      <td style="white-space:pre-wrap">${m.text}${m.error ? html`<div class="sub neg">${m.error}</div>` : ''}</td><td class="nowrap sub">${m.phone}</td><td class=${'nowrap small ' + (ST[m.status]?.[1] || '')}>${ST[m.status]?.[0] || m.status}</td><td class="sub nowrap">${m.staff || ''}</td></tr>`)}</tbody></table>`
+      : html`<div class="muted small">По этому заказу сообщений ещё не было.</div>`}</div>`;
+}
 function Contact({ o, reload }) {
   const app = useApp();
   const [sms, setSms] = useState(null);
