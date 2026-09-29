@@ -186,18 +186,21 @@ export function OrderPage({ id }) {
           try { const r = await api(`orders/${o.id}/card`, { body: {} }); navigator.clipboard?.writeText(r.url).catch(() => {}); if (w) w.location = r.url; else location.href = r.url; toast('Ссылка на карту скопирована'); }
           catch (e) { w?.close(); toast(e.message, 'error'); } }}><${Icon} n="file" />${isQuote ? 'Электронная выцена' : 'Электронная карта заказа'}</button>
         <${DocsMenu} o=${o} />
-        ${isQuote && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/to-order`, { body: {} }), 'Заказ создан'); go('/orders/' + r.id); }}>Превратить в заказ</button>`}
+        <button class="btn" title="Копия с теми же клиентом, авто и позициями" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/copy`, { body: {} }), isQuote ? 'Выцена скопирована' : 'Заказ скопирован'); go((isQuote ? '/quotes/' : '/orders/') + r.id); }}><${Icon} n="file" />Копировать</button>
+        ${isQuote && !o.linked_orders?.length && html`<${QuoteToOrder} o=${o} />`}
         ${app.perms['orders.delete'] && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
       </div>
     </div>
-    ${app.perms['orders.prices'] && html`<div class="totals" style="margin-bottom:14px">
+    ${isQuote && o.linked_orders?.length ? html`<div class="card ok-card small" style="margin-bottom:14px">✓ По этой выцене: ${o.linked_orders.map((x, i) => html`${i ? ', ' : ''}${x.how === 'merged' ? 'позиции добавлены в заказ ' : 'создан заказ '}<a href=${'#/orders/' + x.id}><b>${x.number}</b></a>`)} — выцена завершена</div>` : ''}
+    ${!isQuote && o.linked_quotes?.length ? html`<div class="muted small" style="margin:-6px 0 12px">Из выцены: ${o.linked_quotes.map((x, i) => html`${i ? ', ' : ''}<a href=${'#/quotes/' + x.id}>${x.number}</a>`)}</div>` : ''}
+    <div class="pill-tabs" style="margin-bottom:14px">${tabs.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
+    ${app.perms['orders.prices'] && (isQuote ? tab === 'items' : tab === 'pay') && html`<div class="totals" style="margin-bottom:14px">
       <div><span>Итого брутто</span><b>${zl(o.total)}</b></div>
       <div><span>Нетто</span><b>${zl(o.total_net)}</b></div>
       ${!isQuote && html`<div class=${o.total > 0 && due < 0.01 ? 'ok' : ''}><span>Оплачено</span><b>${zl(o.paid)}</b></div>`}
       ${!isQuote && html`<div class=${due > 0.01 ? 'due' : 'ok'}><span>К оплате</span><b>${zl(due)}</b></div>`}
       ${app.perms['products.prices'] && html`<div><span>Маржа на запчастях</span><b>${zl(o.items.filter((i) => i.kind === 'part').reduce((s, i) => s + (i.qty * i.price * (1 - i.discount / 100)) / (1 + i.vat / 100) - i.qty * i.cost, 0))}</b></div>`}
     </div>`}
-    <div class="pill-tabs" style="margin-bottom:14px">${tabs.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
     ${o.accepted_at && html`<div class="card ok-card small" style="margin-bottom:14px">✓ Клиент подтвердил ${isQuote ? 'выцену' : 'заказ'} по электронной карте ${fdt(o.accepted_at)}${o.accepted_via === 'sms' ? ' (кодом SMS)' : ''}</div>`}
     ${notice && html`<${StatusNotice} o=${o} n=${notice} set=${setNotice} reload=${reload} />`}
     ${tab === 'items' && html`<${ItemsMW} o=${o} reload=${reload} />`}
@@ -284,6 +287,24 @@ function Payments({ o, reload }) {
 }
 
 // ── Записи в терминарз для заказа ──────────────────────────────────────────
+/** «Создать заказ ▾ / Добавить в заказ» для выцены (как в Motowarsztat) */
+function QuoteToOrder({ o }) {
+  const [menu, setMenu] = useState(false);
+  const [pick, setPick] = useState(false);
+  const { data: targets } = useData(pick ? `orders/${o.id}/merge-targets` : null, [pick]);
+  return html`<div class="split-btn">
+    <button class="btn primary" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/to-order`, { body: {} }), 'Заказ создан, выцена завершена'); go('/orders/' + r.id); }}><${Icon} n="wrench" />Создать заказ</button>
+    <button class="btn primary caret" onClick=${() => setMenu(!menu)} aria-label="Ещё"><${Icon} n="down" /></button>
+    ${menu && html`<div class="menu-pop"><button onClick=${() => { setMenu(false); setPick(true); }}><${Icon} n="plus" />Добавить в существующий заказ</button></div>`}
+    ${pick && html`<${Modal} wide title=${'Добавить ' + o.number + ' в заказ'} onClose=${() => setPick(null)}>
+      <div class="muted small" style="margin-bottom:8px">Позиции выцены (${o.items.length}) добавятся в выбранный открытый заказ, выцена станет «завершена» и будет ссылаться на заказ. Сначала — заказы этого клиента / авто.</div>
+      ${!targets ? html`<${Loading} />` : !targets.length ? html`<div class="empty">Открытых заказов нет</div>` : html`<table class="tbl"><tbody>${targets.map((t) => html`<tr class="click" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/add-to-order`, { body: { order_id: t.id } }), `Добавлено в ${t.number}: ${o.items.length} поз.`); go('/orders/' + r.id); }}>
+        <td><b>${t.number}</b>${t.same ? html` <span class="chip">этот клиент</span>` : ''}<div class="sub">${fdt(t.created_at)}</div></td><td>${t.customer_name || ''}<div class="sub">${[t.make, t.model].filter(Boolean).join(' ')} ${t.plate || ''}</div></td>
+        <td>${t.status_name && html`<span class="badge" style=${`border-color:${t.status_color};color:${t.status_color}`}>${t.status_name}</span>`}</td><td class="r nowrap">${zl(t.total)}</td></tr>`)}</tbody></table>`}
+    </${Modal}>`}
+  </div>`;
+}
+
 function Plan({ o }) {
   return html`<div class="card">
     <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Записи на посты</h2>

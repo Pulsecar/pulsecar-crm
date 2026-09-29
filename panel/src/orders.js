@@ -184,11 +184,48 @@ export function quoteToOrder(quoteId, staffName) {
   return tx(() => {
     const id = createOrder({ ...q, kind: 'order', status_id: null, items: items.map(({ id: _i, order_id: _o, ...it }) => it) }, staffName);
     run('UPDATE orders SET quote_id = ? WHERE id = ?', q.id, id);
-    const fin = one('SELECT id FROM order_statuses WHERE is_final = 1 ORDER BY pos LIMIT 1');
-    if (fin) run('UPDATE orders SET status_id = ?, closed_at = datetime(\'now\') WHERE id = ?', fin.id, q.id);
+    closeQuote(q.id);
     log('order', q.id, 'to_order', { orderId: id }, staffName);
     return id;
   });
+}
+/** Выцена отработана (стала заказом / добавлена в заказ): статус «завершено», обзвон — «записан» */
+function closeQuote(qid) {
+  const fin = one('SELECT id FROM order_statuses WHERE is_final = 1 ORDER BY pos LIMIT 1');
+  if (fin) run(`UPDATE orders SET status_id = ?, closed_at = COALESCE(closed_at, datetime('now')) WHERE id = ?`, fin.id, qid);
+  run(`UPDATE orders SET followup = 'accepted' WHERE id = ? AND COALESCE(followup,'') IN ('', 'new', 'call_back', 'thinking', 'scheduled', 'no_answer')`, qid);
+}
+const itemCopy = ({ id: _i, order_id: _o, pos: _p, done: _d, ...it }) => it;
+/** Позиции выцены — в уже существующий заказ (как «Dodaj do zlecenia» в Motowarsztat) */
+export function quoteToExistingOrder(quoteId, orderId, staffName) {
+  const q = getOrder(quoteId), o = getOrder(orderId);
+  if (q.kind !== 'quote') throw new HttpError(400, 'Это не выцена');
+  if (o.kind !== 'order') throw new HttpError(400, 'Выберите заказ');
+  const st = o.status_id ? one('SELECT is_final FROM order_statuses WHERE id = ?', o.status_id) : null;
+  if (st?.is_final) throw new HttpError(400, 'Заказ уже закрыт');
+  const items = all('SELECT * FROM order_items WHERE order_id = ? ORDER BY pos, id', q.id);
+  if (!items.length) throw new HttpError(400, 'В выцене нет позиций');
+  return tx(() => {
+    let pos = one('SELECT COALESCE(MAX(pos),0) m FROM order_items WHERE order_id = ?', o.id).m;
+    for (const it of items) addItem(o.id, { ...itemCopy(it), pos: ++pos });
+    recalc(o.id);
+    run('UPDATE orders SET merged_into = ? WHERE id = ?', o.id, q.id);
+    if (!o.quote_id) run('UPDATE orders SET quote_id = ? WHERE id = ?', q.id, o.id);
+    closeQuote(q.id);
+    log('order', q.id, 'to_order', { orderId: o.id, merged: true }, staffName);
+    log('order', o.id, 'update', `Добавлены позиции из выцены ${q.number} (${items.length})`, staffName);
+    return { id: o.id, added: items.length };
+  });
+}
+/** Копия заказа / выцены: те же клиент, авто, описание и позиции, новый номер */
+export function copyOrder(id, staffName) {
+  const src = getOrder(id);
+  const items = all('SELECT * FROM order_items WHERE order_id = ? ORDER BY pos, id', src.id);
+  const flags = src.flags ? JSON.parse(src.flags) : null;
+  const damages = src.damages ? JSON.parse(src.damages) : null;
+  const nid = createOrder({ ...src, status_id: null, flags, damages, mileage: src.mileage, items: items.map((it, i) => ({ ...itemCopy(it), pos: i + 1 })) }, staffName);
+  log('order', nid, 'update', `Копия ${src.number}`, staffName);
+  return nid;
 }
 
 /** Полная карточка заказа для панели */
@@ -207,5 +244,8 @@ export function orderFull(id) {
     appointments: all(`SELECT a.*, st.name station_name FROM appointments a LEFT JOIN stations st ON st.id = a.station_id WHERE order_id = ? ORDER BY start_at`, id),
     activity: all(`SELECT * FROM activity WHERE entity = 'order' AND entity_id = ? ORDER BY id DESC LIMIT 50`, id),
     loyalty: o.customer_id ? all(`SELECT * FROM transactions WHERE order_no = ?`, o.number) : [],
+    // связи выцена ↔ заказ (как фактура ↔ Pro forma)
+    linked_orders: o.kind === 'quote' ? all(`SELECT id, number, created_at, CASE WHEN id = ? THEN 'merged' ELSE 'created' END how FROM orders WHERE kind = 'order' AND (quote_id = ? OR id = ?) ORDER BY id`, o.merged_into || -1, o.id, o.merged_into || -1) : [],
+    linked_quotes: o.kind === 'order' ? all(`SELECT id, number, created_at FROM orders WHERE kind = 'quote' AND (id = ? OR merged_into = ?) ORDER BY id`, o.quote_id || -1, o.id) : [],
   };
 }

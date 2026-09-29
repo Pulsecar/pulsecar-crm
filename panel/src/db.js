@@ -514,7 +514,8 @@ for (const [c, t] of [['ksef_status', 'TEXT'], ['ksef_number', 'TEXT'], ['ksef_r
 // фактура без заказа: данные автомобиля и раздел оплаты (нал / безнал / BLIK) — JSON
 addColumn('sales_docs', 'car', 'TEXT');
 addColumn('sales_docs', 'pay_split', 'TEXT');
-addColumn('sales_docs', 'proforma_id', 'INTEGER'); // фактура VAT, выставленная на основании Pro forma
+addColumn('sales_docs', 'proforma_id', 'INTEGER');
+addColumn('orders', 'merged_into', 'INTEGER'); // выцена, позиции которой добавлены в уже существующий заказ // фактура VAT, выставленная на основании Pro forma
 addColumn('products', 'price_group_id', 'INTEGER');
 addColumn('products', 'gtu', 'TEXT');
 addColumn('stations', 'slot_min', 'INTEGER');

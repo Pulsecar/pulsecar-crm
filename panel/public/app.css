@@ -641,3 +641,13 @@ a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; }
 @media (max-width: 800px) { .slot-add { grid-template-columns: 1fr 1fr; } }
 
 .tbl tr.chg td { background: var(--accent-dim); }
+
+.autosave { text-align: right; padding: 6px 2px 0; }
+
+/* кнопка с выпадающим меню: «Создать заказ ▾» */
+.split-btn { position: relative; display: inline-flex; }
+.split-btn > .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split-btn > .btn.caret { border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0 8px; margin-left: 1px; }
+.split-btn .menu-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; background: var(--surface2); border: 1px solid var(--border2); border-radius: 10px; padding: 4px; min-width: 250px; box-shadow: 0 12px 30px rgba(0,0,0,.35); }
+.split-btn .menu-pop button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; background: none; color: var(--text); font: inherit; border-radius: 8px; cursor: pointer; text-align: left; }
+.split-btn .menu-pop button:hover { background: var(--surface3); }

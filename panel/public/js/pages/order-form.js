@@ -1,6 +1,6 @@
 // Заказ и выцена как в Motowarsztat: вкладка «Основное» (Pojazd · Klient · Zlecenie · Uszkodzenia),
 // «Работы и товары» — отдельные таблицы Zadania и Towary, переключатель NETTO/BRUTTO, себестоимость (koszt) только в CRM.
-import { html, useState, useEffect, api, act, go, useApp, Icon, Picker, ConfirmButton, zl, num, toast, carName } from '../lib.js';
+import { html, useState, useEffect, useRef, api, act, go, useApp, Icon, Picker, ConfirmButton, zl, num, toast, carName } from '../lib.js';
 import { CustomerCarPicker } from './orders.js';
 import { SupplierParts } from './suppliers.js';
 import { CarDiagram, DMG } from './order-docs.js';
@@ -60,6 +60,27 @@ export function OrderMain({ o, reload, isNew = false, onCreate, kind = 'order', 
       setDirty(false); reload();
     } finally { setBusy(false); }
   };
+  // автосохранение (как в Motowarsztat): через секунду после изменения и при уходе со вкладки
+  const [saved, setSaved] = useState(null);
+  const pending = useRef(null);
+  const autoSave = async (ff, c) => {
+    if (!c.customer?.id && (c.newCustomer?.phone || c.newCustomer?.name)) return; // новый клиент/авто — сохраняется кнопкой
+    if (!c.car?.id && (c.newCar?.plate || c.newCar?.vin || c.newCar?.make)) return;
+    const { status_id, ...rest } = ff;
+    setSaved('saving');
+    try {
+      await api('orders/' + o.id, { method: 'PUT', body: { ...rest, customer_id: c.customer?.id ?? null, car_id: c.car?.id ?? null, mileage: ff.mileage || null, type_id: ff.type_id || null, mechanic_id: ff.mechanic_id || null } });
+      setDirty(false); setSaved(new Date()); reload();
+    } catch (e) { setSaved('error'); toast(e.message, 'error'); }
+  };
+  useEffect(() => {
+    if (isNew || !dirty || !canEdit) return;
+    pending.current = () => autoSave(f, cc);
+    const t = setTimeout(() => { const fn = pending.current; pending.current = null; fn?.(); }, 900);
+    return () => clearTimeout(t);
+  }, [f, cc, dirty]);
+  useEffect(() => () => { const fn = pending.current; pending.current = null; fn?.(); }, []);
+  const needsButton = isNew || (!cc.customer?.id && (cc.newCustomer?.phone || cc.newCustomer?.name)) || (!cc.car?.id && (cc.newCar?.plate || cc.newCar?.vin || cc.newCar?.make));
   const quote = kind === 'quote' || o?.kind === 'quote';
   const staff = app.staff.filter((s) => s.active);
   return html`<div class="mw-form">
@@ -114,8 +135,9 @@ export function OrderMain({ o, reload, isNew = false, onCreate, kind = 'order', 
             <input value=${m.note} placeholder="Где и какое: левая передняя дверь…" onInput=${(e) => { const M = [...f.damages]; M[i] = { ...m, note: e.target.value }; upd({ damages: M }); }} /></div>`)
             : html`<div class="empty warn-bg">Повреждений нет — нажмите на схему, чтобы добавить</div>`}
         </div></div></section>`}
-    ${canEdit && html`<div class="row sticky-save"><button class="btn primary lg" disabled=${busy || (!isNew && !dirty)} onClick=${save}>${isNew ? (quote ? 'Создать выцену' : 'Создать заказ') : 'Сохранить'}</button>
-      ${!isNew && dirty && html`<span class="muted small">Есть несохранённые изменения</span>`}${isNew && html`<span class="muted small">Работы и товары добавите на следующем шаге</span>`}</div>`}
+    ${canEdit && needsButton && html`<div class="row sticky-save"><button class="btn primary lg" disabled=${busy || (!isNew && !dirty)} onClick=${save}>${isNew ? (quote ? 'Создать выцену' : 'Создать заказ') : 'Сохранить'}</button>
+      ${!isNew && dirty && html`<span class="muted small">Новый клиент или авто — нажмите «Сохранить»</span>`}${isNew && html`<span class="muted small">Работы и товары добавите на следующем шаге</span>`}</div>`}
+    ${canEdit && !needsButton && html`<div class="autosave small ${saved === 'error' ? 'neg' : 'muted'}">${saved === 'saving' || (dirty && saved !== 'error') ? 'Сохраняю…' : saved === 'error' ? 'Не сохранено — проверьте данные' : saved ? '✓ Сохранено автоматически' : 'Изменения сохраняются автоматически'}</div>`}
   </div>`;
 }
 

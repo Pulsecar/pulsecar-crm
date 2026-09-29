@@ -372,6 +372,31 @@ try {
   // заказ в графике уходит из «Неназначенных»
   ok(await req('/crm-api/appointments', { body: { order_id: po.id, station_id: (ok(await req('/crm-api/me'), 'me3').stations || [])[0]?.id, start_at: '2030-02-04 09:00', duration_min: 30 } }), 'po planned');
   assert.ok(!ok(await req('/crm-api/appointments?from=2030-02-04&to=2030-02-04'), 'cal un').orders.some((x) => x.id === po.id), 'запланированный заказ не в «Неназначенных»');
+  // выцена: копия, «добавить в существующий заказ», связь и статус «завершено»
+  const wq2 = ok(await req('/crm-api/orders', { body: { kind: 'quote', customer_id: jan.id, items: [{ kind: 'labor', name: 'Klimatyzacja', price: 199 }, { kind: 'part', name: 'Filtr kabiny', price: 60 }] } }), 'quote2');
+  const cp = ok(await req(`/crm-api/orders/${wq2.id}/copy`, { body: {} }), 'quote copy');
+  const cpd = ok(await req('/crm-api/orders/' + cp.id), 'copy get');
+  assert.equal(cpd.kind, 'quote'); assert.equal(cpd.items.length, 2); assert.notEqual(cpd.number, wq2.number);
+  const tgt = ok(await req('/crm-api/orders', { body: { customer_id: jan.id, items: [{ kind: 'labor', name: 'Przegląd', price: 100 }] } }), 'target');
+  const mt = ok(await req(`/crm-api/orders/${wq2.id}/merge-targets`), 'merge targets');
+  assert.ok(mt[0].same && mt.some((x) => x.id === tgt.id));
+  ok(await req(`/crm-api/orders/${wq2.id}/add-to-order`, { body: { order_id: tgt.id } }), 'add to order');
+  const tgd = ok(await req('/crm-api/orders/' + tgt.id), 'target get');
+  assert.equal(tgd.items.length, 3); assert.equal(tgd.total, 359); assert.ok(tgd.linked_quotes.some((x) => x.id === wq2.id));
+  const wq2d = ok(await req('/crm-api/orders/' + wq2.id), 'quote2 get');
+  assert.ok(wq2d.status.is_final, 'выцена завершена'); assert.equal(wq2d.linked_orders[0].id, tgt.id); assert.equal(wq2d.linked_orders[0].how, 'merged');
+  // документ кассы: карточка, комментарий, удаление с пересчётом заказа
+  const kw = ok(await req('/crm-api/cash', { body: { direction: 'out', amount: 40, note: 'x' } }), 'kw');
+  const cashL = ok(await req('/crm-api/cash?from=2000-01-01&to=2100-01-01'), 'cash list');
+  const kwRow = cashL.rows.find((r) => r.direction === 'out' && r.amount === 40 && r.note === 'x');
+  ok(await req('/crm-api/cash/' + kwRow.id, { method: 'PUT', body: { note: 'Zakup oleju Inter Cars' } }), 'kw note');
+  const kwd = ok(await req('/crm-api/cash/' + kwRow.id), 'kw get');
+  assert.equal(kwd.note, 'Zakup oleju Inter Cars'); assert.equal(kwd.source, 'expense');
+  const payRow = cashL.rows.find((r) => r.order_id === po.id && r.method === 'cash');
+  assert.equal(ok(await req('/crm-api/cash/' + payRow.id), 'pay get').source, 'order');
+  ok(await req('/crm-api/cash/' + payRow.id, { method: 'DELETE' }), 'pay delete');
+  assert.equal(ok(await req('/crm-api/orders/' + po.id), 'po get').paid, 300, 'заказ пересчитан после удаления KP');
+  ok(await req('/crm-api/cash/' + kwRow.id, { method: 'DELETE' }), 'kw delete');
   console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 

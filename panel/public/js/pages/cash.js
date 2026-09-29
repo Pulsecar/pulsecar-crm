@@ -1,6 +1,6 @@
 // Касса: несколько касс (наличные, терминал, счёт), KP/KW, перенос денег между кассами
 import { FiscalCard } from '../fiscal.js';
-import { html, useState, useData, api, act, qs, useApp, ErrorBox, Icon, Modal, zl, fdt, todayStr, METHOD } from '../lib.js';
+import { html, useState, useData, api, act, qs, useApp, ErrorBox, Icon, Modal, ConfirmButton, Loading, zl, fdt, todayStr, METHOD } from '../lib.js';
 
 const KIND = { cash: 'Наличные', card: 'Терминал (карты)', bank: 'Банковский счёт' };
 
@@ -13,6 +13,7 @@ export default function Cash() {
   const [doc, setDoc] = useState(null);
   const [tr, setTr] = useState(null);
   const [edit, setEdit] = useState(null);
+  const [cdoc, setCdoc] = useState(null);
   const { data, error, reload } = useData('cash?' + qs({ from, to, register: reg }), [from, to, reg]);
   const regs = (data?.registers || []).filter((r) => r.active);
   const canEdit = app.perms['cash.edit'];
@@ -44,12 +45,12 @@ export default function Cash() {
       ${reg && app.perms['settings.manage'] && html`<button class="btn sm ghost" style="margin-left:auto" onClick=${() => setEdit({ ...data.registers.find((r) => String(r.id) === String(reg)) })}>Настроить кассу</button>`}</div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Время</th><th>Документ</th><th>Касса</th><th>Способ</th><th>Клиент / назначение</th><th>Заказ</th><th>Кто</th><th class="r">Приход</th><th class="r">Расход</th><th></th></tr></thead>
-      <tbody>${(data?.rows || []).map((p) => html`<tr>
-        <td class="nowrap sub">${fdt(p.created_at)}</td><td><b>${p.number || ''}</b>${p.transfer_id ? html`<div class="sub">перенос</div>` : ''}</td><td class="sub">${p.register_name || '—'}</td><td>${METHOD[p.method]}</td>
+      <tbody>${(data?.rows || []).map((p) => html`<tr class="click" onClick=${() => setCdoc(p.id)}>
+        <td class="nowrap sub">${fdt(p.created_at)}</td><td><b>${p.number || html`<span class="sub">${p.direction === 'in' ? 'оплата ' + (METHOD[p.method] || '').toLowerCase() : 'расход'}</span>`}</b>${p.transfer_id ? html`<div class="sub">перенос</div>` : ''}</td><td class="sub">${p.register_name || '—'}</td><td>${METHOD[p.method]}</td>
         <td>${p.customer_name || ''}<div class="sub">${p.note || ''}</div></td>
         <td>${p.order_id ? html`<a href=${'#/orders/' + p.order_id}>${p.order_number}</a>` : ''}</td><td class="sub">${p.staff || ''}</td>
         <td class="r pos">${p.direction === 'in' ? zl(p.amount) : ''}</td><td class="r neg">${p.direction === 'out' ? zl(p.amount) : ''}</td>
-        <td class="act">${p.number && html`<a class="icon-btn" href=${'/crm-api/print/cash/' + p.id} target="_blank" rel="noopener" title="Печать KP/KW"><${Icon} n="print" /></a>`}</td></tr>`)}</tbody></table></div>
+        <td class="act" onClick=${(e) => e.stopPropagation()}>${p.number && html`<a class="icon-btn" href=${'/crm-api/print/cash/' + p.id} target="_blank" rel="noopener" title="Печать KP/KW"><${Icon} n="print" /></a>`}</td></tr>`)}</tbody></table></div>
       ${!data?.rows?.length ? html`<div class="empty">За период операций нет</div>` : ''}</div>`}
     ${doc && html`<${Modal} title=${doc.direction === 'in' ? 'Приход (KP)' : 'Расход (KW)'} onClose=${() => setDoc(null)}
       foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api('cash', { body: doc }), 'Проведено'); setDoc(null); reload(); }}>Провести</button>`}>
@@ -65,6 +66,7 @@ export default function Cash() {
       <label class="f">Примечание<input value=${tr.note} onInput=${(e) => setTr({ ...tr, note: e.target.value })} placeholder="Например: инкассация в банк" /></label>
       <div class="muted small">Создаются KW в первой кассе и KP во второй. В выручку и расходы перенос не попадает.</div>
     </${Modal}>`}
+    ${cdoc && html`<${CashDoc} id=${cdoc} onClose=${() => setCdoc(null)} onChanged=${() => { setCdoc(null); reload(); }} />`}
     ${edit && html`<${Modal} title=${edit.id ? 'Касса: ' + edit.name : 'Новая касса'} onClose=${() => setEdit(null)}
       foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api('cash/registers', { body: edit }), 'Сохранено'); setEdit(null); reload(); }}>Сохранить</button>`}>
       <label class="f">Название<input value=${edit.name} onInput=${(e) => setEdit({ ...edit, name: e.target.value })} placeholder="Kasa główna, Kasa 2, Konto firmowe…" /></label>
@@ -73,4 +75,37 @@ export default function Cash() {
       <label class="check"><input type="checkbox" checked=${!!edit.is_default} onChange=${(e) => setEdit({ ...edit, is_default: e.target.checked })} />Основная для своего типа (сюда идут оплаты по заказам)</label>
       ${edit.id && html`<label class="check"><input type="checkbox" checked=${edit.active !== 0} onChange=${(e) => setEdit({ ...edit, active: e.target.checked ? 1 : 0 })} />Касса используется</label>`}
     </${Modal}>`}`;
+}
+
+const SOURCE = { order: 'Оплата по заказу', storage: 'Оплата хранения / парковки', transfer: 'Перенос между кассами', income: 'Приход (прочий)', expense: 'Расход' };
+/** Карточка документа кассы: откуда деньги / на что расход, комментарий, печать, удаление (админ) */
+function CashDoc({ id, onClose, onChanged }) {
+  const app = useApp();
+  const { data: p } = useData('cash/' + id, [id]);
+  const [note, setNote] = useState(null);
+  if (!p) return html`<${Modal} title="Документ кассы" onClose=${onClose}><${Loading} /></${Modal}>`;
+  const n = note ?? p.note ?? '';
+  const canEdit = app.perms['cash.edit'];
+  const isAdmin = app.user.role === 'admin';
+  const title = p.number || (p.direction === 'in' ? `Оплата: ${METHOD[p.method] || p.method}` : 'Расход');
+  return html`<${Modal} title=${`${title} · ${p.direction === 'in' ? 'приход' : 'расход'} ${zl(p.amount)}`} onClose=${onClose} foot=${html`
+      ${isAdmin && p.method !== 'points' && html`<${ConfirmButton} cls="btn danger" label=${p.order_id ? 'Удалить? Оплата уйдёт из заказа' : p.transfer_id ? 'Удалить обе части переноса?' : 'Удалить документ?'}
+        onConfirm=${async () => { await act(() => api('cash/' + p.id, { method: 'DELETE' }), 'Документ удалён'); onChanged(); }}><${Icon} n="trash" />Удалить</${ConfirmButton}>`}
+      <span style="flex:1"></span>
+      ${p.number && html`<a class="btn" href=${'/crm-api/print/cash/' + p.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать ${p.number.slice(0, 2)}</a>`}
+      ${canEdit && html`<button class="btn primary" disabled=${n.trim() === (p.note || '').trim() || !n.trim()} onClick=${async () => { await act(() => api('cash/' + p.id, { method: 'PUT', body: { note: n } }), 'Сохранено'); onChanged(); }}>Сохранить</button>`}`}>
+    <div class="kv-list" style="margin-bottom:12px">
+      <span>Откуда / на что</span><b>${SOURCE[p.source]}${p.source === 'order' ? html` — <a href=${'#/orders/' + p.order_id} onClick=${onClose}>${p.order_number}</a> <span class=${p.order_final ? 'pos' : 'muted'}>(${p.order_status || '—'}${p.order_final ? ', заказ закрыт' : ''})</span>` : ''}
+        ${p.source === 'storage' && p.storage ? html` — <a href="#/storage" onClick=${onClose}>${p.storage.number}</a>` : ''}${p.source === 'transfer' ? html` — пара ${p.pair_number || ''} (${p.pair_register || ''})` : ''}</b>
+      <span>Касса</span><b>${p.register_name || '—'}</b>
+      <span>Способ</span><b>${METHOD[p.method] || p.method}</b>
+      <span>Сумма</span><b class=${p.direction === 'in' ? 'pos' : 'neg'}>${p.direction === 'in' ? '+' : '−'}${zl(p.amount)}</b>
+      <span>Дата</span><b>${fdt(p.created_at)}</b>
+      ${p.customer_name ? html`<span>Клиент</span><b>${p.customer_name} <span class="sub">${p.customer_phone || ''}</span></b>` : ''}
+      <span>Кто провёл</span><b>${p.staff || '—'}</b>
+    </div>
+    <label class="f">${p.direction === 'out' ? 'На что потрачено (комментарий)' : 'Назначение / комментарий'}
+      <textarea rows="3" value=${n} disabled=${!canEdit} onInput=${(e) => setNote(e.target.value)} placeholder=${p.direction === 'out' ? 'Например: закупка масла в Inter Cars, аренда, хозтовары…' : 'Например: оплата по заказу, предоплата…'}></textarea></label>
+    ${!isAdmin && html`<div class="muted small">Удалить документ может только администратор.</div>`}
+  </${Modal}>`;
 }

@@ -13,7 +13,7 @@ import {
   checkout, issueTicket, loyaltySummary, quote, verifyManual, verifyQrPayload, redeemLimits, redeemForOrder,
 } from './loyalty.js';
 import { importRows, readRows, TEMPLATE_CSV } from './importer.js';
-import { addItem, createOrder, getOrder, orderFull, quoteToOrder, recalc, setStatus, updateItem } from './orders.js';
+import { addItem, copyOrder, createOrder, getOrder, orderFull, quoteToExistingOrder, quoteToOrder, recalc, setStatus, updateItem } from './orders.js';
 import { invoicesEnabled, invoicePdf, issueInvoice, testFakturownia } from './invoices.js';
 import { createStockDoc, findOrCreateProduct } from './stock.js';
 import { publicList, save as saveIntegration, cfg, setState, def as integrationDef } from './integrations/index.js';
@@ -603,6 +603,24 @@ crm.post('/orders/:id/to-order', (req, res) => {
   const s = who(req, 'orders.create');
   res.json({ id: quoteToOrder(Number(req.params.id), s.name) });
 });
+crm.post('/orders/:id/add-to-order', (req, res) => {
+  const s = who(req, 'orders.edit');
+  res.json(quoteToExistingOrder(Number(req.params.id), Number(req.body?.order_id), s.name));
+});
+crm.post('/orders/:id/copy', (req, res) => {
+  const src = getOrder(Number(req.params.id));
+  const s = who(req, src.kind === 'quote' ? 'quotes.manage' : 'orders.create');
+  res.json({ id: copyOrder(src.id, s.name) });
+});
+/** Открытые заказы для «Добавить в заказ»: сначала этого же клиента / авто */
+crm.get('/orders/:id/merge-targets', (req, res) => {
+  who(req, 'orders.view');
+  const q = getOrder(Number(req.params.id));
+  res.json(all(`SELECT o.id, o.number, o.created_at, o.total, st.name status_name, st.color status_color, COALESCE(CASE WHEN c.kind = 'company' THEN c.company END, c.name) customer_name, k.make, k.model, k.plate,
+      (o.customer_id = ? OR o.car_id = ?) same
+    FROM orders o LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id
+    WHERE o.kind = 'order' AND COALESCE(st.is_final, 0) = 0 ORDER BY same DESC, o.id DESC LIMIT 60`, q.customer_id || -1, q.car_id || -1));
+});
 
 crm.delete('/orders/:id', (req, res) => {
   const s = who(req, 'orders.delete');
@@ -974,6 +992,45 @@ crm.post('/cash/transfer', (req, res) => {
   res.json({ ok: true, ...out });
 });
 crm.get('/cash/registers', (req, res) => { who(req, 'cash.view'); res.json(registers()); });
+/** Документ кассы (KP / KW / оплата картой): откуда деньги, комментарий, печать, удаление */
+crm.get('/cash/:id', (req, res) => {
+  who(req, 'cash.view');
+  const p = one(`SELECT p.*, r.name register_name, r.kind register_kind, c.name customer_name, c.phone customer_phone, o.number order_number, o.kind order_kind,
+      st.name order_status, st.is_final order_final, t.number pair_number, tr.name pair_register
+    FROM payments p LEFT JOIN cash_registers r ON r.id = p.register_id LEFT JOIN customers c ON c.id = p.customer_id LEFT JOIN orders o ON o.id = p.order_id
+    LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN payments t ON t.id = p.transfer_id LEFT JOIN cash_registers tr ON tr.id = t.register_id WHERE p.id = ?`, Number(req.params.id));
+  if (!p) throw new HttpError(404, 'Документ не найден');
+  const storage = /^(Парковка|Хранение шин) (\S+)/.exec(p.note || '');
+  const st = storage ? one('SELECT id, number, kind FROM storage WHERE number = ?', storage[2]) : null;
+  const source = p.transfer_id ? 'transfer' : p.order_id ? 'order' : st ? 'storage' : p.direction === 'in' ? 'income' : 'expense';
+  res.json({ ...p, source, storage: st });
+});
+crm.put('/cash/:id', (req, res) => {
+  const s = who(req, 'cash.edit');
+  const p = one('SELECT * FROM payments WHERE id = ?', Number(req.params.id));
+  if (!p) throw new HttpError(404, 'Документ не найден');
+  const note = String(req.body?.note ?? '').trim().slice(0, 500);
+  if (!note) throw new HttpError(400, 'Напишите назначение / комментарий');
+  run('UPDATE payments SET note = ? WHERE id = ?', note, p.id);
+  log('payment', p.id, 'update', { note }, s.name);
+  res.json({ ok: true });
+});
+/** Удалить документ кассы (только администратор): оплата заказа — сумма заказа пересчитывается, перенос — удаляются обе части */
+crm.delete('/cash/:id', (req, res) => {
+  const s = who(req, 'admin');
+  const p = one('SELECT * FROM payments WHERE id = ?', Number(req.params.id));
+  if (!p) throw new HttpError(404, 'Документ не найден');
+  if (p.method === 'points') throw new HttpError(400, 'Списание баллов отменяется корректировкой баллов у клиента');
+  const storage = /^(Парковка|Хранение шин) (\S+)/.exec(p.note || '');
+  tx(() => {
+    run('DELETE FROM payments WHERE id = ? OR (id = ? AND ? IS NOT NULL)', p.id, p.transfer_id || -1, p.transfer_id);
+    if (p.order_id) recalc(p.order_id);
+    if (storage && p.direction === 'in') run('UPDATE storage SET paid = MAX(0, ROUND(COALESCE(paid,0) - ?, 2)) WHERE number = ?', p.amount, storage[2]);
+  });
+  if (p.order_id) log('order', p.order_id, 'payment_delete', { amount: p.amount, number: p.number }, s.name);
+  log('payment', p.id, 'delete', { number: p.number, amount: p.amount, direction: p.direction, note: p.note }, s.name);
+  res.json({ ok: true });
+});
 crm.post('/cash/registers', (req, res) => {
   who(req, 'settings.manage');
   const b = req.body || {};
