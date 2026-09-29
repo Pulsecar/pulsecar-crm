@@ -348,6 +348,15 @@ try {
   const fe = ok(await req('/crm-api/sales-docs/' + fi.id), 'free inv get2');
   assert.equal(fe.number, fi.number); assert.equal(fe.total_gross, 147.6); assert.equal(fe.paid, 100); assert.equal(fe.payment_method, 'mixed'); assert.equal(fe.items.length, 2);
   assert.equal((await req('/crm-api/sales-docs/' + fi.id, { method: 'PUT', body: { buyer: { name: 'J' }, payment_method: 'mixed', pay_split: [{ method: 'cash', amount: 500 }], lines: [{ name: 'a', qty: 1, unit_gross: 10 }] } })).status, 400, 'части больше суммы');
+  // один заказ — на разных постах и в разное время
+  const st2 = ok(await req('/crm-api/me'), 'me stations').stations || [];
+  if (st2.length >= 2) {
+    ok(await req('/crm-api/appointments', { body: { order_id: mo.id, station_id: st2[0].id, start_at: '2030-01-07 09:00', duration_min: 60 } }), 'part1');
+    ok(await req('/crm-api/appointments', { body: { order_id: mo.id, station_id: st2[1].id, start_at: '2030-01-07 13:00', duration_min: 120 } }), 'part2');
+    const cal = ok(await req('/crm-api/appointments?from=2030-01-07&to=2030-01-07'), 'cal parts');
+    const mine = cal.rows.filter((r) => r.order_id === mo.id);
+    assert.equal(mine.length, 2); assert.ok(mine.every((r) => r.part_total === 2)); assert.deepEqual(mine.map((r) => r.part_no).sort(), [1, 2]);
+  }
   console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 

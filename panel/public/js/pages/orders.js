@@ -11,6 +11,7 @@ import { CarEditor } from './cars.js';
 import { ScanBox } from '../scan.js';
 import { ReceiptBox } from '../fiscal.js';
 import { ObjectHistory } from './audit.js';
+import { OrderSlots } from './calendar.js';
 
 
 // ── Выцены: обзвон клиента (статус, причина отказа, когда перезвонить) ─────────
@@ -282,10 +283,9 @@ function Payments({ o, reload }) {
 function Plan({ o }) {
   return html`<div class="card">
     <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Записи на посты</h2>
-      <a class="btn primary sm" style="margin-left:auto" href=${`#/calendar?order=${o.id}`}><${Icon} n="cal" />Запланировать в терминарзе</a></div>
-    ${o.appointments.length ? html`<table class="tbl"><tbody>${o.appointments.map((a) => html`<tr><td class="nowrap"><b>${fdt(a.start_at) || 'без времени'}</b></td><td>${a.station_name || 'не распределено'}</td><td class="sub">${a.duration_min} мин</td><td class="sub">${a.status}</td>
-      <td class="act"><a class="btn sm" href=${'#/calendar?date=' + (a.start_at || '').slice(0, 10)}>Открыть</a></td></tr>`)}</tbody></table>`
-      : html`<div class="muted">Заказ ещё не поставлен в терминарз</div>`}
+      <a class="btn sm" style="margin-left:auto" href=${`#/calendar?order=${o.id}`}><${Icon} n="cal" />Открыть терминарз</a></div>
+    <div class="muted small" style="margin-bottom:8px">Один заказ можно разбить на части: разные посты / подъёмники и разное время (например, диагностика утром на посту 1, ремонт после обеда на подъёмнике 2).</div>
+    <${OrderSlots} orderId=${o.id} />
   </div>`;
 }
 

@@ -634,3 +634,8 @@ a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; }
 .inv-lines select.inline-input { width: 82px; min-width: 82px; }
 .inv-car .btn.sm:has(svg:only-child) { width: auto; }
 .grid > .card + .card { margin-top: 0; }
+
+/* части заказа в графике */
+.slots-tbl { margin-top: 8px; } .slots-tbl tr.on td { background: var(--accent-dim); }
+.slot-add { display: grid; grid-template-columns: 1.4fr 1fr .8fr .9fr auto; gap: 8px; margin-top: 10px; padding: 10px; border: 1px dashed var(--border2); border-radius: 10px; }
+@media (max-width: 800px) { .slot-add { grid-template-columns: 1fr 1fr; } }

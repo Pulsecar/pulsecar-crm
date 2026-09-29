@@ -267,6 +267,48 @@ function NewOrderModal({ init, onClose, onSaved }) {
 }
 
 // ── Карточка записи в графике ───────────────────────────────────────────────
+/** Части заказа в графике: один заказ можно поставить на разные посты / подъёмники и в разное время (как в Motowarsztat) */
+export function OrderSlots({ orderId, currentId, onChanged, compact }) {
+  const app = useApp();
+  const canEdit = app.perms['calendar.edit'];
+  const { data: o, reload } = useData(orderId ? 'orders/' + orderId : null, [orderId]);
+  const [add, setAdd] = useState(null);
+  const parts = (o?.appointments || []).filter((x) => x.status !== 'cancelled');
+  const cur = parts.find((x) => x.id === currentId);
+  const openAdd = () => {
+    // по умолчанию — другой пост сразу после текущей части (одна машина не может стоять на двух подъёмниках одновременно)
+    const base = cur || parts[parts.length - 1];
+    const other = app.stations.find((s) => s.active !== 0 && s.id !== base?.station_id);
+    const end = base?.start_at ? new Date(base.start_at.replace(' ', 'T')) : null;
+    if (end) end.setMinutes(end.getMinutes() + (base.duration_min || 60));
+    const pad = (n) => String(n).padStart(2, '0');
+    setAdd({ station_id: other?.id || base?.station_id || app.stations[0]?.id || '', date: end ? `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}` : todayStr(),
+      time: end ? `${pad(end.getHours())}:${pad(end.getMinutes())}` : (app.settings.hours_start || '08:00'), duration_min: 60 });
+  };
+  const save = async () => {
+    await act(() => api('appointments', { body: { order_id: orderId, station_id: Number(add.station_id) || null, start_at: add.date && add.time ? `${add.date} ${add.time}` : null, duration_min: Number(add.duration_min) || 60 } }), 'Часть заказа добавлена в график');
+    setAdd(null); reload(); onChanged?.();
+  };
+  const del = async (x) => { await act(() => api('appointments/' + x.id, { method: 'DELETE' }), 'Часть убрана из графика'); reload(); onChanged?.(); };
+  if (!o) return '';
+  const total = parts.reduce((a, x) => a + (x.duration_min || 0), 0);
+  return html`<div class=${'slots' + (compact ? ' compact' : '')}>
+    <div class="row" style="align-items:center;gap:8px"><b class="grow">Посты и время${parts.length > 1 ? ` · ${parts.length} части, всего ${h1(total / 60)}` : ''}</b>
+      ${canEdit && !add && html`<button class="btn sm" onClick=${openAdd}><${Icon} n="plus" />Ещё пост / время</button>`}</div>
+    ${parts.length ? html`<table class="tbl slots-tbl"><tbody>${parts.map((x, i) => html`<tr class=${x.id === currentId ? 'on' : ''}>
+      <td class="sub">${i + 1}/${parts.length}</td><td class="nowrap"><b>${x.start_at ? fdt(x.start_at) : 'без времени'}</b></td><td>${x.station_name || 'не распределено'}</td><td class="sub nowrap">${h1((x.duration_min || 0) / 60)}</td>
+      <td class="act nowrap">${x.id === currentId ? html`<span class="chip">эта запись</span>` : html`<a class="btn sm" href=${'#/calendar?date=' + (x.start_at || '').slice(0, 10)}>Показать</a>`}
+        ${canEdit && x.id !== currentId && html`<${ConfirmButton} cls="icon-btn" label="Убрать эту часть?" onConfirm=${() => del(x)}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table>`
+      : html`<div class="muted small">Заказ ещё не в графике</div>`}
+    ${add && html`<div class="slot-add">
+      <label class="f">Пост / подъёмник<select value=${add.station_id} onChange=${(e) => setAdd({ ...add, station_id: e.target.value })}>${app.stations.filter((s) => s.active !== 0).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+      <label class="f">Дата<input type="date" value=${add.date} onInput=${(e) => setAdd({ ...add, date: e.target.value })} /></label>
+      <label class="f">Время<input type="time" step="900" value=${add.time} onInput=${(e) => setAdd({ ...add, time: e.target.value })} /></label>
+      <label class="f">Длительность<select value=${add.duration_min} onChange=${(e) => setAdd({ ...add, duration_min: Number(e.target.value) })}>${[30, 60, 90, 120, 180, 240, 300, 360, 480].map((m) => html`<option value=${m}>${h1(m / 60)}</option>`)}</select></label>
+      <div class="row" style="align-self:end;gap:6px"><button class="btn sm" onClick=${() => setAdd(null)}>Отмена</button><button class="btn primary sm" onClick=${save}>Добавить</button></div></div>`}
+  </div>`;
+}
+
 function ApptModal({ a, onClose, onSaved }) {
   const app = useApp();
   const canEdit = app.perms['calendar.edit'];
@@ -310,6 +352,7 @@ function ApptModal({ a, onClose, onSaved }) {
         <div class="muted">${a.customer_name || ''} ${a.customer_phone || ''} · ${carName(a)} ${a.plate || ''}</div>
         ${a.order_complaint && html`<div style="margin-top:6px">${a.order_complaint}</div>`}
         <${OrderItems} a=${a} onStatus=${onSaved} /></div>
+      ${!isBlock && html`<div class="card" style="background:var(--surface2);margin-top:10px"><${OrderSlots} orderId=${a.order_id} currentId=${a.id} onChanged=${onSaved} /></div>`}
       <div class="grid g2"><label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ ...f, mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
         <label class="f">Статус записи<select value=${f.status} onChange=${(e) => set({ ...f, status: e.target.value })}>${['planned', 'arrived', 'no_show'].map((k) => html`<option value=${k}>${STATUS[k]}</option>`)}</select></label></div>` : html`
     <div class="grid g2">
