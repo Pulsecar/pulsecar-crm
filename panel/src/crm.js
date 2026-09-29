@@ -644,7 +644,8 @@ crm.get('/appointments', (req, res) => {
     FROM orders o LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id
     WHERE o.kind = 'order' AND COALESCE(st.is_final, 0) = 0 ORDER BY o.id DESC LIMIT 300`)
     .map((o) => ({ ...o, hours: Math.round((o.hours || 0) * 100) / 100 }))
-    .filter((o) => o.planned_min === 0 || o.planned_min < Math.round((o.hours || 0) * 60));
+    // заказ в графике (хоть одна часть) из «Неназначенных» уходит; ещё пост/время — кнопкой в карточке записи
+    .filter((o) => o.planned_min === 0);
   const jobs = orderJobs([...new Set([...rows, ...unassigned].map((a) => a.order_id).filter(Boolean).concat(orders.map((o) => o.id)))]);
   res.json({
     rows: rows.map((a) => ({ ...a, jobs: jobs[a.order_id] || [] })),
@@ -2016,11 +2017,46 @@ crm.post('/sales-docs', async (req, res) => {
   }
   res.json({ ...d, ...(ks || {}), warning });
 });
+/** Фактура VAT на основании Pro forma: покупатель, позиции, авто и способ оплаты копируются */
+crm.post('/sales-docs/:id/to-vat', async (req, res) => {
+  const s = who(req, 'invoices.create');
+  const pf = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
+  if (!pf || pf.kind !== 'proforma') throw new HttpError(400, 'Фактуру VAT можно выставить только на основании Pro forma');
+  const was = one(`SELECT number FROM sales_docs WHERE proforma_id = ? AND kind = 'vat'`, pf.id);
+  if (was) throw new HttpError(409, `По этой Pro forma уже выставлена ${was.number}`);
+  if (pf.order_id && one(`SELECT 1 FROM sales_docs WHERE order_id = ? AND kind = 'vat'`, pf.order_id)) throw new HttpError(409, 'По заказу уже выставлена фактура VAT');
+  const b = req.body || {};
+  const j = (v, def) => { try { return v ? JSON.parse(v) : def; } catch { return def; } };
+  const lines = j(pf.items, []);
+  const total = round2(lines.reduce((a, l) => a + (l.gross || 0), 0));
+  const split = j(pf.pay_split, null);
+  const viaKsef = getSetting('invoice_mode', 'auto') === 'auto' && KSEF.ksefEnabled();
+  const days = Math.max(0, Math.round((new Date(pf.due_date) - new Date(pf.issue_date)) / 86400000)) || 0;
+  // заказ: оплачено = оплаты заказа; без заказа — «уже оплачено» (по умолчанию да, иначе body.paid = false)
+  const paid = pf.order_id ? undefined : split?.length ? round2(split.reduce((a, x) => a + x.amount, 0)) : b.paid === false ? 0 : total;
+  const d = DOC.createSaleDoc({ kind: 'vat', orderId: pf.order_id || null, buyer: j(pf.buyer, {}), lines, issue_date: viaKsef ? today() : b.issue_date, sale_date: b.sale_date,
+    payment_method: pf.payment_method, due_days: days, notes: pf.notes, paid }, s.name);
+  run('UPDATE sales_docs SET proforma_id = ?, car = COALESCE(car, ?), pay_split = COALESCE(pay_split, ?) WHERE id = ?', pf.id, pf.car, pf.pay_split, d.id);
+  if (pf.order_id) {
+    log('order', pf.order_id, 'invoice', `${d.number} на основании ${pf.number}`, s.name);
+    const target = Number(getSetting('status_on_sale_doc', '')) || null;
+    if (target) try { setStatus(pf.order_id, target, s.name); } catch {}
+  }
+  let ks = null, warning = null;
+  if (viaKsef && (cfg('ksef')?.autoSend ?? true)) {
+    try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
+    if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил фактуру: ' + ks.ksef_error;
+  }
+  res.json({ ...one('SELECT id, number, kind, total_gross FROM sales_docs WHERE id = ?', d.id), ...(ks || {}), warning });
+});
 /** Карточка документа продажи (для просмотра и редактирования) */
 const docEditable = (d) => d.kind !== 'correction' && !d.ext_id && !d.ksef_number && !['sent', 'accepted'].includes(d.ksef_status || '');
 crm.get('/sales-docs/:id', (req, res) => {
   who(req, 'invoices.create');
-  const d = one('SELECT d.*, o.number order_no, x.number corrects_no FROM sales_docs d LEFT JOIN orders o ON o.id = d.order_id LEFT JOIN sales_docs x ON x.id = d.corrects_id WHERE d.id = ?', Number(req.params.id));
+  const d = one(`SELECT d.*, o.number order_no, x.number corrects_no, p.number proforma_no,
+      (SELECT v.id FROM sales_docs v WHERE v.proforma_id = d.id AND v.kind = 'vat') vat_id, (SELECT v.number FROM sales_docs v WHERE v.proforma_id = d.id AND v.kind = 'vat') vat_no,
+      (d.order_id IS NOT NULL AND EXISTS (SELECT 1 FROM sales_docs w WHERE w.order_id = d.order_id AND w.kind = 'vat')) order_has_vat
+    FROM sales_docs d LEFT JOIN orders o ON o.id = d.order_id LEFT JOIN sales_docs x ON x.id = d.corrects_id LEFT JOIN sales_docs p ON p.id = d.proforma_id WHERE d.id = ?`, Number(req.params.id));
   if (!d) throw new HttpError(404, 'Документ не найден');
   const j = (v, def) => { try { return v ? JSON.parse(v) : def; } catch { return def; } };
   const { ksef_xml, ...rest } = d;

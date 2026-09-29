@@ -357,6 +357,21 @@ try {
     const mine = cal.rows.filter((r) => r.order_id === mo.id);
     assert.equal(mine.length, 2); assert.ok(mine.every((r) => r.part_total === 2)); assert.deepEqual(mine.map((r) => r.part_no).sort(), [1, 2]);
   }
+  // оплаты заказа (карта + наличные) переходят в фактуру с разбивкой; Pro forma → фактура VAT
+  const po = ok(await req('/crm-api/orders', { body: { customer_id: jan.id, items: [{ kind: 'labor', name: 'Serwis', price: 500 }] } }), 'order pf');
+  ok(await req(`/crm-api/orders/${po.id}/payments`, { body: { split: [{ method: 'card', amount: 300 }, { method: 'cash', amount: 200 }] } }), 'pf pay');
+  const pfd = ok(await req(`/crm-api/orders/${po.id}/sales-docs`, { body: { kind: 'proforma' } }), 'proforma');
+  const fv2 = ok(await req(`/crm-api/sales-docs/${pfd.id}/to-vat`, { body: {} }), 'pf → vat');
+  const fv2d = ok(await req('/crm-api/sales-docs/' + fv2.id), 'fv2 get');
+  assert.equal(fv2d.kind, 'vat'); assert.equal(fv2d.proforma_id, pfd.id); assert.equal(fv2d.order_id, po.id); assert.equal(fv2d.paid, 500); assert.equal(fv2d.payment_method, 'mixed');
+  assert.deepEqual(fv2d.pay_split.map((x) => x.method + x.amount).sort(), ['card300', 'cash200']);
+  assert.equal((await req(`/crm-api/sales-docs/${pfd.id}/to-vat`, { body: {} })).status, 409, 'вторая фактура из той же Pro forma');
+  assert.equal(ok(await req('/crm-api/sales-docs/' + pfd.id), 'pf get').vat_id, fv2.id);
+  const fpr = await req('/crm-api/print/sale/' + fv2.id);
+  assert.ok(fpr.j.includes('na podstawie faktury pro forma') && fpr.j.includes('karta płatnicza: 300,00'), 'на фактуре: основание и разбивка оплаты');
+  // заказ в графике уходит из «Неназначенных»
+  ok(await req('/crm-api/appointments', { body: { order_id: po.id, station_id: (ok(await req('/crm-api/me'), 'me3').stations || [])[0]?.id, start_at: '2030-02-04 09:00', duration_min: 30 } }), 'po planned');
+  assert.ok(!ok(await req('/crm-api/appointments?from=2030-02-04&to=2030-02-04'), 'cal un').orders.some((x) => x.id === po.id), 'запланированный заказ не в «Неназначенных»');
   console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 

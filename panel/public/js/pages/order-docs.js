@@ -1,6 +1,6 @@
 // Документы заказа: печать (протоколы, спецификация, карта механика, kosztorys), фактуры VAT / Pro forma / корректы,
 // приём авто (схема повреждений, фото и файлы, подписи клиента)
-import { html, useState, useRef, api, act, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast } from '../lib.js';
+import { html, useState, useRef, api, act, go, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast, METHOD } from '../lib.js';
 
 const PRINTS = [['intake', 'Протокол приёма', 'Protokół przyjęcia'], ['estimate', 'Kosztorys / выцена', 'Kosztorys'], ['spec', 'Спецификация заказа', 'Specyfikacja'],
   ['mechanic', 'Карта для механика', 'Karta dla mechanika'], ['release', 'Протокол выдачи', 'Protokół wydania']];
@@ -33,7 +33,7 @@ export function SalesDocs({ o, reload }) {
   const [corr, setCorr] = useState(null);
   const hasVat = o.sales_docs?.some((d) => d.kind === 'vat');
   const open = (kind) => setForm({
-    kind, payment_method: o.payments?.find((p) => p.method !== 'points')?.method || o.customer?.payment_method || app.settings.payment_method_default || 'cash', due_days: o.customer?.payment_term_days ?? app.settings.payment_term_days ?? 0,
+    kind, payment_method: (() => { const m = [...new Set((o.payments || []).filter((p) => p.method !== 'points' && p.amount > 0).map((p) => p.method))]; return m.length > 1 ? 'mixed' : m[0]; })() || o.customer?.payment_method || app.settings.payment_method_default || 'cash', due_days: o.customer?.payment_term_days ?? app.settings.payment_term_days ?? 0,
     issue_date: new Date().toISOString().slice(0, 10), buyer: { name: o.customer?.company || o.customer?.name || '', nip: o.customer?.nip || '', street: o.customer?.street || '', postcode: o.customer?.postcode || '', city: o.customer?.city || '' }, notes: '',
   });
   const issue = async () => {
@@ -60,7 +60,8 @@ export function SalesDocs({ o, reload }) {
     <h2>Документы продажи</h2>
     ${o.sales_docs?.length ? html`<table class="tbl" style="margin-bottom:10px"><tbody>${o.sales_docs.map((d) => html`<tr>
       <td><b>${d.number}</b><div class="sub">${KIND[d.kind]} · ${d.issue_date}</div>${d.kind !== 'proforma' ? html`<${KsefChip} d=${d} />` : ''}</td><td class="r nowrap">${zl(d.total_gross)}</td>
-      <td class="act nowrap"><a class="btn sm" href=${'/crm-api/print/sale/' + d.id} target="_blank" rel="noopener">Открыть</a>
+      <td class="act nowrap"><a class="btn sm" href=${'#/sales/' + d.id}>Открыть</a><a class="icon-btn" title="Печать / PDF" href=${'/crm-api/print/sale/' + d.id} target="_blank" rel="noopener"><${Icon} n="print" /></a>
+        ${d.kind === 'proforma' && !hasVat && html`<button class="btn sm primary" onClick=${async () => { const r = await act(() => api(`sales-docs/${d.id}/to-vat`, { body: {} })); toast(`${r.number} выставлена из ${d.number}${r.ksef_number ? ' · KSeF ' + r.ksef_number : ''}`); if (r.warning) toast(r.warning, 'error'); go('/sales/' + r.id); }}>→ Фактура VAT</button>`}
         ${d.kind !== 'proforma' && !d.ext_url && app.features.ksef && d.ksef_status !== 'accepted' && html`<button class="btn sm" onClick=${async () => { const r = await act(() => api(`sales-docs/${d.id}/ksef`, { body: {} })); toast(r.ksef_number ? 'KSeF: ' + r.ksef_number : r.ksef_status === 'rejected' ? 'KSeF отклонил: ' + r.ksef_error : 'Отправлено, ждём номер KSeF', r.ksef_status === 'rejected' ? 'error' : 'ok'); reload(); }}>${d.ksef_status ? 'Проверить KSeF' : 'В KSeF'}</button>`}
         ${d.ksef_number && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + d.id + '/upo'}>UPO</a>`}
         ${d.kind !== 'proforma' && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + d.id + '/xml'} title="XML FA(3)">XML</a>`}
@@ -81,6 +82,7 @@ export function SalesDocs({ o, reload }) {
         <label class="f">Оплата<select value=${form.payment_method} onChange=${(e) => setForm({ ...form, payment_method: e.target.value })}>${PAYM.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>
         <label class="f">Срок оплаты, дней<input type="number" min="0" value=${form.due_days} onInput=${(e) => setForm({ ...form, due_days: e.target.value })} /></label></div>
       <label class="f" style="margin-top:10px">Примечание на документе<input value=${form.notes} onInput=${(e) => setForm({ ...form, notes: e.target.value })} placeholder="np. Zapłacono kartą" /></label>
+      ${o.paid > 0 && html`<div class="small" style="margin-top:8px">Оплаты заказа попадут на фактуру: ${[...new Set(o.payments.filter((p) => p.method !== 'points').map((p) => METHOD[p.method] || p.method))].join(' + ')} · ${zl(Math.min(o.paid, o.total))}${o.paid > o.total + 0.01 ? html` <span class="neg">(оплачено больше суммы заказа на ${zl(o.paid - o.total)})</span>` : ''}</div>`}
       <div class="muted small" style="margin-top:8px">Позиции берутся из заказа: ${o.items.length} шт. Номер — по настройке нумерации (${form.kind === 'vat' ? 'FV' : 'PRO'}).</div>
     </${Modal}>`}
 

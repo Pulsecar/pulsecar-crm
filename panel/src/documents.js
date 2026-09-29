@@ -352,6 +352,13 @@ export function createSaleDoc({ kind, orderId, buyer, issue_date, sale_date, pay
     total_net: T.net, total_vat: T.vat, total_gross: T.gross, notes: notes || null, reason: reason || null,
     ext_id: ext?.id ? String(ext.id) : null, ext_url: ext?.url || null, ksef: ext ? 1 : 0, created_by: staffName || null,
   });
+  // оплаты заказа → разбивка на фактуре (наличные / карта / BLIK / перевод), в пределах суммы документа
+  if (o && kind !== 'proforma') {
+    const by = all(`SELECT method, ROUND(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 2) amount FROM payments WHERE order_id = ? AND method <> 'points' AND transfer_id IS NULL GROUP BY method HAVING amount > 0 ORDER BY amount DESC`, o.id);
+    let left = paidAmt; const split = [];
+    for (const p of by) { const a = round2(Math.min(p.amount, left)); if (a > 0) { split.push({ method: p.method, amount: a }); left = round2(left - a); } }
+    if (split.length > 1 || pm === 'mixed') run('UPDATE sales_docs SET pay_split = ? WHERE id = ?', JSON.stringify(split), id);
+  }
   if (o && kind === 'vat') run('UPDATE orders SET invoice_no = COALESCE(invoice_no, ?) WHERE id = ?', number, o.id);
   return one('SELECT * FROM sales_docs WHERE id = ?', id);
 }
@@ -406,6 +413,7 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
       <div class="box"><h3>Sprzedawca</h3><div class="n">${esc(S.company_legal_name || S.company_name || '')}</div>${esc(S.company_legal_address || S.company_address || '')}<br>NIP: <b>${esc(S.company_nip || '—')}</b>${S.company_bank ? `<br>Nr konta: <b>${esc(S.company_bank)}</b>` : ''}</div>
       <div class="box"><h3>Nabywca</h3><div class="n">${esc(b.name || '')}</div>${esc([b.street, [b.postcode, b.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}${b.nip ? `<br>NIP: <b>${esc(b.nip)}</b>` : ''}</div>
     </div>
+    ${d.proforma_id ? (() => { const pf = one('SELECT number, issue_date FROM sales_docs WHERE id = ?', d.proforma_id); return pf ? `<div class="sub" style="margin-bottom:6px">Wystawiona na podstawie faktury pro forma ${esc(pf.number)} z dnia ${esc(pf.issue_date)}</div>` : ''; })() : ''}
     ${d.kind === 'correction' && orig ? `<div class="sec box kv"><span>Dotyczy faktury</span><b>${esc(orig.number)} z dnia ${esc(orig.issue_date)}</b><span>Data sprzedaży</span><b>${esc(orig.sale_date)}</b></div>` : ''}
     ${(() => { const c = safeJson(d.car, null); if (!c) return ''; const t = [[c.make, c.model, c.year].filter(Boolean).join(' '), c.plate && `nr rej. ${c.plate}`, c.vin && `VIN ${c.vin}`, c.mileage && `przebieg ${c.mileage} km`, c.engine && `silnik ${c.engine}`].filter(Boolean);
       return t.length ? `<div class="sec box kv"><span>Pojazd</span><b>${esc(t.join(' · '))}</b></div>` : ''; })()}

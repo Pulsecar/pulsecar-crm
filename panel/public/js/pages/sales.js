@@ -190,9 +190,12 @@ export function SaleDocPage({ id }) {
       ${st ? html`<span class="badge" style=${`border-color:${st[1]};color:${st[1]}`}>${st[0]}</span>` : d.kind !== 'proforma' ? html`<span class="sub">${d.ext_url ? 'через Fakturownia' : 'не в KSeF'}</span>` : ''}
       <div class="actions">
         ${d.editable && html`<button class="btn" onClick=${() => setEdit(true)}><${Icon} n="edit" />Редактировать</button>`}
+        ${d.kind === 'proforma' && !d.vat_id && !d.order_has_vat && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`sales-docs/${d.id}/to-vat`, { body: {} })); toast(`${r.number} выставлена${r.ksef_number ? ' · KSeF ' + r.ksef_number : ''}`); if (r.warning) toast(r.warning, 'error'); go('/sales/' + r.id); }}><${Icon} n="file" />Выставить фактуру VAT</button>`}
         ${(d.kind === 'vat' || d.kind === 'correction') && app.features.ksef && d.ksef_status !== 'accepted' && !d.ext_url && html`<button class="btn" onClick=${async () => { const x = await act(() => api(`sales-docs/${d.id}/ksef`, { body: {} })); toast(x.ksef_number ? 'KSeF: ' + x.ksef_number : 'Статус: ' + (x.ksef_status || '—'), x.ksef_status === 'rejected' ? 'error' : 'ok'); reload(); }}>Отправить в KSeF</button>`}
         ${d.ksef_number && html`<a class="btn" href=${'/crm-api/sales-docs/' + d.id + '/upo'}>UPO</a>`}
         <a class="btn primary" href=${d.ext_url || '/crm-api/print/sale/' + d.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать / PDF</a></div></div>
+    ${d.vat_id ? html`<div class="small" style="margin:-8px 0 12px">На основании этой Pro forma выставлена <a href=${'#/sales/' + d.vat_id}>${d.vat_no}</a></div>` : ''}
+    ${d.proforma_id ? html`<div class="small" style="margin:-8px 0 12px">Выставлена на основании <a href=${'#/sales/' + d.proforma_id}>${d.proforma_no}</a></div>` : ''}
     ${!d.editable && d.kind !== 'correction' && html`<div class="muted small" style="margin:-8px 0 12px">Фактура уже в KSeF${d.ext_id ? ' / Fakturownia' : ''} — изменить её можно только корректой (в заказе: «Документы продажи» → «Корректа»).</div>`}
     ${d.ksef_error && html`<div class="card" style="border-color:var(--danger);margin-bottom:12px"><b style="color:var(--danger)">KSeF:</b> ${d.ksef_error}</div>`}
     <div class="grid g3" style="margin-bottom:12px">
