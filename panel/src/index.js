@@ -70,7 +70,7 @@ app.get(/^\/admin(\/.*)?$/, (_req, res) => res.redirect('/'));
 app.use(express.static(join(root, 'public'), { index: 'index.html', maxAge: '1h',
   setHeaders: (res, path) => { if (/\.(js|mjs|css|json|html)$/.test(path) && !/[\\/]vendor[\\/]/.test(path)) res.setHeader('Cache-Control', 'no-cache'); } }));
 // приложение для клиентов (веб-версия Expo): https://…/app/
-app.get(/^\/app(\/.*)?$/, (_req, res) => res.sendFile(join(root, 'public/app/index.html')));
+app.get(/^\/app(\/[^.]*)?$/, (_req, res) => res.sendFile(join(root, 'public/app/index.html')));
 // SPA: все остальные пути — index.html
 app.get(/^\/(?!api|crm-api|vendor|ical|hooks|k\/|rezerwacja).*/, (_req, res) => res.sendFile(join(root, 'public/index.html')));
 
