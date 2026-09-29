@@ -64,7 +64,7 @@ function Balances({ app }) {
   const val = (x) => (!x ? null : x.unlimited ? '∞' : x.unknown ? '?' : x.count);
   const low = (x, n) => x && !x.unlimited && !x.unknown && x.count <= n;
   return html`<div class="bal">
-    ${b.plate && html`<button class=${'bal-chip' + (low(b.plate, 5) ? ' low' : '')} title="Сколько авто ещё можно найти по номеру" onClick=${() => setOpen(true)}><${Icon} n="car" /><${Icon} n="search" /><b>${val(b.plate)}</b></button>`}
+    ${b.plate && html`<button class=${'bal-chip' + (low(b.plate, 5) ? ' low' : '')} title="Сколько авто ещё можно найти по номеру" onClick=${() => setOpen(true)}><${Icon} n="carsearch" /><b>${val(b.plate)}</b></button>`}
     ${b.sms && html`<button class=${'bal-chip' + (low(b.sms, 20) ? ' low' : '')} title="Сколько SMS осталось" onClick=${() => setOpen(true)}><${Icon} n="chat" /><b>${val(b.sms)}</b></button>`}
     ${open && html`<${BalanceModal} app=${app} b=${b} onClose=${() => setOpen(false)} reload=${() => load(true)} />`}
   </div>`;
@@ -77,7 +77,7 @@ function BalanceModal({ app, b, onClose, reload }) {
   const put = async (body, msg) => { await act(() => api('balances', { method: 'PUT', body }), msg); await reload(); };
   const since = (x) => (x?.since ? ` · с ${new Date(x.since.replace(' ', 'T') + 'Z').toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} использовано ${x.used}` : '');
   return html`<${Modal} title="Остатки: поиск по номеру и SMS" onClose=${onClose} foot=${html`<button class="btn" onClick=${reload}><${Icon} n="history" />Обновить</button><button class="btn primary" onClick=${onClose}>Готово</button>`}>
-    <div class="bal-m">${b.plate && html`<div class="card" style="margin-bottom:12px"><div class="row"><${Icon} n="car" /><b class="grow">Поиск авто по номеру (RegCheck)</b><b style="font-size:20px">${b.plate.unknown ? '—' : b.plate.count}</b></div>
+    <div class="bal-m">${b.plate && html`<div class="card" style="margin-bottom:12px"><div class="row"><${Icon} n="carsearch" /><b class="grow">Поиск авто по номеру (RegCheck)</b><b style="font-size:20px">${b.plate.unknown ? '—' : b.plate.count}</b></div>
       <div class="muted small" style="margin:6px 0">${b.plate.unknown ? `RegCheck не сообщает остаток по API. Впишите, сколько запросов сейчас на счету — CRM будет вычитать каждый поиск.${b.plate.used30 ? ` За 30 дней поисков: ${b.plate.used30}.` : ''}` : 'Остаток считает CRM: вписанное число минус поиски' + since(b.plate)}</div>
       ${admin && html`<div class="row"><label class="f grow">Сейчас запросов на счету<input type="number" min="0" value=${plate} onInput=${(e) => setPlate(e.target.value)} placeholder="например 100" /></label>
         <button class="btn" onClick=${() => put({ kind: 'plate', count: plate }, 'Сохранено')}>Сохранить</button></div>

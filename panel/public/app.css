@@ -589,8 +589,7 @@ html.side-mini .nav-item .count { position: absolute; top: 2px; right: 2px; }
 .bal { display: flex; gap: 8px; margin-left: auto; }
 .bal + .umenu { margin-left: 0; }
 .bal-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font: inherit; }
-.bal-chip svg { width: 16px; height: 16px; color: var(--muted); }
-.bal-chip svg + svg { width: 12px; height: 12px; margin-left: -6px; margin-top: 8px; }
+.bal-chip svg { width: 19px; height: 19px; color: var(--muted); }
 .bal-chip b { margin-left: 4px; font-variant-numeric: tabular-nums; }
 .bal-chip.low { border-color: var(--warn); }
 .bal-chip.low b { color: var(--warn); }
