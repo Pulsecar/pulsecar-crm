@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Body, Button, Card, H1, H2, IconBadge } from '../components/ui';
+import { Body, Button, Card, H1, H2, IconBadge, open } from '../components/ui';
 import { colors, fonts } from '../theme';
 import { useT, UIKey } from '../i18n';
 import { useNav } from '../nav';
@@ -67,8 +67,22 @@ export default function Profile() {
                   <Text style={st.carTitle}>{v.orderNo}</Text>
                   <Text style={[st.status, { backgroundColor: v.statusColor || colors.accent }]}>{v.status}</Text>
                 </View>
-                {v.items.slice(0, 5).map((it, i) => <Text key={i} style={st.itemName}>• {it.name}</Text>)}
-                {!!v.total && <Text style={[st.visitTotal, { marginTop: 6 }]}>{fmtZl(v.total)}</Text>}
+                {v.items.slice(0, 6).map((it, i) => <Text key={i} style={st.itemName}>• {it.name}{it.qty && it.qty !== 1 ? ` ×${it.qty}` : ''}</Text>)}
+                {v.items.length > 6 && <Text style={st.small}>+{v.items.length - 6}</Text>}
+                {!!v.total && (
+                  <Text style={[st.visitTotal, { marginTop: 6 }]}>
+                    {fmtZl(v.total)}
+                    <Text style={st.small}>  {v.due && v.due > 0.01 ? `${t('toPay')}: ${fmtZl(v.due)}` : t('paidAll')}</Text>
+                  </Text>
+                )}
+                {(!!v.cardUrl || !!v.payLink) && (
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                    {!!v.cardUrl && <Button small variant="outline" icon="document-text-outline" title={t('orderCard')} onPress={() => open(v.cardUrl!)} style={{ flex: 1 }} />}
+                    {!!v.due && v.due > 0.01 && (
+                      <Button small icon="card-outline" title={`${t('payNow')} ${fmtZl(v.due)}`} onPress={() => open(v.payLink || v.cardUrl!)} style={{ flex: 1 }} />
+                    )}
+                  </View>
+                )}
               </Card>
             ))}
           </View>
@@ -86,6 +100,88 @@ export default function Profile() {
               </View>
             ))}
           </Card>
+        </>
+      )}
+
+      {/* Сметы, ждущие решения клиента */}
+      {!!me?.quotes?.length && (
+        <>
+          <H2 style={{ marginTop: 26, marginBottom: 4 }}>{t('quotesTitle')}</H2>
+          <Text style={[st.small, { marginBottom: 12 }]}>{t('quotesHint')}</Text>
+          <View style={{ gap: 10 }}>
+            {me.quotes.map((q) => (
+              <Card key={q.no}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.carTitle}>{q.no}</Text>
+                    <Text style={st.small}>{fmtDate(q.date)}{q.car ? ` · ${q.car}` : ''}{q.plate && q.car !== q.plate ? ` · ${q.plate}` : ''}</Text>
+                  </View>
+                  {q.accepted && <Text style={[st.status, { backgroundColor: colors.accent }]}>{t('quoteAccepted')}</Text>}
+                </View>
+                <View style={{ marginTop: 8, gap: 3 }}>
+                  {q.items.slice(0, 6).map((it, i) => (
+                    <View key={i} style={st.item}>
+                      <Text style={st.itemName}>• {it.name}{it.qty && it.qty !== 1 ? ` ×${it.qty}` : ''}</Text>
+                      {it.price !== null && <Text style={st.itemPrice}>{fmtZl(it.price * (it.qty || 1))}</Text>}
+                    </View>
+                  ))}
+                  {q.items.length > 6 && <Text style={st.small}>+{q.items.length - 6}</Text>}
+                </View>
+                <Text style={[st.visitTotal, { marginTop: 8 }]}>{fmtZl(q.total)}</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                  {!!q.cardUrl && (
+                    <Button small icon={q.accepted ? 'document-text-outline' : 'checkmark-circle-outline'} title={q.accepted ? t('orderCard') : t('quoteOpen')}
+                      onPress={() => open(q.cardUrl!)} style={{ flex: 1 }} />
+                  )}
+                  <Button small variant="outline" icon="calendar-outline" title={t('quoteBook')} style={{ flex: 1 }}
+                    onPress={() => nav.go('booking', { note: `${q.no}${q.car ? ' · ' + q.car : ''} ${q.plate || ''}`.trim() })} />
+                </View>
+              </Card>
+            ))}
+          </View>
+        </>
+      )}
+
+      {/* Хранение шин и парковка */}
+      {!!me?.storage?.length && (
+        <>
+          <H2 style={{ marginTop: 26, marginBottom: 12 }}>{t('storageTitle')}</H2>
+          <View style={{ gap: 10 }}>
+            {me.storage.map((x) => {
+              const left = Math.round((x.due - x.paid) * 100) / 100;
+              const parking = x.kind === 'parking';
+              return (
+                <Card key={x.no}>
+                  <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                    <IconBadge name={parking ? 'car-outline' : 'disc-outline'} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.carTitle}>
+                        {parking ? t('kindParking') : x.kind === 'koła' ? t('kindWheels') : t('kindTires')}
+                        {!parking && x.qty ? <Text style={st.small}>  {x.qty} {t('pcs')}</Text> : null}
+                      </Text>
+                      {!!x.description && <Text style={st.itemName}>{x.description}</Text>}
+                      <Text style={st.small}>
+                        {x.no}{x.car ? ` · ${x.car}` : ''}{x.plate ? ` · ${x.plate}` : ''}
+                      </Text>
+                      <Text style={st.small}>
+                        {t('storedSince')} {fmtDate(x.since)}{x.until ? ` ${t('storedUntil')} ${fmtDate(x.until)}` : ''}
+                      </Text>
+                    </View>
+                    {x.due > 0 && (
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[st.visitTotal, left > 0.01 ? { color: colors.danger } : null]}>{fmtZl(left > 0.01 ? left : x.due)}</Text>
+                        <Text style={st.small}>{left > 0.01 ? t('toPay') : t('paidAll')}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {!parking && (
+                    <Button small variant="outline" icon="calendar-outline" title={t('getTires')} style={{ marginTop: 12 }}
+                      onPress={() => nav.go('booking', { service: 'tires', note: `${x.no}${x.plate ? ' · ' + x.plate : ''}` })} />
+                  )}
+                </Card>
+              );
+            })}
+          </View>
         </>
       )}
 

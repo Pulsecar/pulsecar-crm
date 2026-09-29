@@ -7,6 +7,7 @@ import { useT } from '../i18n';
 import { useNav } from '../nav';
 import { CONTACT, SERVICES, WHY } from '../data';
 import { openStatus } from '../hours';
+import { useAccount } from '../account';
 
 export const SOCIALS: { label: string; icon: IconName; url: string }[] = [
   { label: 'WhatsApp', icon: 'logo-whatsapp', url: CONTACT.whatsapp },
@@ -19,6 +20,9 @@ export default function Home() {
   const { t, p } = useT();
   const nav = useNav();
   const st = openStatus();
+  const acc = useAccount();
+  const active = acc.session ? acc.me?.activeOrders?.[0] : undefined;
+  const quotesN = acc.session ? acc.me?.quotes?.filter((q) => !q.accepted).length || 0 : 0;
 
   const promo: { icon: IconName; title: string; text: string; cta: string; onPress: () => void }[] = [
     { icon: 'qr-code-outline', title: t('cardPromoTitle'), text: t('cardPromoText'), cta: t('cardPromoCta'), onPress: () => nav.go('card') },
@@ -38,6 +42,27 @@ export default function Home() {
           {st.open ? `${t('openNow')} · ${t('until')} ${st.closesAt}:00` : t('closedNow')}
         </Text>
       </View>
+
+      {!!active && (
+        <Pressable onPress={() => nav.go('profile')} style={[st_.banner, { borderColor: active.statusColor || colors.accent }]}>
+          <Ionicons name="car-sport" size={22} color={active.statusColor || colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={st_.bannerTitle}>{t('activeBanner')}</Text>
+            <Text style={st_.bannerSub}>{active.orderNo}{active.status ? ` · ${active.status}` : ''}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </Pressable>
+      )}
+      {quotesN > 0 && (
+        <Pressable onPress={() => nav.go('profile')} style={[st_.banner, { borderColor: colors.accent }]}>
+          <Ionicons name="document-text-outline" size={22} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={st_.bannerTitle}>{t('quotesTitle')} · {quotesN}</Text>
+            <Text style={st_.bannerSub}>{t('quoteOpen')}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </Pressable>
+      )}
 
       <H1 style={{ textAlign: 'center' }}>
         {t('heroTitle')} – <Text style={{ color: colors.accent }}>Pulsecar</Text>
@@ -105,6 +130,9 @@ export default function Home() {
 
 const st_ = StyleSheet.create({
   wrap: { padding: 20, paddingBottom: 40 },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1, backgroundColor: colors.surface, marginBottom: 12 },
+  bannerTitle: { fontFamily: fonts.semibold, color: colors.text, fontSize: 15 },
+  bannerSub: { fontFamily: fonts.regular, color: colors.muted, fontSize: 13 },
   status: {
     alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 18,
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.border,

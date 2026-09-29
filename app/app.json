@@ -2,14 +2,14 @@
   "expo": {
     "name": "Pulsecar",
     "slug": "pulsecar",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "pl.pulsecar.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "whatsapp",
@@ -23,7 +23,7 @@
     },
     "android": {
       "package": "pl.pulsecar.app",
-      "versionCode": 1,
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#101113",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -36,7 +36,8 @@
       "favicon": "./assets/favicon.png",
       "name": "Pulsecar",
       "backgroundColor": "#101113",
-      "themeColor": "#101113"
+      "themeColor": "#101113",
+      "output": "single"
     },
     "plugins": [
       "expo-font",
@@ -54,6 +55,9 @@
     ],
     "scheme": "pulsecar",
     "backgroundColor": "#101113",
-    "description": "Warsztat samochodowy Pulsecar — Warszawa Bielany, ul. Arkuszowa 176"
+    "description": "Warsztat samochodowy Pulsecar — Warszawa Bielany, ul. Arkuszowa 176",
+    "experiments": {
+      "baseUrl": "/app"
+    }
   }
 }

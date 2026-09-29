@@ -6,6 +6,7 @@ import { HttpError, newCardNo, normPhone, randomHex, safeEqual, sha256 } from '.
 import { sendSms } from './sms.js';
 import { loyaltySummary, welcomeBonus } from './loyalty.js';
 import { notify } from './integrations/notify.js';
+import { cardUrl } from './messaging.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '50kb' }));
@@ -103,11 +104,24 @@ api.get('/me', (req, res) => {
      WHERE o.customer_id = ? AND o.kind = 'order' ORDER BY COALESCE(o.closed_at, o.created_at) DESC, o.id DESC`, c.id,
   );
   const items = all(
-    `SELECT i.* FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.customer_id = ? AND o.kind = 'order' ORDER BY i.pos, i.id`, c.id,
+    `SELECT i.* FROM order_items i JOIN orders o ON o.id = i.order_id WHERE o.customer_id = ? AND o.kind IN ('order','quote') ORDER BY i.pos, i.id`, c.id,
   );
+  const lastId = orders[0]?.id;
+  const safeCard = (id) => { try { return cardUrl(id); } catch { return null; } };
+  // выцены, которые ждут решения клиента (не завершены и ещё не стали заказом)
+  const quotes = all(
+    `SELECT o.*, st.is_final, k.make, k.model, k.plate FROM orders o LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN cars k ON k.id = o.car_id
+     WHERE o.customer_id = ? AND o.kind = 'quote' AND COALESCE(st.is_final,0) = 0 AND o.total > 0
+       AND NOT EXISTS (SELECT 1 FROM orders z WHERE z.quote_id = o.id) AND o.created_at >= datetime('now','-120 days')
+     ORDER BY o.id DESC LIMIT 10`, c.id,
+  );
+  const storage = all(`SELECT s.*, k.make, k.model, k.plate FROM storage s LEFT JOIN cars k ON k.id = s.car_id WHERE s.customer_id = ? AND s.date_out IS NULL ORDER BY s.id DESC`, c.id);
+  const days = (a) => Math.max(1, Math.round((Date.now() - new Date(a + 'T12:00:00').getTime()) / 86400000) + 1);
   const visitOut = (v) => ({
     orderNo: v.number, date: (v.closed_at || v.created_at || '').slice(0, 10), mileage: v.mileage, total: v.total,
     active: !v.is_final, status: v.client_label || v.status_name || null, statusColor: v.status_color || null,
+    due: Math.max(0, Math.round(((v.total || 0) - (v.paid || 0)) * 100) / 100), payLink: v.pay_link || null,
+    cardUrl: !v.is_final || v.id === lastId ? safeCard(v.id) : null,
     items: items.filter((i) => i.order_id === v.id).map((i) => ({ name: i.name, kind: i.kind === 'part' ? 'część' : 'usługa', qty: i.qty, price: i.price })),
   });
   const upcoming = all(
@@ -120,12 +134,22 @@ api.get('/me', (req, res) => {
     customer: { name: c.name, phone: c.phone, email: c.email, cardNo: c.card_no, since: c.registered_at },
     loyalty: loyaltySummary(c.id),
     cars: cars.map((car) => ({
-      id: car.id, plate: car.plate, vin: car.vin, make: car.make, model: car.model, year: car.year, lastMileage: car.last_mileage,
+      id: car.id, plate: car.plate, vin: car.vin, make: car.make, model: car.model, year: car.year == null ? null : String(car.year).replace(/\.0+$/, ''), lastMileage: car.last_mileage,
       visits: orders.filter((v) => v.car_id === car.id).map(visitOut),
     })),
     otherVisits: orders.filter((v) => !v.car_id || !cars.some((k) => k.id === v.car_id)).map(visitOut),
     activeOrders: orders.filter((v) => !v.is_final).map(visitOut),
     appointments: upcoming.map((a) => ({ start: a.start_at, status: a.status, title: a.title })),
+    quotes: quotes.map((q) => ({
+      no: q.number, date: (q.created_at || '').slice(0, 10), total: q.total, accepted: !!q.accepted_at,
+      car: [q.make, q.model].filter(Boolean).join(' ') || q.plate || null, plate: q.plate || null, cardUrl: safeCard(q.id),
+      items: items.filter((i) => i.order_id === q.id).map((i) => ({ name: i.name, kind: i.kind === 'part' ? 'część' : 'usługa', qty: i.qty, price: i.price })),
+    })),
+    storage: storage.map((x) => {
+      const due = x.kind === 'parking' ? Math.round(days(x.date_in) * (x.price || 0) * 100) / 100 : x.price || 0;
+      return { no: x.number, kind: x.kind, description: x.description, qty: x.qty, since: x.date_in, until: x.date_until,
+        car: [x.make, x.model].filter(Boolean).join(' ') || null, plate: x.plate || null, due, paid: x.paid || 0 };
+    }),
     transactions: all('SELECT * FROM transactions WHERE customer_id = ? ORDER BY id DESC LIMIT 100', c.id).map((t) => ({
       type: t.type, points: t.points, amount: t.amount_pln, orderNo: t.order_no, date: t.created_at, note: t.note,
     })),

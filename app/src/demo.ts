@@ -63,7 +63,7 @@ export const DEMO_ME: Me = {
   otherVisits: [],
   activeOrders: [
     {
-      orderNo: 'ZL 296/09/2026', date: '2026-09-27', mileage: 186000, total: 610, active: true, status: 'W naprawie', statusColor: '#FF9F43',
+      orderNo: 'ZL 296/09/2026', date: '2026-09-27', mileage: 186000, total: 610, active: true, status: 'W naprawie', statusColor: '#FF9F43', due: 610, cardUrl: 'https://panel.pulsecar.tech/app/',
       items: [
         { name: 'Wymiana łącznika stabilizatora', kind: 'usługa', qty: 1, price: 100 },
         { name: 'Łącznik stabilizatora Lemförder', kind: 'część', qty: 2, price: 130 },
@@ -72,6 +72,18 @@ export const DEMO_ME: Me = {
     },
   ],
   appointments: [{ start: '2026-10-06 10:00', status: 'planned', title: 'Klimatyzacja — serwis' }],
+  quotes: [
+    {
+      no: 'WY 41/09/2026', date: '2026-09-27', total: 890, accepted: false, car: 'Škoda Octavia', plate: 'WX 12345', cardUrl: 'https://panel.pulsecar.tech/app/',
+      items: [
+        { name: 'Wymiana klocków i tarcz — przód', kind: 'usługa', qty: 1, price: 250 },
+        { name: 'Tarcze + klocki TRW — komplet', kind: 'część', qty: 1, price: 640 },
+      ],
+    },
+  ],
+  storage: [
+    { no: 'PR/2026/031', kind: 'opony', description: 'Michelin Alpin 6 205/55 R16, DOT 2223', qty: 4, since: '2026-04-12', until: '2026-11-15', car: 'Škoda Octavia', plate: 'WX 12345', due: 200, paid: 200 },
+  ],
   transactions: [
     { type: 'earn', points: 280, amount: 560, orderNo: 'ZL/2026/0412', date: '2026-09-20 15:12:00', note: null },
     { type: 'earn', points: 725, amount: 1450, orderNo: 'ZL/2026/0233', date: '2026-06-11 17:40:00', note: null },

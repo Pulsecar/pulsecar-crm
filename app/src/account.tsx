@@ -6,7 +6,10 @@ import { DEMO_ME, DEMO_SESSION } from './demo';
 
 // ── Типы ответа сервера ────────────────────────────────────────────────────
 export type Item = { name: string; kind: string | null; qty: number | null; price: number | null };
-export type Visit = { orderNo: string; date: string | null; mileage: number | null; total: number | null; items: Item[]; active?: boolean; status?: string | null; statusColor?: string | null };
+export type Visit = { orderNo: string; date: string | null; mileage: number | null; total: number | null; items: Item[]; active?: boolean; status?: string | null; statusColor?: string | null;
+  due?: number; payLink?: string | null; cardUrl?: string | null };
+export type Quote = { no: string; date: string; total: number; accepted: boolean; car: string | null; plate: string | null; cardUrl: string | null; items: Item[] };
+export type StorageItem = { no: string; kind: string; description: string | null; qty: number | null; since: string; until: string | null; car: string | null; plate: string | null; due: number; paid: number };
 export type Car = {
   id: number; plate: string | null; vin: string | null; make: string | null; model: string | null; year: string | null;
   lastMileage: number | null; visits: Visit[];
@@ -25,6 +28,8 @@ export type Me = {
   otherVisits: Visit[];
   activeOrders?: Visit[];
   appointments?: { start: string | null; status: string; title: string | null }[];
+  quotes?: Quote[];
+  storage?: StorageItem[];
   transactions: Tx[];
 };
 export type Session = { token: string; qrSecret: string; cardNo: string; demo?: boolean };
