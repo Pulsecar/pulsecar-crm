@@ -187,7 +187,7 @@ function Shell({ app }) {
   const active = (to) => (to === '/' ? route.path === '/' : route.path.startsWith(to));
   return html`<div class="shell">
     <aside class=${'side' + (menu ? ' open' : '')}>
-      <div class="brand"><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar" /></div>
+      <a class="brand" href="#/" title="На главную" onClick=${() => setMenu(false)}><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar — на главную" /></a>
       ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
         <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label}>
           <${Icon} n=${n.icon} /><span class="nl">${n.label}</span>${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}

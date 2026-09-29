@@ -594,3 +594,4 @@ html.side-mini .nav-item .count { position: absolute; top: 2px; right: 2px; }
 .bal-chip.low { border-color: var(--warn); }
 .bal-chip.low b { color: var(--warn); }
 .bal-m .row > svg { width: 20px; height: 20px; color: var(--muted); flex: none; }
+a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; } a.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
