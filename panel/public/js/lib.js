@@ -60,7 +60,9 @@ export const fdt = (s) => (s ? `${fdate(s)} ${s.slice(11, 16)}` : '');
 export const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export const addDays = (s, n) => { const d = new Date(s + 'T12:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export const carName = (k) => (k ? [k.make, k.model].filter(Boolean).join(' ') || k.plate || k.vin || '—' : '—');
-export const METHOD = { cash: 'Наличные', card: 'Карта', transfer: 'Перевод', points: 'Баллы' };
+export const METHOD = { cash: 'Наличные', card: 'Карта', blik: 'BLIK', transfer: 'Перевод', mixed: 'Смешанная оплата', points: 'Баллы' };
+/** Способы, которыми принимаем деньги (платёж). «Смешанная» — это несколько платежей разными способами */
+export const PAY_KINDS = ['cash', 'card', 'blik', 'transfer'];
 
 // ── Тосты ──────────────────────────────────────────────────────────────────
 let pushToast = () => {};

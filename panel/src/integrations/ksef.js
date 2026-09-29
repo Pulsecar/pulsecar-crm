@@ -131,7 +131,7 @@ const x = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<
 const amt = (n) => { const v = round2(n); return (Object.is(v, -0) || v === 0 ? 0 : v).toFixed(2); };
 const price = (n) => { const v = Math.round((Number(n) || 0) * 10000) / 10000; return String(v === 0 ? 0 : v); };
 const qty = (n) => String(Math.round((Number(n) || 0) * 1e6) / 1e6);
-const PAY = { cash: 1, card: 2, transfer: 6, points: 3 };
+const PAY = { cash: 1, card: 2, blik: 7, transfer: 6, points: 3 };
 const RATE_FIELD = { 23: ['P_13_1', 'P_14_1'], 22: ['P_13_1', 'P_14_1'], 8: ['P_13_2', 'P_14_2'], 7: ['P_13_2', 'P_14_2'], 5: ['P_13_3', 'P_14_3'], 0: ['P_13_6_1', null] };
 function splitAddr(a) {
   const s = String(a || '').trim();
@@ -187,7 +187,8 @@ export function buildFa3(d, S = Object.fromEntries(all('SELECT key, value FROM s
   const paid = d.kind !== 'correction' && d.paid >= d.total_gross - 0.005 && d.total_gross > 0;
   const bank = digits(S.company_bank).length >= 10 ? `<RachunekBankowy><NrRB>${digits(S.company_bank)}</NrRB>${S.company_bank_name ? `<NazwaBanku>${x(S.company_bank_name)}</NazwaBanku>` : ''}</RachunekBankowy>` : '';
   const platnosc = d.kind === 'correction' ? '' : `<Platnosc>${paid ? `<Zaplacono>1</Zaplacono><DataZaplaty>${d.issue_date}</DataZaplaty>` : `<TerminPlatnosci><Termin>${d.due_date || d.issue_date}</Termin></TerminPlatnosci>`}`
-    + `<FormaPlatnosci>${PAY[d.payment_method] || 1}</FormaPlatnosci>${d.payment_method === 'transfer' ? bank : ''}</Platnosc>`;
+    + (d.payment_method === 'mixed' ? '<PlatnoscInna>1</PlatnoscInna><OpisPlatnosci>Płatność mieszana</OpisPlatnosci>' : `<FormaPlatnosci>${PAY[d.payment_method] || 1}</FormaPlatnosci>`)
+    + `${d.payment_method === 'transfer' || d.payment_method === 'mixed' ? bank : ''}</Platnosc>`;
   const contact = S.company_email || S.company_phone ? `<DaneKontaktowe>${S.company_email ? `<Email>${x(S.company_email)}</Email>` : ''}${S.company_phone ? `<Telefon>${x(digits(S.company_phone).slice(-16))}</Telefon>` : ''}</DaneKontaktowe>` : '';
   const stopka = [S.company_krs && `KRS: ${S.company_krs}`, S.company_regon && `REGON: ${S.company_regon}`, S.company_bdo && `BDO: ${S.company_bdo}`, S.company_capital && `Kapitał zakładowy: ${S.company_capital}`].filter(Boolean);
   return `<?xml version="1.0" encoding="UTF-8"?>

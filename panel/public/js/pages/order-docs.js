@@ -17,7 +17,7 @@ export function DocsMenu({ o }) {
 }
 
 const KIND = { vat: 'Фактура VAT', proforma: 'Pro forma', correction: 'Корректа' };
-const PAYM = [['cash', 'Наличные'], ['card', 'Карта'], ['transfer', 'Перевод']];
+const PAYM = [['cash', 'Наличные'], ['card', 'Карта'], ['blik', 'BLIK'], ['transfer', 'Перевод'], ['mixed', 'Смешанная оплата']];
 
 const KS = { accepted: ['Przyjęty', 'var(--accent)'], sent: ['Wysłano, ждём номер', 'var(--warn)'], rejected: ['Odrzucony', 'var(--danger)'], error: ['Ошибка отправки', 'var(--danger)'] };
 function KsefChip({ d }) {

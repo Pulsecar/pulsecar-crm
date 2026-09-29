@@ -1,6 +1,6 @@
 import {
   html, useState, useEffect, useData, api, act, go, qs, useApp, Loading, ErrorBox, Badge, Icon, Modal, Field, Pager, Picker,
-  ConfirmButton, useDebounced, zl, num, fdate, fdt, carName, METHOD, toast,
+  ConfirmButton, useDebounced, zl, num, fdate, fdt, carName, METHOD, PAY_KINDS, toast,
 } from '../lib.js';
 import { SupplierParts } from './suppliers.js';
 import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
@@ -212,13 +212,17 @@ function Payments({ o, reload }) {
   const app = useApp();
   const due = Math.max(0, Math.round((o.total - o.paid) * 100) / 100);
   const [p, setP] = useState({ method: 'card', amount: due || '' });
+  const [split, setSplit] = useState({ cash: '', card: '', blik: '', transfer: '' });
+  const mixed = p.method === 'mixed';
+  const splitSum = Math.round(PAY_KINDS.reduce((a, k) => a + (Number(split[k]) || 0), 0) * 100) / 100;
   const [scan, setScan] = useState(null); // {ticket, limits, client}
   const [scanOpen, setScanOpen] = useState(false);
   const [pts, setPts] = useState('');
   const [askReceipt, setAskReceipt] = useState(0);
   const addPay = async () => {
-    const r = await act(() => api(`orders/${o.id}/payments`, { body: p }), 'Оплата добавлена');
-    setP({ ...p, amount: '' }); reload();
+    const body = mixed ? { split: PAY_KINDS.map((k) => ({ method: k, amount: Number(split[k]) || 0 })).filter((x) => x.amount > 0) } : p;
+    const r = await act(() => api(`orders/${o.id}/payments`, { body }), 'Оплата добавлена');
+    setP({ ...p, amount: '' }); setSplit({ cash: '', card: '', blik: '', transfer: '' }); reload();
     if (r && app.features.fiscal?.autoOnPay && !(o.receipts || []).some((x) => x.status === 'printed')) setAskReceipt(Date.now());
   };
   const onScan = async (data) => {
@@ -237,10 +241,16 @@ function Payments({ o, reload }) {
         <td class="act">${app.user.role === 'admin' && x.method !== 'points' ? html`<${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api(`orders/${o.id}/payments/${x.id}`, { method: 'DELETE' })); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>` : ''}</td></tr>`)}</tbody></table>`
         : html`<div class="muted">Оплат пока нет</div>`}
       <div class="row end" style="margin-top:14px">
-        <label class="f">Способ<select value=${p.method} onChange=${(e) => setP({ ...p, method: e.target.value })}><option value="card">Карта</option><option value="cash">Наличные</option><option value="transfer">Перевод</option></select></label>
-        <label class="f" style="width:140px">Сумма<input type="number" step="0.01" value=${p.amount} onInput=${(e) => setP({ ...p, amount: e.target.value })} /></label>
-        <button class="btn primary" onClick=${addPay} disabled=${!(Number(p.amount) > 0)}>Принять оплату</button>
+        <label class="f">Способ<select value=${p.method} onChange=${(e) => setP({ ...p, method: e.target.value })}>
+          ${['card', 'cash', 'blik', 'transfer', 'mixed'].map((k) => html`<option value=${k}>${METHOD[k]}</option>`)}</select></label>
+        ${!mixed && html`<label class="f" style="width:140px">Сумма<input type="number" step="0.01" value=${p.amount} onInput=${(e) => setP({ ...p, amount: e.target.value })} /></label>`}
+        <button class="btn primary" onClick=${addPay} disabled=${mixed ? !(splitSum > 0) : !(Number(p.amount) > 0)}>Принять оплату${mixed && splitSum > 0 ? ' ' + zl(splitSum) : ''}</button>
       </div>
+      ${mixed && html`<div class="pay-split">
+        ${PAY_KINDS.map((k) => html`<label class="f">${METHOD[k]}<input type="number" step="0.01" min="0" value=${split[k]} placeholder="0,00"
+          onInput=${(e) => setSplit({ ...split, [k]: e.target.value })} /></label>`)}
+        <div class="small ${Math.abs(splitSum - due) < 0.01 ? 'pos' : 'muted'}">Итого ${zl(splitSum)} из ${zl(due)}${due - splitSum > 0.01 ? html` · <a href="#" onClick=${(e) => { e.preventDefault(); const k = PAY_KINDS.find((x) => !(Number(split[x]) > 0)) || 'card'; setSplit({ ...split, [k]: String(Math.round((due - splitSum + (Number(split[k]) || 0)) * 100) / 100) }); }}>дополнить остаток</a>` : ''}</div>
+      </div>`}
       <${ReceiptBox} o=${o} reload=${reload} ask=${askReceipt} />
       ${!app.features.fiscal && html`<label class="f" style="margin-top:14px;max-width:260px">Номер чека с кассового аппарата<input value=${o.receipt_no || ''} onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { receipt_no: e.target.value } }), 'Сохранено'); }} placeholder="например 000123" /></label>`}
     </div>

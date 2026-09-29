@@ -144,6 +144,9 @@ function Login({ onDone }) {
 
 function Shell({ app }) {
   const route = useRoute();
+  // левое меню можно свернуть стрелкой (как в Motowarsztat): остаются иконки с подписями разделов
+  const [mini, setMini] = useState(() => { try { return localStorage.getItem('pc.side.mini') === '1'; } catch { return false; } });
+  const toggleMini = () => { const v = !mini; setMini(v); try { localStorage.setItem('pc.side.mini', v ? '1' : '0'); } catch {} };
   const [menu, setMenu] = useState(false);
   const [q, setQ] = useState('');
   const [requests, setRequests] = useState(0);
@@ -185,8 +188,9 @@ function Shell({ app }) {
   else page = html`<div class="empty">Страница не найдена</div>`;
 
   const active = (to) => (to === '/' ? route.path === '/' : route.path.startsWith(to));
-  return html`<div class="shell">
+  return html`<div class=${'shell' + (mini ? ' mini' : '')}>
     <aside class=${'side' + (menu ? ' open' : '')}>
+      <button class="side-toggle" onClick=${toggleMini} title=${mini ? 'Развернуть меню' : 'Свернуть меню'} aria-label=${mini ? 'Развернуть меню' : 'Свернуть меню'}><${Icon} n=${mini ? 'right' : 'left'} /></button>
       <a class="brand" href="#/" title="На главную" onClick=${() => setMenu(false)}><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar — на главную" /></a>
       ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
         <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label}>

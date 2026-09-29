@@ -33,7 +33,7 @@ export default function Cash() {
     <div class="grid g4" style="margin:12px 0">
       <div class="stat accent"><b>${zl(data?.cashBalance)}</b><span>Наличных во всех кассах</span></div>
       <div class="stat"><b>${zl(data?.period.cashIn)}</b><span>Наличные за период · расход ${zl(data?.period.cashOut)}</span></div>
-      <div class="stat"><b>${zl(data?.period.card)}</b><span>Картой за период</span></div>
+      <div class="stat"><b>${zl((data?.period.card || 0) + (data?.period.blik || 0))}</b><span>Картой за период${data?.period.blik ? html` · из них BLIK ${zl(data.period.blik)}` : ''}</span></div>
       <div class="stat"><b>${zl(data?.period.transfer)}</b><span>Переводом · баллами ${zl(data?.period.points)}</span></div>
     </div>
     <div class="card" style="margin-bottom:12px"><div class="row end">

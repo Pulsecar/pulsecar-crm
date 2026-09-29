@@ -15,7 +15,7 @@ export const SETTINGS_SCHEMA = [
       yes('proforma_on', 'Фактуры Pro forma'),
     ] },
     { title: 'Оплата', fields: [
-      sel('payment_method_default', 'Способ оплаты по умолчанию', [['cash', 'Наличные'], ['card', 'Карта'], ['transfer', 'Перевод']]),
+      sel('payment_method_default', 'Способ оплаты по умолчанию', [['cash', 'Наличные'], ['card', 'Карта'], ['blik', 'BLIK'], ['transfer', 'Перевод'], ['mixed', 'Смешанная оплата']]),
       num('payment_term_days', 'Срок оплаты фактуры, дней'),
     ] },
     { title: 'Печать документов', fields: [

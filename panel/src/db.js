@@ -472,8 +472,9 @@ if (!one('SELECT 1 FROM cash_registers')) {
     Number(one(`SELECT value FROM settings WHERE key = 'cash_opening'`)?.value || 0) || 0);
   run(`UPDATE payments SET register_id = (SELECT id FROM cash_registers WHERE kind = CASE payments.method WHEN 'cash' THEN 'cash' WHEN 'card' THEN 'card' WHEN 'transfer' THEN 'bank' END ORDER BY is_default DESC, pos LIMIT 1) WHERE register_id IS NULL`);
 }
-db.exec(`CREATE TRIGGER IF NOT EXISTS payments_register AFTER INSERT ON payments WHEN NEW.register_id IS NULL AND NEW.method <> 'points' BEGIN
-  UPDATE payments SET register_id = (SELECT id FROM cash_registers WHERE active = 1 AND kind = CASE NEW.method WHEN 'cash' THEN 'cash' WHEN 'card' THEN 'card' WHEN 'transfer' THEN 'bank' END ORDER BY is_default DESC, pos LIMIT 1) WHERE id = NEW.id;
+// BLIK проходит через платёжный терминал — попадает в кассу «карта»
+db.exec(`DROP TRIGGER IF EXISTS payments_register; CREATE TRIGGER payments_register AFTER INSERT ON payments WHEN NEW.register_id IS NULL AND NEW.method <> 'points' BEGIN
+  UPDATE payments SET register_id = (SELECT id FROM cash_registers WHERE active = 1 AND kind = CASE NEW.method WHEN 'cash' THEN 'cash' WHEN 'card' THEN 'card' WHEN 'blik' THEN 'card' WHEN 'transfer' THEN 'bank' END ORDER BY is_default DESC, pos LIMIT 1) WHERE id = NEW.id;
 END`);
 // ── Документы продажи, подписи клиента, файлы заказа ─────────────────────────
 db.exec(`

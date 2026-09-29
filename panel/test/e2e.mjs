@@ -315,6 +315,29 @@ try {
   assert.ok('sms' in bal0 && 'plate' in bal0);
   ok(await req('/crm-api/balances', { method: 'PUT', body: { kind: 'sms', count: 50 } }), 'set sms balance');
   ok(await req('/crm-api/balances', { method: 'PUT', body: { kind: 'plate', count: 14 } }), 'set plate balance');
+  // BLIK и смешанная оплата: несколько платежей за раз, фактура → «Płatność mieszana»
+  const mo = ok(await req('/crm-api/orders', { body: { customer_id: jan.id, items: [{ kind: 'labor', name: 'Diagnostyka', price: 300 }] } }), 'order mixed');
+  ok(await req(`/crm-api/orders/${mo.id}/payments`, { body: { split: [{ method: 'cash', amount: 100 }, { method: 'blik', amount: 150 }, { method: 'card', amount: 50 }] } }), 'mixed pay');
+  const mof = ok(await req('/crm-api/orders/' + mo.id), 'order mixed get');
+  assert.equal(mof.paid, 300); assert.equal(mof.payments.length, 3);
+  assert.ok(mof.payments.some((x) => x.method === 'blik' && x.amount === 150));
+  const cash3 = ok(await req('/crm-api/cash?from=2000-01-01&to=2100-01-01'), 'cash3');
+  assert.ok(cash3.period.blik >= 150);
+  const blikRow = cash3.rows.find((r) => r.method === 'blik' && r.amount === 150);
+  assert.ok(blikRow && /Terminal/i.test(blikRow.register_name || ''), 'BLIK → касса-терминал');
+  const bad = await req(`/crm-api/orders/${mo.id}/payments`, { body: { method: 'bitcoin', amount: 5 } });
+  assert.equal(bad.status, 400);
+  // включить/выключить сотрудника переключателем
+  const stl = ok(await req('/crm-api/staff'), 'staff list');
+  const mech = stl.rows.find((x) => x.role !== 'admin') || stl.rows.find((x) => x.login !== 'admin');
+  if (mech) {
+    ok(await req(`/crm-api/staff/${mech.id}/active`, { body: { active: false } }), 'staff off');
+    assert.equal(ok(await req('/crm-api/staff'), 'staff2').rows.find((x) => x.id === mech.id).active, 0);
+    ok(await req(`/crm-api/staff/${mech.id}/active`, { body: { active: true } }), 'staff on');
+  }
+  const me0 = stl.rows.find((x) => x.login === 'admin');
+  assert.equal((await req(`/crm-api/staff/${me0.id}/active`, { body: { active: false } })).status, 400);
+  console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 
   // 10. удаление аккаунта в приложении

@@ -72,7 +72,7 @@ export async function initI18n() {
   const lang = getLang();
   document.documentElement.lang = lang === 'uk' ? 'uk' : lang;
   if (lang === 'ru') return lang;
-  try { dict = await (await fetch(`/i18n/${lang}.json`, { cache: 'force-cache' })).json(); } catch { dict = null; return lang; }
+  try { dict = await (await fetch(`/i18n/${lang}.json`, { cache: 'no-cache' })).json(); } catch { dict = null; return lang; }
   const origConfirm = window.confirm.bind(window), origAlert = window.alert.bind(window), origPrompt = window.prompt.bind(window);
   window.confirm = (m) => origConfirm(tr(String(m ?? '')));
   window.alert = (m) => origAlert(tr(String(m ?? '')));

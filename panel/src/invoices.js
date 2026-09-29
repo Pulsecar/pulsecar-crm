@@ -16,7 +16,7 @@ function F(any = false) {
 export const invoicesEnabled = () => { const f = F(); return !!(f.domain && f.token); };
 const base = (any = false) => process.env.FAKTUROWNIA_BASE || `https://${F(any).domain}.fakturownia.pl`;
 
-const PAY = { cash: 'cash', card: 'card', transfer: 'transfer', points: 'other' };
+const PAY = { cash: 'cash', card: 'card', blik: 'BLIK', transfer: 'transfer', mixed: 'Płatność mieszana', points: 'other' };
 
 export async function issueInvoice(orderId, { kind = 'vat', buyer = {} } = {}) {
   if (!invoicesEnabled()) throw new HttpError(400, 'Fakturownia не подключена: Настройки → Интеграции → Fakturownia.');

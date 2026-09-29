@@ -35,6 +35,8 @@ import path from 'node:path';
 import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate, testSmshttp, activeProvider, smsParts, translit } from './sms.js';
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
+/** Способы оплаты (платёж): наличные, карта, BLIK, перевод. «mixed» — только как способ в документах/настройках */
+const PAY_METHODS = ['cash', 'card', 'blik', 'transfer'];
 
 export const crm = express.Router();
 crm.use(express.json({ limit: '1mb' }));
@@ -198,7 +200,7 @@ function custData(b) {
   if (o.kind !== undefined) o.kind = o.kind === 'company' ? 'company' : 'person';
   if (o.kind === 'person') { o.company = null; o.nip = null; }
   if (o.country !== undefined) o.country = String(o.country || 'PL').toUpperCase().slice(0, 2) || 'PL';
-  if (o.payment_method !== undefined && !['cash', 'card', 'transfer', null].includes(o.payment_method)) o.payment_method = null;
+  if (o.payment_method !== undefined && !['cash', 'card', 'blik', 'transfer', 'mixed', null].includes(o.payment_method)) o.payment_method = null;
   if (o.payment_term_days !== undefined && o.payment_term_days !== null) o.payment_term_days = Math.max(0, Math.min(365, Math.trunc(Number(o.payment_term_days)) || 0));
   if (o.nip) o.nip = String(o.nip).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
   // имя для списков: «Имя Фамилия», у фирмы без контактного лица — название фирмы
@@ -534,14 +536,20 @@ crm.delete('/orders/:id/comments/:cid', (req, res) => {
 crm.post('/orders/:id/payments', (req, res) => {
   const s = who(req, 'orders.payments');
   const o = getOrder(Number(req.params.id));
-  const method = ['cash', 'card', 'transfer'].includes(req.body?.method) ? req.body.method : null;
-  const amount = round2(req.body?.amount);
-  if (!method || !(amount > 0)) throw new HttpError(400, 'Укажите способ и сумму оплаты');
-  insert('payments', {
-    number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, order_id: o.id, customer_id: o.customer_id,
-    note: String(req.body?.note || '') || `Оплата ${o.number}`, staff: s.name,
+  // смешанная оплата: split = [{method, amount}, …] — каждая часть отдельным платежом (наличные → KP в кассе, карта/BLIK → терминал)
+  const parts = Array.isArray(req.body?.split)
+    ? req.body.split.map((x) => ({ method: PAY_METHODS.includes(x?.method) ? x.method : null, amount: round2(x?.amount) })).filter((x) => x.method && x.amount > 0)
+    : [{ method: PAY_METHODS.includes(req.body?.method) ? req.body.method : null, amount: round2(req.body?.amount) }];
+  if (!parts.length || parts.some((x) => !x.method || !(x.amount > 0))) throw new HttpError(400, 'Укажите способ и сумму оплаты');
+  const mixed = parts.length > 1;
+  tx(() => {
+    for (const { method, amount } of parts) insert('payments', {
+      number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, order_id: o.id, customer_id: o.customer_id,
+      note: String(req.body?.note || '') || `Оплата ${o.number}${mixed ? ' (płatność mieszana)' : ''}`, staff: s.name,
+    });
   });
   recalc(o.id);
+  const amount = round2(parts.reduce((a, x) => a + x.amount, 0)), method = mixed ? parts.map((x) => `${x.method} ${x.amount}`).join(' + ') : parts[0].method;
   log('order', o.id, 'payment', { method, amount }, s.name);
   notify('payment', `Оплата ${o.number}: ${amount} zł (${method})`, { order: o.number, amount, method });
   res.json({ ok: true });
@@ -896,10 +904,10 @@ crm.post('/storage/:id/pay', (req, res) => {
   if (!st) throw new HttpError(404, 'Запись не найдена');
   const amount = round2(req.body?.amount);
   if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
-  const method = ['cash', 'card', 'transfer'].includes(req.body?.method) ? req.body.method : 'cash';
+  const method = PAY_METHODS.includes(req.body?.method) ? req.body.method : 'cash';
   const what = st.kind === 'parking' ? 'Парковка' : 'Хранение шин';
   tx(() => {
-    insert('payments', { number: nextNumber('KP'), direction: 'in', method, amount, note: `${what} ${st.number}`, staff: s.name, customer_id: st.customer_id || null });
+    insert('payments', { number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, note: `${what} ${st.number}`, staff: s.name, customer_id: st.customer_id || null });
     run('UPDATE storage SET paid = ROUND(COALESCE(paid,0) + ?, 2) WHERE id = ?', amount, st.id);
   });
   log('storage', st.id, 'payment', `${amount} ${method}`, s.name);
@@ -929,7 +937,7 @@ crm.get('/cash', (req, res) => {
   res.json({
     rows, registers: regs,
     cashBalance: round2(regs.filter((r) => r.kind === 'cash').reduce((a, r) => a + r.balance, 0)),
-    period: { cashIn: sum('in', 'cash'), cashOut: sum('out', 'cash'), card: sum('in', 'card'), transfer: sum('in', 'transfer'), points: sum('in', 'points') },
+    period: { cashIn: sum('in', 'cash'), cashOut: sum('out', 'cash'), card: sum('in', 'card'), blik: sum('in', 'blik'), transfer: sum('in', 'transfer'), points: sum('in', 'points') },
   });
 });
 crm.post('/cash', (req, res) => {
@@ -982,7 +990,7 @@ crm.post('/cash/registers', (req, res) => {
 crm.post('/orders/:id/receipt', (req, res) => {
   const s = who(req, 'orders.payments');
   const o = getOrder(Number(req.params.id));
-  const method = ['cash', 'card', 'transfer'].includes(req.body?.method) ? req.body.method : null;
+  const method = PAY_METHODS.includes(req.body?.method) ? req.body.method : null;
   const nip = String(req.body?.nip || '').replace(/\D/g, '');
   if (nip && nip.length !== 10) throw new HttpError(400, 'NIP — 10 цифр');
   const r = FISCAL.createReceipt(o, { nip: nip || null, method }, s.name);
@@ -1438,6 +1446,17 @@ crm.post('/staff', (req, res) => {
   }
   if (Number(b.id) === me.id && (!d.active || d.role !== 'admin')) throw new HttpError(400, 'Нельзя отключить или понизить самого себя');
   if (b.id) update('staff', Number(b.id), d); else insert('staff', d);
+  res.json({ ok: true, ...lists() });
+});
+
+/** Быстро включить/выключить сотрудника (переключатель в списке). Выключенный не может войти в CRM и не предлагается в заказах */
+crm.post('/staff/:id/active', (req, res) => {
+  const me = who(req, 'settings.manage');
+  const st = one('SELECT * FROM staff WHERE id = ?', Number(req.params.id));
+  if (!st) throw new HttpError(404, 'Сотрудник не найден');
+  const active = req.body?.active ? 1 : 0;
+  if (st.id === me.id && !active) throw new HttpError(400, 'Нельзя отключить самого себя');
+  update('staff', st.id, { active });
   res.json({ ok: true, ...lists() });
 });
 

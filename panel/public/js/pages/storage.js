@@ -47,7 +47,7 @@ export default function Storage() {
         <button class="btn primary" onClick=${async () => { await act(() => api(`storage/${pay.s.id}/pay`, { body: { amount: pay.amount, method: pay.method } }), 'Оплата принята — приход в кассе'); setPay(null); reload(); }}>Принять ${zl(pay.amount)}</button>`}>
       <div class="muted small" style="margin-bottom:8px">${pay.s.customer_name || ''} · к оплате ${zl(storageDue(pay.s))}${pay.s.paid ? ` · уже оплачено ${zl(pay.s.paid)}` : ''}</div>
       <div class="grid g2"><label class="f">Сумма, zł<input type="number" step="0.01" value=${pay.amount} onInput=${(e) => setPay({ ...pay, amount: Number(e.target.value) })} /></label>
-        <label class="f">Способ<select value=${pay.method} onChange=${(e) => setPay({ ...pay, method: e.target.value })}>${['cash', 'card', 'transfer'].map((m) => html`<option value=${m}>${METHOD[m]}</option>`)}</select></label></div>
+        <label class="f">Способ<select value=${pay.method} onChange=${(e) => setPay({ ...pay, method: e.target.value })}>${['cash', 'card', 'blik', 'transfer'].map((m) => html`<option value=${m}>${METHOD[m]}</option>`)}</select></label></div>
       <div class="muted small">Оплата попадёт в кассу как приход (KP) с пометкой ${pay.s.kind === 'parking' ? '«Парковка»' : '«Хранение шин»'} и номером ${pay.s.number}.</div></${Modal}>`}`;
 }
 

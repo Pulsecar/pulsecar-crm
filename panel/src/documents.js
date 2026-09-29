@@ -31,7 +31,7 @@ const FUEL_PL = { 'резерв': 'rezerwa', 'полный': 'pełny', '1/4': '1
 export const fuelPl = (f) => FUEL_PL[f] || f || '—';
 const FUEL_PCT = { 'резерв': 5, '1/4': 25, '1/2': 50, '3/4': 75, 'полный': 100 };
 export const fuelPct = (f) => FUEL_PCT[f] ?? null;
-export const PAY_PL = { cash: 'gotówka', card: 'karta płatnicza', transfer: 'przelew', points: 'punkty', mixed: 'mieszana' };
+export const PAY_PL = { cash: 'gotówka', card: 'karta płatnicza', blik: 'BLIK', transfer: 'przelew', points: 'punkty', mixed: 'mieszana' };
 
 // ── Кwota słownie (для фактур и KP/KW) ─────────────────────────────────────
 const U = ['', 'jeden', 'dwa', 'trzy', 'cztery', 'pięć', 'sześć', 'siedem', 'osiem', 'dziewięć'];
@@ -341,7 +341,9 @@ export function createSaleDoc({ kind, orderId, buyer, issue_date, sale_date, pay
   const sale = /^\d{4}-\d{2}-\d{2}$/.test(sale_date || '') ? sale_date : d10(o?.closed_at) || issue;
   const days = Number(due_days ?? S.payment_term_days ?? 0) || 0;
   const due = new Date(new Date(issue).getTime() + days * 86400000).toISOString().slice(0, 10);
-  const pm = payment_method || (o && one(`SELECT method FROM payments WHERE order_id = ? AND method <> 'points' ORDER BY amount DESC LIMIT 1`, o.id)?.method) || S.payment_method_default || 'cash';
+  // заказ оплачен несколькими способами (наличные + карта и т.п.) → «Płatność mieszana»
+  const methods = o ? all(`SELECT DISTINCT method FROM payments WHERE order_id = ? AND direction = 'in' AND method <> 'points' ORDER BY amount DESC`, o.id).map((r) => r.method) : [];
+  const pm = payment_method || (methods.length > 1 ? 'mixed' : methods[0]) || S.payment_method_default || 'cash';
   const paidAmt = kind === 'proforma' ? 0 : round2(paid ?? Math.min(T.gross, o?.paid || 0));
   const number = ext?.number || nextNumber(NUM_KEY[kind], new Date(issue));
   const id = insert('sales_docs', {

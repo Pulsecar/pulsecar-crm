@@ -34,7 +34,7 @@ h3 { font-size: 14px; margin: 0 0 8px; font-weight: 600; color: var(--muted); te
 .err { color: var(--danger); }
 
 /* ── Каркас ── */
-.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; transition: grid-template-columns .18s; }
 .side { background: var(--panel); border-right: 1px solid var(--border); padding: 14px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .side .brand { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 16px; }
 .side .brand img { height: 34px; }
@@ -595,3 +595,27 @@ html.side-mini .nav-item .count { position: absolute; top: 2px; right: 2px; }
 .bal-chip.low b { color: var(--warn); }
 .bal-m .row > svg { width: 20px; height: 20px; color: var(--muted); flex: none; }
 a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; } a.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* смешанная оплата: суммы по способам */
+.pay-split{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:10px}
+.pay-split .small{grid-column:1/-1}
+@media (max-width:640px){.pay-split{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* ── Левое меню: сворачивается стрелкой, в свёрнутом виде — иконка и название раздела под ней ── */
+.side-toggle { position: absolute; top: 22px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; padding: 0; z-index: 2; }
+.side-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.side-toggle svg { width: 14px; height: 14px; }
+@media (min-width: 861px) {
+.shell.mini { grid-template-columns: 96px 1fr; }
+.shell.mini .side { padding: 12px 6px; }
+.shell.mini .side .brand { padding: 30px 2px 12px; justify-content: center; }
+.shell.mini .side .brand img { height: auto; width: 64px; }
+.shell.mini .side-toggle { right: 50%; transform: translateX(50%); top: 10px; }
+.shell.mini .nav-item { flex-direction: column; gap: 4px; padding: 8px 2px; text-align: center; position: relative; }
+.shell.mini .nav-item svg { width: 20px; height: 20px; }
+.shell.mini .nav-item .nl { font-size: 10.5px; letter-spacing: -.1px; line-height: 1.2; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; hyphens: auto; }
+.shell.mini .nav-item .count { position: absolute; top: 2px; right: 8px; margin: 0; font-size: 10px; padding: 0 5px; }
+.shell.mini .nav-foot { display: none; }
+}
+@media (max-width: 860px) { .side-toggle { display: none; } }

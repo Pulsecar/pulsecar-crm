@@ -2,7 +2,7 @@
 import { html, useState, useData, api, act, qs, go, useApp, ErrorBox, Icon, Modal, zl, fdate, toast, useDebounced, todayStr } from '../lib.js';
 
 const TYPE = { vat: 'Фактура VAT', correction: 'Корректа', proforma: 'Pro forma', receipt: 'Чек (paragon)' };
-const PAYM = { cash: 'Наличные', card: 'Карта', transfer: 'Перевод', points: 'Баллы' };
+const PAYM = { cash: 'Наличные', card: 'Карта', blik: 'BLIK', transfer: 'Перевод', mixed: 'Смешанная оплата', points: 'Баллы' };
 const KS = { accepted: ['KSeF ✓', 'var(--accent)'], sent: ['KSeF: ждём номер', 'var(--warn)'], rejected: ['KSeF: отклонена', 'var(--danger)'], error: ['KSeF: ошибка', 'var(--danger)'] };
 const RS = { printed: ['напечатан', 'var(--accent)'], pending: ['в очереди', 'var(--warn)'], error: ['ошибка кассы', 'var(--danger)'], manual: ['№ вручную', 'var(--muted)'] };
 

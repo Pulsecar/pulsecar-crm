@@ -68,6 +68,7 @@ export function noviReceipt(lines, { nip, payments, cfg: c, systemNumber }) {
     rest = round2(rest - v);
     if (p.method === 'cash') pays.push({ cash: { value: money(v) } });
     else if (p.method === 'card') pays.push({ card: { name: 'Karta', value: money(v) } });
+    else if (p.method === 'blik') pays.push({ mobile: { name: 'BLIK', value: money(v) } });
     else if (p.method === 'transfer') pays.push({ transfer: { name: 'Przelew', value: money(v) } });
     else if (p.method === 'points') pays.push({ voucher: { name: 'Pulse Points', value: money(v) } });
   }

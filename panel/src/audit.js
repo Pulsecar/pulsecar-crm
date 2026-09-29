@@ -122,7 +122,7 @@ const lookups = () => {
 };
 const DOCK = { vat: 'фактура VAT', proforma: 'Pro forma', correction: 'корректа', order: 'заказ', quote: 'выцена', labor: 'работа', part: 'товар' };
 const STAT = { issued: 'выставлен', planned: 'запланирован', request: 'заявка', arrived: 'приехал', no_show: 'не приехал', cancelled: 'отменён', printed: 'напечатан', pending: 'в очереди', error: 'ошибка', manual: 'вручную' };
-const METHOD = { cash: 'наличные', card: 'карта', transfer: 'перевод', points: 'баллы' };
+const METHOD = { cash: 'наличные', card: 'карта', blik: 'BLIK', transfer: 'перевод', mixed: 'смешанная', points: 'баллы' };
 function fmt(k, v, L, secret) {
   if (secret) return v == null ? '—' : '••• (скрыто)';
   if (v === null || v === undefined || v === '') return '—';

@@ -212,15 +212,15 @@ export const REPORTS = {
     },
   },
   cash_methods: {
-    group: 'Касса', title: 'Оплаты по способам и дням', about: 'Сколько пришло наличными, картой и переводом по дням.',
+    group: 'Касса', title: 'Оплаты по способам и дням', about: 'Сколько пришло наличными, картой, BLIK и переводом по дням.',
     params: ['period'],
     run(q) {
       if (!isDate(q.from) || !isDate(q.to)) throw new HttpError(400, 'Выберите период');
-      const rows = all(`SELECT ${L('created_at')} d, SUM(CASE WHEN method='cash' THEN amount ELSE 0 END) cash, SUM(CASE WHEN method='card' THEN amount ELSE 0 END) card,
+      const rows = all(`SELECT ${L('created_at')} d, SUM(CASE WHEN method='cash' THEN amount ELSE 0 END) cash, SUM(CASE WHEN method='card' THEN amount ELSE 0 END) card, SUM(CASE WHEN method='blik' THEN amount ELSE 0 END) blik,
           SUM(CASE WHEN method='transfer' THEN amount ELSE 0 END) transfer, SUM(CASE WHEN method='points' THEN amount ELSE 0 END) points, SUM(amount) total
         FROM payments WHERE direction = 'in' AND transfer_id IS NULL AND ${L('created_at')} BETWEEN ? AND ? GROUP BY d ORDER BY d`, q.from, q.to).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, k === 'd' ? v : r2(v)])));
       const s = (k) => r2(rows.reduce((a, r) => a + r[k], 0));
-      return { columns: [['d', 'День', date], ['cash', 'Наличные', money], ['card', 'Карта', money], ['transfer', 'Перевод', money], ['points', 'Баллы', money], ['total', 'Всего', money]], rows, totals: { cash: s('cash'), card: s('card'), transfer: s('transfer'), points: s('points'), total: s('total') } };
+      return { columns: [['d', 'День', date], ['cash', 'Наличные', money], ['card', 'Карта', money], ['blik', 'BLIK', money], ['transfer', 'Перевод', money], ['points', 'Баллы', money], ['total', 'Всего', money]], rows, totals: { cash: s('cash'), card: s('card'), blik: s('blik'), transfer: s('transfer'), points: s('points'), total: s('total') } };
     },
   },
 

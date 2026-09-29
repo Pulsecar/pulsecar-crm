@@ -79,11 +79,14 @@ export function StaffAccess() {
   return html`<div class="card tight">
     <div class="row" style="padding:12px 14px"><span class="muted small">Выдайте каждому сотруднику свой логин и пароль. Права задаются ролью и уточняются галочками — как в Motowarsztat.</span>
       <button class="btn primary sm" style="margin-left:auto" onClick=${newStaff}><${Icon} n="plus" />Сотрудник</button></div>
-    <table class="tbl"><thead><tr><th>Имя</th><th>Доступ в CRM</th><th>Роль</th><th class="r">Ставка н/ч</th><th class="r">% от работ</th><th>Последний вход</th></tr></thead>
+    <table class="tbl"><thead><tr><th>Имя</th><th>Доступ в CRM</th><th>Роль</th><th class="r">Ставка н/ч</th><th class="r">% от работ</th><th>Последний вход</th><th class="c">Работает</th></tr></thead>
       <tbody>${data.rows.map((s) => html`<tr class=${'click' + (s.active ? '' : ' faint')} onClick=${() => setEdit({ ...s, password: '' })}>
         <td><span class="dot" style=${'background:' + (s.color || '#666')}></span> <b>${s.name}</b>${s.active ? '' : html` <span class="chip">отключён</span>`}</td>
         <td>${s.login && s.has_password ? html`<span class="pos">✓ ${s.login}</span>` : html`<span class="muted">нет входа</span>`}</td><td>${ROLE[s.role]}</td>
-        <td class="r">${zl(s.hourly_rate)}</td><td class="r">${s.commission_pct}%</td><td class="sub">${s.last_login ? fdt(s.last_login) : '—'}</td></tr>`)}</tbody></table>
+        <td class="r">${zl(s.hourly_rate)}</td><td class="r">${s.commission_pct}%</td><td class="sub">${s.last_login ? fdt(s.last_login) : '—'}</td>
+        <td class="c" onClick=${(e) => e.stopPropagation()}>${s.id === app.user.id ? html`<span class="muted small" title="Нельзя отключить самого себя">вы</span>`
+          : html`<label class="toggle" title=${s.active ? 'Выключить сотрудника' : 'Включить сотрудника'}><input type="checkbox" checked=${!!s.active}
+            onChange=${async (e) => { const on = e.target.checked; await act(() => api(`staff/${s.id}/active`, { body: { active: on } }), on ? 'Сотрудник включён' : 'Сотрудник выключен'); reload(); app.reload(); }} /><i></i></label>`}</td></tr>`)}</tbody></table>
     ${edit && html`<${Modal} wide title=${edit.id ? edit.name : 'Новый сотрудник'} onClose=${() => setEdit(null)} foot=${html`
         ${edit.id && edit.has_password ? html`<${ConfirmButton} cls="btn ghost danger" label="Забрать доступ в CRM?" onConfirm=${async () => { await act(() => api('staff', { body: { ...edit, effective: undefined, password: '', revoke: true } }), 'Доступ отключён'); setEdit(null); reload(); }}>Забрать доступ</${ConfirmButton}>` : ''}
         <button class="btn primary" style="margin-left:auto" onClick=${save}>Сохранить</button>`}>
