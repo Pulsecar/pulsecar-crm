@@ -20,6 +20,7 @@ import { publicList, save as saveIntegration, cfg, setState, def as integrationD
 import * as IC from './integrations/intercars.js';
 import * as SUP from './integrations/suppliers.js';
 import { notify, testTelegram } from './integrations/notify.js';
+import { balances, setManual } from './balances.js';
 import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, ensureFeedToken } from './integrations/services.js';
 import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
 import { SETTINGS_SCHEMA, SETTINGS_KEYS } from './settings-schema.js';
@@ -1790,6 +1791,15 @@ crm.get('/vehicle/plate/:plate', async (req, res) => {
   let vin = null;
   if (r.vin && (!r.make || !r.model)) vin = await decodeVin(r.vin).catch(() => null);
   res.json({ ...r, make: r.make || vin?.make || '', model: r.model || vin?.model || '', year: r.year || vin?.year || '' });
+});
+/** Остатки: SMS и поиск авто по номеру (чипы в шапке) */
+crm.get('/balances', async (req, res) => { who(req); res.json(await balances(req.query.force === '1')); });
+crm.put('/balances', (req, res) => {
+  who(req, 'settings.manage');
+  const b = req.body || {};
+  if (b.sms_price !== undefined) setSetting('sms_price', String(b.sms_price));
+  if (b.kind) setManual(b.kind, b.count);
+  res.json({ ok: true });
 });
 crm.get('/vin/:vin', async (req, res) => {
   who(req, 'cars.view');

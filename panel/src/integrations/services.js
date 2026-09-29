@@ -91,6 +91,7 @@ export async function checkPayment(order) {
 }
 
 // ── VIN ────────────────────────────────────────────────────────────────────
+import { decodeVinOffline } from '../vin-offline.js';
 export async function decodeVin(vin) {
   const v = String(vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (v.length !== 17) throw new HttpError(400, 'VIN — 17 символов');
@@ -104,14 +105,22 @@ export async function decodeVin(vin) {
       return { source: 'vindecoder.eu', make: g('Make'), model: g('Model'), year: g('Model Year'), capacity: g('Engine Displacement (ccm)'), power_kw: g('Engine Power (kW)'), fuel: g('Fuel Type - Primary'), engine: g('Engine Code') };
     }
   }
-  const r = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${v}?format=json`);
-  const x = (await r.json().catch(() => ({})))?.Results?.[0] || {};
-  if (!x.Make) throw new HttpError(404, 'Бесплатная база не знает этот VIN. Для европейских авто подключите vindecoder.eu в интеграциях.');
-  return {
-    source: 'NHTSA', make: x.Make ? x.Make[0] + x.Make.slice(1).toLowerCase() : null, model: x.Model || null, year: x.ModelYear || null,
+  // бесплатно: своя расшифровка по коду производителя (марка, модель VAG/Mercedes, год) + база NHTSA (авто для рынка США)
+  const off = decodeVinOffline(v);
+  let x = {};
+  try {
+    const r = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${v}?format=json`, { signal: AbortSignal.timeout(8000) });
+    x = (await r.json().catch(() => ({})))?.Results?.[0] || {};
+  } catch {}
+  const nh = x.Make ? {
+    source: 'NHTSA', make: x.Make[0] + x.Make.slice(1).toLowerCase(), model: x.Model || null, year: x.ModelYear || null,
     capacity: x.DisplacementCC ? Math.round(Number(x.DisplacementCC)) : null, power_kw: x.EngineKW ? Math.round(Number(x.EngineKW)) : null,
     fuel: x.FuelTypePrimary || null, engine: x.EngineModel || null,
-  };
+  } : null;
+  if (nh?.model) return { ...nh, make: off?.make || nh.make, year: nh.year || off?.year || null };
+  if (off) return { ...off, year: off.year || nh?.year || null };
+  if (nh) return nh;
+  throw new HttpError(404, 'VIN не удалось расшифровать бесплатно. Самый точный бесплатный способ — скан кода Aztec с техпаспорта; для полной расшифровки по VIN — vindecoder.eu в интеграциях.');
 }
 
 // ── Календарь iCal (подписка для Google / iPhone) ───────────────────────────

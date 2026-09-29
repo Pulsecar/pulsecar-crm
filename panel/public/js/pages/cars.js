@@ -67,7 +67,7 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
     try {
       const r = await api('vin/' + encodeURIComponent(f.vin));
       set({ make: r.make || f.make, model: r.model || f.model, year: r.year || f.year, capacity: r.capacity || f.capacity, power_kw: r.power_kw || f.power_kw, engine: r.engine || f.engine });
-      toast('Данные из VIN (' + r.source + ')');
+      toast(r.partial && !r.model ? `Из VIN: ${[r.make, r.year].filter(Boolean).join(', ')} — модель впишите вручную или отсканируйте Aztec техпаспорта` : 'Данные из VIN (' + r.source + ')');
     } catch (err) { toast(err.message, 'error'); }
   };
   const inp = (key, l, attrs = {}) => html`<label class="f">${l}<input value=${f[key] ?? ''} placeholder=${l} onInput=${(e) => set({ [key]: e.target.value })} ...${attrs} /></label>`;

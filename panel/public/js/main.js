@@ -1,4 +1,4 @@
-import { html, render, useState, useEffect, api, useRoute, go, AppCtx, Toasts, Icon, toast } from './lib.js';
+import { html, render, useState, useEffect, api, act, useRoute, go, AppCtx, Toasts, Icon, Modal, toast } from './lib.js';
 import Dashboard from './pages/dashboard.js';
 import { OrdersList, OrderPage, NewOrder } from './pages/orders.js';
 import Calendar from './pages/calendar.js';
@@ -53,6 +53,42 @@ const USER_MENU = [
     { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' }],
   [{ to: '/changelog', icon: 'file', label: 'Что нового в CRM' }, { screen: true, icon: 'monitor', label: 'Настройки экрана' }],
 ];
+
+// ── Остатки в шапке (как в Motowarsztat): поиск авто по номеру и SMS ─────────
+function Balances({ app }) {
+  const [b, setB] = useState(null);
+  const [open, setOpen] = useState(false);
+  const load = (force) => api('balances' + (force ? '?force=1' : '')).then(setB, () => {});
+  useEffect(() => { load(); const t = setInterval(() => load(), 5 * 60 * 1000); return () => clearInterval(t); }, []);
+  if (!b || (!b.sms && !b.plate)) return null;
+  const val = (x) => (!x ? null : x.unlimited ? '∞' : x.unknown ? '?' : x.count);
+  const low = (x, n) => x && !x.unlimited && !x.unknown && x.count <= n;
+  return html`<div class="bal">
+    ${b.plate && html`<button class=${'bal-chip' + (low(b.plate, 5) ? ' low' : '')} title="Сколько авто ещё можно найти по номеру" onClick=${() => setOpen(true)}><${Icon} n="car" /><${Icon} n="search" /><b>${val(b.plate)}</b></button>`}
+    ${b.sms && html`<button class=${'bal-chip' + (low(b.sms, 20) ? ' low' : '')} title="Сколько SMS осталось" onClick=${() => setOpen(true)}><${Icon} n="chat" /><b>${val(b.sms)}</b></button>`}
+    ${open && html`<${BalanceModal} app=${app} b=${b} onClose=${() => setOpen(false)} reload=${() => load(true)} />`}
+  </div>`;
+}
+function BalanceModal({ app, b, onClose, reload }) {
+  const admin = app.perms['settings.manage'];
+  const [plate, setPlate] = useState(b.plate?.manual ? String(b.plate.count) : '');
+  const [sms, setSms] = useState(b.sms?.manual ? String(b.sms.count) : '');
+  const [price, setPrice] = useState(app.settings.sms_price || '0.17');
+  const put = async (body, msg) => { await act(() => api('balances', { method: 'PUT', body }), msg); await reload(); };
+  const since = (x) => (x?.since ? ` · с ${new Date(x.since.replace(' ', 'T') + 'Z').toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} использовано ${x.used}` : '');
+  return html`<${Modal} title="Остатки: поиск по номеру и SMS" onClose=${onClose} foot=${html`<button class="btn" onClick=${reload}><${Icon} n="history" />Обновить</button><button class="btn primary" onClick=${onClose}>Готово</button>`}>
+    <div class="bal-m">${b.plate && html`<div class="card" style="margin-bottom:12px"><div class="row"><${Icon} n="car" /><b class="grow">Поиск авто по номеру (RegCheck)</b><b style="font-size:20px">${b.plate.unknown ? '—' : b.plate.count}</b></div>
+      <div class="muted small" style="margin:6px 0">${b.plate.unknown ? `RegCheck не сообщает остаток по API. Впишите, сколько запросов сейчас на счету — CRM будет вычитать каждый поиск.${b.plate.used30 ? ` За 30 дней поисков: ${b.plate.used30}.` : ''}` : 'Остаток считает CRM: вписанное число минус поиски' + since(b.plate)}</div>
+      ${admin && html`<div class="row"><label class="f grow">Сейчас запросов на счету<input type="number" min="0" value=${plate} onInput=${(e) => setPlate(e.target.value)} placeholder="например 100" /></label>
+        <button class="btn" onClick=${() => put({ kind: 'plate', count: plate }, 'Сохранено')}>Сохранить</button></div>
+        <div class="faint small">Купили пакет — впишите новое число. Пополнить: tablicarejestracyjnaapi.pl → личный кабинет.</div>`}</div>`}
+    ${b.sms && html`<div class="card"><div class="row"><${Icon} n="chat" /><b class="grow">SMS (${b.sms.provider})</b><b style="font-size:20px">${b.sms.unlimited ? '∞' : b.sms.unknown ? '—' : b.sms.count}</b></div>
+      <div class="muted small" style="margin:6px 0">${b.sms.unlimited ? b.sms.note : b.sms.note ? 'Остаток из кабинета SMS-сервиса: ' + b.sms.note : b.sms.manual ? 'Остаток считает CRM: вписанное число минус отправленные SMS' + since(b.sms) : 'Этот SMS-сервис не сообщает остаток по API — впишите, сколько SMS в пакете.'}</div>
+      ${admin && b.sms.provider === 'smsapi' && html`<div class="row"><label class="f grow">Цена одного SMS в SMSAPI, pkt<input value=${price} onInput=${(e) => setPrice(e.target.value)} /></label><button class="btn" onClick=${() => put({ sms_price: price }, 'Сохранено')}>Сохранить</button></div>`}
+      ${admin && !b.sms.unlimited && !b.sms.note && html`<div class="row"><label class="f grow">Сейчас SMS в пакете<input type="number" min="0" value=${sms} onInput=${(e) => setSms(e.target.value)} /></label><button class="btn" onClick=${() => put({ kind: 'sms', count: sms }, 'Сохранено')}>Сохранить</button></div>`}
+    </div>`}</div>
+  </${Modal}>`;
+}
 
 function UserMenu({ app }) {
   const [open, setOpen] = useState(false);
@@ -164,6 +200,7 @@ function Shell({ app }) {
           <input type="search" placeholder="Поиск: клиент, телефон, номер авто, VIN, заказ…" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Поиск" />
         </form>
         <a class="btn primary" href="#/orders/new"><${Icon} n="plus" />Заказ</a>
+        <${Balances} app=${app} />
         <${UserMenu} app=${app} />
       </div>
       <main class="content">${page}</main>

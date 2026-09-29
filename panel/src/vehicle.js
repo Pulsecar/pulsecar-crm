@@ -1,4 +1,6 @@
 // Данные авto: код Aztec с польского техпаспорта (dowód rejestracyjny) и поиск по номеру
+import { logUsage } from './balances.js';
+import { setSetting } from './db.js';
 import { HttpError } from './util.js';
 import { cfg } from './integrations/index.js';
 
@@ -101,6 +103,7 @@ export async function lookupPlate(plateRaw, opts = {}) {
     const r = await fetch(c.url.replaceAll('{plate}', encodeURIComponent(plate)), { headers: { Accept: 'application/json', ...headers } });
     if (!r.ok) throw new HttpError(502, `Сервис ответил ${r.status}`);
     const j = await r.json();
+    if (!opts.test) logUsage('plate', plate);
     const d = j.data || j.vehicle || j;
     return normalize({
       make: d.make || d.brand || d.marka, model: d.model, year: d.year || d.production_year || d.rok_produkcji, vin: d.vin,
@@ -112,12 +115,14 @@ export async function lookupPlate(plateRaw, opts = {}) {
   const base = process.env.REGCHECK_BASE || 'https://www.regcheck.org.uk/api/reg.asmx';
   const r = await fetch(`${base}/CheckPoland?RegistrationNumber=${encodeURIComponent(plate)}&username=${encodeURIComponent(c.username)}`);
   const t = await r.text();
+  if (!r.ok && /credit|balance|insufficient|no lookups/i.test(t)) { setSetting('bal_plate_empty', '1'); throw new HttpError(402, 'RegCheck: закончились запросы — пополните пакет на tablicarejestracyjnaapi.pl'); }
   if (!r.ok) throw new HttpError(r.status === 500 && /not found|no vehicle/i.test(t) ? 404 : 502, /not found|no vehicle/i.test(t) ? 'Номер не найден в базе' : `RegCheck: ${t.replace(/<[^>]+>/g, ' ').trim().slice(0, 160) || r.status}`);
   const m = t.match(/<vehicleJson>([\s\S]*?)<\/vehicleJson>/);
   if (!m) throw new HttpError(404, 'Номер не найден в базе');
   const raw = m[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   let d;
   try { d = JSON.parse(raw); } catch { throw new HttpError(502, 'RegCheck: непонятный ответ'); }
+  if (!opts.test) { logUsage('plate', plate); setSetting('bal_plate_empty', ''); }
   return normalize({
     make: tv(d.CarMake) || tv(d.MakeDescription), model: tv(d.CarModel) || tv(d.ModelDescription), year: d.ManufacturingYear || d.RegistrationYear,
     vin: d.VehicleIdentificationNumber, capacity: tv(d.EngineSize), power_kw: d.Power, fuel: tv(d.FuelType), first_reg: d.RegistrationDate, description: d.Description,

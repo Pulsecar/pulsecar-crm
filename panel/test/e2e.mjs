@@ -311,6 +311,10 @@ try {
   assert.ok(cash2.rows.some((r) => r.note === 'Парковка ' + prow.number && r.amount === 90 && r.method === 'card'));
   const aw = ok(await req('/crm-api/audit?entity=orders&id=' + wq.id), 'audit fu');
   assert.ok(aw.rows.some((r) => r.entity === 'order_comments'));
+  const bal0 = ok(await req('/crm-api/balances?force=1'), 'balances');
+  assert.ok('sms' in bal0 && 'plate' in bal0);
+  ok(await req('/crm-api/balances', { method: 'PUT', body: { kind: 'sms', count: 50 } }), 'set sms balance');
+  ok(await req('/crm-api/balances', { method: 'PUT', body: { kind: 'plate', count: 14 } }), 'set plate balance');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 
   // 10. удаление аккаунта в приложении
