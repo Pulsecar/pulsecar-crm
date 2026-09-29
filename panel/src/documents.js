@@ -9,6 +9,16 @@ import { KSEF_ENVS } from './integrations/ksef.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Печатные документы — только по-польски: имя сотрудника кириллицей (например «Администратор») пишем латиницей
+const TRL = { а: 'a', б: 'b', в: 'w', г: 'g', д: 'd', е: 'e', ё: 'io', ж: 'ż', з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'ch', ц: 'c', ч: 'cz', ш: 'sz', щ: 'szcz', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'ju', я: 'ja', і: 'i', ї: 'ji', є: 'je', ґ: 'g' };
+const ROLE_PL = { 'администратор': 'Administrator', 'приёмщик': 'Przyjmujący', 'приемщик': 'Przyjmujący', 'механик': 'Mechanik', 'менеджер': 'Kierownik' };
+export const plName = (n) => {
+  const v = String(n || '').trim();
+  if (!/[А-Яа-яЁёІіЇїЄєҐґ]/.test(v)) return v;
+  if (ROLE_PL[v.toLowerCase()]) return ROLE_PL[v.toLowerCase()];
+  return v.replace(/[А-Яа-яЁёІіЇїЄєҐґ]/g, (ch) => { const l = ch.toLowerCase(), t = TRL[l] ?? ''; return ch === l ? t : t.charAt(0).toUpperCase() + t.slice(1); });
+};
+
 // файлы заказов (фото, видео, PDF) лежат рядом с базой: data/files/<id заказа>/
 export const FILES_DIR = path.join(path.dirname(path.resolve(config.dbPath)), 'files');
 export function sendOrderFile(res, f, download = false) {
@@ -116,7 +126,7 @@ tr.empty td{height:22px}
 export function companyBlock(S, { legal = false } = {}) {
   const addr = legal && S.company_legal_address ? S.company_legal_address : S.company_address;
   return `<div class="co">${legal ? '' : '<div class="adm">Administratorem danych osobowych jest:</div>'}<b>${esc(S.company_name || S.company_brand || '')}</b>
-    ${esc(addr || '')}<br>${S.company_nip ? 'NIP: ' + esc(S.company_nip) + ' · ' : ''}${S.company_phone ? 'tel. ' + esc(S.company_phone) : ''}${S.company_email ? ' · ' + esc(S.company_email) : ''}
+    ${esc(addr || '')}<br>${esc([S.company_nip && 'NIP: ' + S.company_nip, S.company_phone && 'tel. ' + S.company_phone, S.company_email].filter(Boolean).join(' · '))}
     ${legal && S.company_bank ? `<br>Nr konta: <b style="display:inline;font-size:10px">${esc(S.company_bank)}</b>${S.company_bank_name ? ' (' + esc(S.company_bank_name) + ')' : ''}` : ''}</div>`;
 }
 
@@ -239,7 +249,7 @@ export function orderDoc(type, orderId, { S = settingsMap(), bar = true, back = 
   const st = all(`SELECT a.order_id, st.name FROM appointments a JOIN stations st ON st.id = a.station_id WHERE a.order_id = ?`, o.id)[0]?.name || '';
   const L = itemLines(o, S).map((i) => ({ ...i, station_name: st }));
   const damages = safeJson(o.damages, []);
-  const signerName = (k) => S[k + '_person'] || o.created_by || '';
+  const signerName = (k) => plName(S[k + '_person'] || o.created_by || '');
   const quote = o.kind === 'quote';
   if (type === 'intake') {
     const tasks = L.filter((i) => i.kind === 'labor');
@@ -265,7 +275,7 @@ export function orderDoc(type, orderId, { S = settingsMap(), bar = true, back = 
   }
   if (type === 'mechanic') {
     const body = `${S.mech_contact !== '0' ? partiesWorkshop(o, S) : partiesWorkshop(o, S, { contact: false })}
-      ${S.mech_basic !== '0' ? `<div class="cols"><div class="box kv"><span>Przyjął</span><b>${esc(o.created_by || '')}</b><span>Mechanik</span><b>${esc(o.mechanic_name || '')}</b><span>Termin</span><b>${esc(o.pickup_at || '—')}</b></div>
+      ${S.mech_basic !== '0' ? `<div class="cols"><div class="box kv"><span>Przyjął</span><b>${esc(plName(o.created_by))}</b><span>Mechanik</span><b>${esc(plName(o.mechanic_name))}</b><span>Termin</span><b>${esc(o.pickup_at || '—')}</b></div>
         <div class="box"><h3>Zgłoszenie klienta</h3><div class="note">${esc(o.complaint || '—')}</div></div></div>` : ''}
       ${o.mechanic_note ? `<div class="sec box"><h3>Uwagi dla mechanika</h3><div class="note">${esc(o.mechanic_note)}</div></div>` : ''}
       ${itemsTables(L, S, { prefix: 'mech', prices: false, doneCol: true, mechanicCol: true, stationCol: S.mech_station !== '0', code: S.mech_code !== '0', brand: true, emptyLabor: Number(S.mech_extra_labor ?? 3), emptyParts: Number(S.mech_extra_parts ?? 3) })}
@@ -410,7 +420,7 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
       <script>document.querySelectorAll('[data-qr]').forEach(function(el){try{var q=qrcode(0,'M');q.addData(el.dataset.qr);q.make();el.innerHTML=q.createSvgTag({cellSize:3,margin:0});}catch(e){el.textContent=el.dataset.qr}})</script>`;
   }
   const body = `<div class="cols">
-      <div class="box"><h3>Sprzedawca</h3><div class="n">${esc(S.company_legal_name || S.company_name || '')}</div>${esc(S.company_legal_address || S.company_address || '')}<br>NIP: <b>${esc(S.company_nip || '—')}</b>${S.company_bank ? `<br>Nr konta: <b>${esc(S.company_bank)}</b>` : ''}</div>
+      <div class="box"><h3>Sprzedawca</h3><div class="n">${esc(S.company_legal_name || S.company_name || '')}</div>${esc(S.company_legal_address || S.company_address || '')}<br>NIP: <b>${esc(S.company_nip || '—')}</b>${S.company_regon ? `<br>REGON: <b>${esc(S.company_regon)}</b>` : ''}${S.company_krs ? `<br>KRS: <b>${esc(S.company_krs)}</b>${S.company_court ? `, ${esc(S.company_court)}` : ''}` : ''}${S.company_bdo ? `<br>Nr BDO: <b>${esc(S.company_bdo)}</b>` : ''}${S.company_bank ? `<br>Nr konta: <b>${esc(S.company_bank)}</b>` : ''}</div>
       <div class="box"><h3>Nabywca</h3><div class="n">${esc(b.name || '')}</div>${esc([b.street, [b.postcode, b.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}${b.nip ? `<br>NIP: <b>${esc(b.nip)}</b>` : ''}</div>
     </div>
     ${d.proforma_id ? (() => { const pf = one('SELECT number, issue_date FROM sales_docs WHERE id = ?', d.proforma_id); return pf ? `<div class="sub" style="margin-bottom:6px">Wystawiona na podstawie faktury pro forma ${esc(pf.number)} z dnia ${esc(pf.issue_date)}</div>` : ''; })() : ''}
@@ -422,10 +432,9 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
     <div class="cols" style="margin-top:10px"><div class="box kv"><span>Sposób płatności</span><b>${esc(PAY_PL[d.payment_method] || d.payment_method)}${(() => { const p = safeJson(d.pay_split, null); return p?.length ? `<br><span class="sub">${esc(p.map((x) => `${PAY_PL[x.method] || x.method}: ${zl(x.amount)} zł`).join(', '))}</span>` : ''; })()}</b><span>Termin płatności</span><b>${esc(d.due_date)}</b>${S.company_bank && d.payment_method === 'transfer' ? `<span>Rachunek</span><b>${esc(S.company_bank)}</b>` : ''}</div>
       ${(() => { const t = `${mpp ? '<b>Mechanizm podzielonej płatności</b><br>' : ''}${d.kind === 'proforma' ? '<b>Dokument nie jest fakturą VAT</b> i nie stanowi podstawy do odliczenia podatku.<br>' : ''}${d.ksef && d.ext_id ? 'Faktura przekazana do KSeF przez Fakturownia.<br>' : ''}${d.ksef_number ? 'Faktura przyjęta w KSeF.<br>' : ''}${esc(d.notes || '')}`; return t ? `<div class="box">${t}</div>` : '<div></div>'; })()}</div>
     ${ksefBox}
-    ${[S.company_krs && `KRS ${S.company_krs}${S.company_court ? ', ' + S.company_court : ''}`, S.company_regon && `REGON ${S.company_regon}`, S.company_bdo && `BDO ${S.company_bdo}`, S.company_capital && `Kapitał zakładowy ${S.company_capital}`].filter(Boolean).length
-      ? `<div class="sec sub">${esc([S.company_krs && `KRS ${S.company_krs}${S.company_court ? ', ' + S.company_court : ''}`, S.company_regon && `REGON ${S.company_regon}`, S.company_bdo && `Nr BDO ${S.company_bdo}`, S.company_capital && `Kapitał zakładowy ${S.company_capital}`].filter(Boolean).join(' · '))}</div>` : ''}
+    ${S.company_capital ? `<div class="sec sub">Kapitał zakładowy ${esc(S.company_capital)}</div>` : ''}
     ${S.sale_footer ? `<div class="sec note">${esc(S.sale_footer)}</div>` : ''}
-    ${d.ksef_hash ? '' : sigBlock('Osoba upoważniona do wystawienia', 'Osoba upoważniona do odbioru', S.sale_person || d.created_by || '')}`;
+    ${d.ksef_hash ? '' : sigBlock('Osoba upoważniona do wystawienia', 'Osoba upoważniona do odbioru', plName(S.sale_person || d.created_by || ''))}`;
   return page({
     S, title: SALE_KIND[d.kind], number: d.number, legal: true, bar, back,
     meta: [['Data wystawienia', d.issue_date], d.kind !== 'proforma' ? ['Data sprzedaży', d.sale_date] : null, ['Miejsce wystawienia', d.place || 'Warszawa']],
@@ -443,12 +452,12 @@ export function stockDocHtml(id, { S = settingsMap(), bar = true } = {}) {
   const showCode = S.stock_code !== '0', showLoc = S.stock_location === '1', showCost = d.type === 'WZ' && S.wz_cost_col === '1';
   const total = round2(items.reduce((s, i) => s + i.qty * i.price_net, 0));
   const body = `<div class="cols"><div class="box kv"><span>${d.type === 'PZ' ? 'Dostawca' : 'Kontrahent'}</span><b>${esc(d.counterparty || '—')}</b>${d.ext_number ? `<span>Dokument dostawcy</span><b>${esc(d.ext_number)}</b>` : ''}${o ? `<span>Zlecenie</span><b>${esc(o.number)}</b>` : ''}</div>
-      <div class="box kv"><span>Magazyn</span><b>Główny</b><span>Wystawił</span><b>${esc(d.created_by || '')}</b></div></div>
+      <div class="box kv"><span>Magazyn</span><b>Główny</b><span>Wystawił</span><b>${esc(plName(d.created_by))}</b></div></div>
     <div class="sec"><table><thead><tr><th style="width:22px">Lp.</th><th>Nazwa</th>${showCode ? '<th>Kod</th>' : ''}${showLoc ? '<th>Lokalizacja</th>' : ''}<th class="r">Ilość</th><th>J.m.</th><th class="r">Cena netto</th>${showCost ? '<th class="r">Koszt zakupu</th>' : ''}<th class="r">Wartość netto</th></tr></thead><tbody>
       ${items.map((i, n) => `<tr><td>${n + 1}</td><td>${esc(i.name)}${i.manufacturer ? ` <span class="sub">${esc(i.manufacturer)}</span>` : ''}</td>${showCode ? `<td class="mono">${esc(i.code || '')}</td>` : ''}${showLoc ? `<td>${esc(i.location || '')}</td>` : ''}<td class="r">${qtyFmt(i.qty)}</td><td>${esc(i.unit || 'szt.')}</td><td class="r">${zl(i.price_net)}</td>${showCost ? `<td class="r">${zl(i.purchase_price)}</td>` : ''}<td class="r">${zl(i.qty * i.price_net)}</td></tr>`).join('')}
       <tr class="sum"><td colspan="${5 + (showCode ? 1 : 0) + (showLoc ? 1 : 0) + (showCost ? 1 : 0)}" class="r">Razem netto</td><td class="r">${zl(total)}</td></tr></tbody></table></div>
     ${d.note ? `<div class="sec note">${esc(d.note)}</div>` : ''}
-    ${sigBlock('Wystawił', d.type === 'PZ' ? 'Przyjął' : 'Odebrał', S.stock_person || d.created_by || '')}`;
+    ${sigBlock('Wystawił', d.type === 'PZ' ? 'Przyjął' : 'Odebrał', plName(S.stock_person || d.created_by || ''))}`;
   return page({ S, title: STOCK_TITLE[d.type] || d.type, number: d.number, meta: [['Data', d10(d.doc_date)]], body, bar });
 }
 
@@ -462,7 +471,7 @@ export function cashDocHtml(id, { S = settingsMap(), bar = true } = {}) {
       <div class="box kv"><span>Forma</span><b>${esc(PAY_PL[p.method] || p.method)}</b><span>Kasa</span><b>Główna</b></div></div>
     <div class="sec"><table><thead><tr><th>Tytułem</th><th class="r">Kwota</th></tr></thead><tbody><tr><td>${esc(o ? `Zapłata za zlecenie ${o.number}` : p.note || '')}</td><td class="r">${zl(p.amount)} zł</td></tr>
       <tr class="sum"><td class="r">Razem</td><td class="r">${zl(p.amount)} zł</td></tr></tbody></table><div class="words">Słownie: ${esc(slownie(p.amount))}</div></div>
-    ${sigBlock('Wystawił', kp ? 'Wpłacił' : 'Otrzymał', S.cash_person || p.staff || '')}`;
+    ${sigBlock('Wystawił', kp ? 'Wpłacił' : 'Otrzymał', plName(S.cash_person || p.staff || ''))}`;
   return page({ S, title: kp ? 'Dowód wpłaty KP' : 'Dowód wypłaty KW', number: p.number || `#${p.id}`, meta: [['Data', d10(p.created_at)]], body, bar });
 }
 
@@ -477,6 +486,6 @@ export function storageDocHtml(id, { S = settingsMap(), bar = true } = {}) {
       <tbody><tr><td>${esc(r.kind === 'koła' ? 'Koła kompletne' : 'Opony')}${r.description ? `<div class="sub">${esc(r.description)}</div>` : ''}</td><td class="r">${esc(r.qty)} szt.</td><td>${esc(r.location || '')}</td><td>${esc(d10(r.date_in))}</td><td>${esc(d10(r.date_until) || '—')}</td><td class="r">${zl(r.price)} zł</td></tr></tbody></table></div>
     ${r.note ? `<div class="sec note">${esc(r.note)}</div>` : ''}
     ${terms ? `<div class="sec note">${esc(terms)}</div>` : ''}
-    ${sigBlock('Podpis przyjmującego', 'Podpis klienta', S.storage_person || '')}`;
+    ${sigBlock('Podpis przyjmującego', 'Podpis klienta', plName(S.storage_person || ''))}`;
   return page({ S, title: 'Depozyt — przechowanie kół / opon', number: r.number, meta: [['Data przyjęcia', d10(r.date_in)], r.date_out ? ['Data wydania', d10(r.date_out)] : null], body, bar });
 }
