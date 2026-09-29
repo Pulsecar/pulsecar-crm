@@ -8,7 +8,7 @@ import Stock from './pages/stock.js';
 import Purchases from './pages/purchases.js';
 import Storage from './pages/storage.js';
 import Cash from './pages/cash.js';
-import Sales from './pages/sales.js';
+import Sales, { SaleDocPage } from './pages/sales.js';
 import Pos from './pages/pos.js';
 import Finance from './pages/finance.js';
 import Reports from './pages/reports.js';
@@ -172,7 +172,7 @@ function Shell({ app }) {
   else if (p0 === 'purchases') page = html`<${Purchases} />`;
   else if (p0 === 'storage') page = html`<${Storage} />`;
   else if (p0 === 'cash') page = html`<${Cash} />`;
-  else if (p0 === 'sales') page = html`<${Sales} />`;
+  else if (p0 === 'sales') page = p1 ? html`<${SaleDocPage} id=${p1} key=${p1} />` : html`<${Sales} />`;
   else if (p0 === 'pos') page = html`<${Pos} />`;
   else if (p0 === 'reports') page = html`<${Reports} query=${route.query} />`;
   else if (p0 === 'finance') page = html`<${Finance} />`;

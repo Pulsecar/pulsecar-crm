@@ -132,6 +132,7 @@ const amt = (n) => { const v = round2(n); return (Object.is(v, -0) || v === 0 ? 
 const price = (n) => { const v = Math.round((Number(n) || 0) * 10000) / 10000; return String(v === 0 ? 0 : v); };
 const qty = (n) => String(Math.round((Number(n) || 0) * 1e6) / 1e6);
 const PAY = { cash: 1, card: 2, blik: 7, transfer: 6, points: 3 };
+const SPLIT_PL = { cash: 'gotówka', card: 'karta', blik: 'BLIK', transfer: 'przelew' };
 const RATE_FIELD = { 23: ['P_13_1', 'P_14_1'], 22: ['P_13_1', 'P_14_1'], 8: ['P_13_2', 'P_14_2'], 7: ['P_13_2', 'P_14_2'], 5: ['P_13_3', 'P_14_3'], 0: ['P_13_6_1', null] };
 function splitAddr(a) {
   const s = String(a || '').trim();
@@ -185,9 +186,15 @@ export function buildFa3(d, S = Object.fromEntries(all('SELECT key, value FROM s
     rows = L.map((l, i) => lineXml(l, i + 1)).join('');
   }
   const paid = d.kind !== 'correction' && d.paid >= d.total_gross - 0.005 && d.total_gross > 0;
+  const js = (v) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
+  const split = js(d.pay_split) || [];
+  // данные автомобиля — в «Dodatkowy opis» фактуры (klucz → wartość)
+  const car = js(d.car);
+  const opis = car ? [['Pojazd', [car.make, car.model, car.year].filter(Boolean).join(' ')], ['Nr rejestracyjny', car.plate], ['VIN', car.vin], ['Przebieg', car.mileage && `${car.mileage} km`], ['Silnik', car.engine]]
+    .filter(([, v]) => v).map(([k, v]) => `<DodatkowyOpis><Klucz>${x(k)}</Klucz><Wartosc>${x(String(v).slice(0, 256))}</Wartosc></DodatkowyOpis>`).join('') : '';
   const bank = digits(S.company_bank).length >= 10 ? `<RachunekBankowy><NrRB>${digits(S.company_bank)}</NrRB>${S.company_bank_name ? `<NazwaBanku>${x(S.company_bank_name)}</NazwaBanku>` : ''}</RachunekBankowy>` : '';
   const platnosc = d.kind === 'correction' ? '' : `<Platnosc>${paid ? `<Zaplacono>1</Zaplacono><DataZaplaty>${d.issue_date}</DataZaplaty>` : `<TerminPlatnosci><Termin>${d.due_date || d.issue_date}</Termin></TerminPlatnosci>`}`
-    + (d.payment_method === 'mixed' ? '<PlatnoscInna>1</PlatnoscInna><OpisPlatnosci>Płatność mieszana</OpisPlatnosci>' : `<FormaPlatnosci>${PAY[d.payment_method] || 1}</FormaPlatnosci>`)
+    + (d.payment_method === 'mixed' ? `<PlatnoscInna>1</PlatnoscInna><OpisPlatnosci>${x(('Płatność mieszana' + (split.length ? ': ' + split.map((p) => `${SPLIT_PL[p.method] || p.method} ${amt(p.amount)} zł`).join(', ') : '')).slice(0, 256))}</OpisPlatnosci>` : `<FormaPlatnosci>${PAY[d.payment_method] || 1}</FormaPlatnosci>`)
     + `${d.payment_method === 'transfer' || d.payment_method === 'mixed' ? bank : ''}</Platnosc>`;
   const contact = S.company_email || S.company_phone ? `<DaneKontaktowe>${S.company_email ? `<Email>${x(S.company_email)}</Email>` : ''}${S.company_phone ? `<Telefon>${x(digits(S.company_phone).slice(-16))}</Telefon>` : ''}</DaneKontaktowe>` : '';
   const stopka = [S.company_krs && `KRS: ${S.company_krs}`, S.company_regon && `REGON: ${S.company_regon}`, S.company_bdo && `BDO: ${S.company_bdo}`, S.company_capital && `Kapitał zakładowy: ${S.company_capital}`].filter(Boolean);
@@ -199,7 +206,7 @@ export function buildFa3(d, S = Object.fromEntries(all('SELECT key, value FROM s
     + `<Fa><KodWaluty>PLN</KodWaluty><P_1>${d.issue_date}</P_1>${d.place ? `<P_1M>${x(d.place)}</P_1M>` : ''}<P_2>${x(d.number)}</P_2>`
     + `${d.kind !== 'correction' && d.sale_date && d.sale_date !== d.issue_date ? `<P_6>${d.sale_date}</P_6>` : ''}${totals.rates}<P_15>${amt(totals.gross)}</P_15>`
     + '<Adnotacje><P_16>2</P_16><P_17>2</P_17><P_18>2</P_18><P_18A>2</P_18A><Zwolnienie><P_19N>1</P_19N></Zwolnienie><NoweSrodkiTransportu><P_22N>1</P_22N></NoweSrodkiTransportu><P_23>2</P_23><PMarzy><P_PMarzyN>1</P_PMarzyN></PMarzy></Adnotacje>'
-    + `<RodzajFaktury>${d.kind === 'correction' ? 'KOR' : 'VAT'}</RodzajFaktury>${kor}${rows}${platnosc}</Fa>`
+    + `<RodzajFaktury>${d.kind === 'correction' ? 'KOR' : 'VAT'}</RodzajFaktury>${kor}${opis}${rows}${platnosc}</Fa>`
     + (stopka.length ? `<Stopka><Rejestry>${S.company_krs ? `<KRS>${digits(S.company_krs)}</KRS>` : ''}${S.company_regon ? `<REGON>${digits(S.company_regon)}</REGON>` : ''}${S.company_bdo ? `<BDO>${digits(S.company_bdo)}</BDO>` : ''}</Rejestry></Stopka>` : '')
     + '</Faktura>';
 }

@@ -337,6 +337,17 @@ try {
   }
   const me0 = stl.rows.find((x) => x.login === 'admin');
   assert.equal((await req(`/crm-api/staff/${me0.id}/active`, { body: { active: false } })).status, 400);
+  // фактура без заказа (без KSeF): можно открыть, изменить, авто сохраняется в CRM
+  const fi = ok(await req('/crm-api/sales-docs', { body: { kind: 'vat', buyer: { name: 'Jan Kowalski' }, payment_method: 'card', paid: true, save_car: true,
+    car: { plate: 'WX 55555', make: 'Toyota', model: 'Corolla', mileage: 100000 }, lines: [{ name: 'Olej 5W30', qty: 2, unit_gross: 61.5, vat: 23 }] } }), 'free inv');
+  const fid = ok(await req('/crm-api/sales-docs/' + fi.id), 'free inv get');
+  assert.equal(fid.editable, true); assert.equal(fid.total_gross, 123); assert.ok(fid.car.car_id, 'авто сохранено в CRM');
+  assert.ok(ok(await req('/crm-api/cars?q=WX55555'), 'car saved').rows.some((k) => k.id === fid.car.car_id));
+  ok(await req('/crm-api/sales-docs/' + fi.id, { method: 'PUT', body: { buyer: { name: 'Jan Kowalski', nip: '' }, payment_method: 'mixed', pay_split: [{ method: 'cash', amount: 50 }, { method: 'card', amount: 50 }],
+    car: fid.car, lines: [...fid.items, { name: 'Filtr', qty: 1, unit_net: 20, price_mode: 'net', vat: 23 }] } }), 'free inv edit');
+  const fe = ok(await req('/crm-api/sales-docs/' + fi.id), 'free inv get2');
+  assert.equal(fe.number, fi.number); assert.equal(fe.total_gross, 147.6); assert.equal(fe.paid, 100); assert.equal(fe.payment_method, 'mixed'); assert.equal(fe.items.length, 2);
+  assert.equal((await req('/crm-api/sales-docs/' + fi.id, { method: 'PUT', body: { buyer: { name: 'J' }, payment_method: 'mixed', pay_split: [{ method: 'cash', amount: 500 }], lines: [{ name: 'a', qty: 1, unit_gross: 10 }] } })).status, 400, 'части больше суммы');
   console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 

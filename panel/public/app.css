@@ -619,3 +619,18 @@ a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; }
 .shell.mini .nav-foot { display: none; }
 }
 @media (max-width: 860px) { .side-toggle { display: none; } }
+
+/* ── Фактура без заказа: поиск позиций, авто, карточка документа ── */
+.inv-ac .ac-list { min-width: 460px; right: auto; }
+.inv-ac .ac-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.inv-car { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 8px; background: var(--surface2); }
+.inv-lines .inline-input.price.on { border-color: var(--accent); }
+.kv-list { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+.kv-list > span { color: var(--muted); }
+.inv-lines td:first-child { width: 42%; }
+.inv-lines .inline-input { border: 1px solid var(--border); }
+.inv-lines .inline-input.num.price { width: 104px; }
+.inv-lines .inline-input.num.qty { width: 70px; }
+.inv-lines select.inline-input { width: 82px; min-width: 82px; }
+.inv-car .btn.sm:has(svg:only-child) { width: auto; }
+.grid > .card + .card { margin-top: 0; }

@@ -120,6 +120,22 @@ try {
   for (const s of ['<RodzajFaktury>KOR</RodzajFaktury>', `<NrKSeFFaKorygowanej>${fv.ksef_number}</NrKSeFFaKorygowanej>`, '<StanPrzed>1</StanPrzed>', '<P_15>-61.50</P_15>', '<PrzyczynaKorekty>Zwrot filtra</PrzyczynaKorekty>'])
     assert.ok(x2.includes(s), 'в корректе нет ' + s);
   assert.equal(Object.keys(state.sessions).length, 1, 'сессия переиспользуется');
+  // фактура без заказа: цена нетто, авто в «DodatkowyOpis», смешанная оплата; после KSeF — только корректа
+  const ff = ok(await req('/crm-api/sales-docs', { body: { kind: 'vat', buyer: { name: 'Firma Testowa sp. z o.o.', nip: '7010000005', street: 'ul. Testowa 5', postcode: '02-222', city: 'Warszawa' },
+    payment_method: 'mixed', pay_split: [{ method: 'cash', amount: 100 }, { method: 'blik', amount: 23 }],
+    car: { plate: 'wa 12345', vin: 'wvwzzz1kz8w000001', make: 'Volkswagen', model: 'Golf V', mileage: 212000 },
+    lines: [{ name: 'Diagnostyka', qty: 1, unit: 'usł.', unit_net: 100, price_mode: 'net', vat: 23 }] } }), 'free fv');
+  assert.equal(ff.ksef_status, 'accepted', JSON.stringify(ff)); assert.equal(ff.total_gross, 123); assert.equal(ff.paid, 123);
+  const x3 = state.xml[state.xml.length - 1];
+  for (const s of ['<DodatkowyOpis><Klucz>Nr rejestracyjny</Klucz><Wartosc>WA12345</Wartosc></DodatkowyOpis>', '<Klucz>VIN</Klucz><Wartosc>WVWZZZ1KZ8W000001</Wartosc>', '<PlatnoscInna>1</PlatnoscInna>', 'gotówka 100.00 zł, BLIK 23.00 zł', '<P_11A>123.00</P_11A>'])
+    assert.ok(x3.includes(s), 'в XML фактуры без заказа нет ' + s);
+  assert.ok(x3.indexOf('<DodatkowyOpis>') < x3.indexOf('<FaWiersz>'), 'DodatkowyOpis перед FaWiersz (порядок FA(3))');
+  if (process.env.FA3_XSD) { const fs = await import('node:fs'); fs.writeFileSync('/tmp/fa3-free.xml', x3); }
+  assert.equal((await req('/crm-api/sales-docs/' + ff.id, { method: 'PUT', body: { buyer: { name: 'X' }, lines: [{ name: 'a', qty: 1, unit_gross: 1 }] } })).status, 409, 'после KSeF изменить нельзя');
+  const ffd = ok(await req('/crm-api/sales-docs/' + ff.id), 'free fv get');
+  assert.equal(ffd.editable, false); assert.equal(ffd.car.plate, 'WA12345'); assert.equal(ffd.pay_split.length, 2);
+  const pr = await req('/crm-api/print/sale/' + ff.id);
+  assert.ok(pr.j.includes('Pojazd') && pr.j.includes('WA12345') && pr.j.includes('BLIK: 23,00'), 'авто и разбивка оплаты на фактуре');
   // отклонённая фактура: статус и причина, повторная отправка
   const o2 = ok(await req('/crm-api/orders', { body: { customer_id: cu.id } }), 'order2');
   ok(await req(`/crm-api/orders/${o2.id}/items`, { body: { kind: 'labor', name: 'ODRZUC test', qty: 1, price: 100, vat: 23 } }), 'bad item');

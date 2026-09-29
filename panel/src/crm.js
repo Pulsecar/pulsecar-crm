@@ -1956,26 +1956,100 @@ crm.get('/sales', (req, res) => {
   const sum = (t) => round2(rows.filter((r) => (t ? r.type === t : r.type !== 'proforma')).reduce((a, r) => a + (Number(r.gross) || 0), 0));
   res.json({ rows, totals: { all: sum(), vat: sum('vat'), correction: sum('correction'), receipt: sum('receipt'), proforma: sum('proforma') }, ksefPending: rows.filter((r) => r.type !== 'proforma' && r.type !== 'receipt' && r.ksef_status && r.ksef_status !== 'accepted').length });
 });
-/** Фактура без заказа (продажа запчастей, услуга): покупатель + свои позиции */
+/** Позиции фактуры без заказа: цену можно ввести нетто или брутто (price_mode), остальное считается */
+function freeLines(arr) {
+  return (arr || []).map((l) => {
+    const qty = Number(l.qty) || 0, vat = Number(l.vat ?? 23);
+    let gross, net;
+    if (l.price_mode === 'net' && l.unit_net !== '' && l.unit_net != null) { net = round2(qty * (Number(l.unit_net) || 0)); gross = round2(net * (1 + vat / 100)); }
+    else if ((l.unit_gross === undefined || l.unit_gross === '') && l.gross != null && Number(l.qty) === qty) { gross = round2(Number(l.gross)); net = round2(gross / (1 + vat / 100)); } // позиция, сохранённая ранее
+    else { gross = round2(qty * (Number(l.unit_gross) || 0)); net = round2(gross / (1 + vat / 100)); }
+    return { name: String(l.name || '').trim().slice(0, 250), code: l.code || null, kind: l.kind === 'labor' ? 'labor' : 'part', qty, unit: l.unit || 'szt.', unit_net: qty ? round2(net / qty) : 0, discount: 0, vat, net, vat_amt: round2(gross - net), gross, gtu: null,
+      price_mode: l.price_mode === 'net' ? 'net' : 'gross', product_id: l.product_id || null, catalog_id: l.catalog_id || null };
+  }).filter((l) => l.name && l.qty > 0);
+}
+const CAR_KEYS = ['car_id', 'make', 'model', 'year', 'plate', 'vin', 'mileage', 'engine', 'fuel'];
+function freeCar(c, buyer, save) {
+  if (!c) return null;
+  const car = Object.fromEntries(CAR_KEYS.map((k) => [k, c[k] === '' || c[k] == null ? null : String(c[k]).trim()]).filter(([, v]) => v));
+  if (car.plate) car.plate = normPlate(car.plate);
+  if (car.vin) car.vin = car.vin.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!Object.keys(car).some((k) => k !== 'car_id')) return null;
+  // «Сохранить авто в CRM»: новая машина попадает в базу (к клиенту с тем же NIP, если он есть)
+  if (save && !car.car_id && (car.plate || car.vin)) {
+    const ex = one('SELECT id FROM cars WHERE (plate = ? AND ? IS NOT NULL) OR (vin = ? AND ? IS NOT NULL)', car.plate || null, car.plate || null, car.vin || null, car.vin || null);
+    const nip = String(buyer?.nip || '').replace(/\D/g, '');
+    const cust = nip ? one("SELECT id FROM customers WHERE REPLACE(REPLACE(nip,'-',''),' ','') = ?", nip) : null;
+    car.car_id = ex?.id || createCar({ plate: car.plate || '', vin: car.vin && car.vin.length === 17 ? car.vin : '', make: car.make || '', model: car.model || '', year: car.year || '',
+      engine: car.engine || '', last_mileage: Number(car.mileage) || null, customer_id: cust?.id || null });
+  }
+  if (car.car_id) car.car_id = Number(car.car_id);
+  return car;
+}
+function freeSplit(b, total) {
+  if (b.payment_method !== 'mixed') return null;
+  const parts = (b.pay_split || []).map((x) => ({ method: ['cash', 'card', 'blik', 'transfer'].includes(x?.method) ? x.method : null, amount: round2(x?.amount) })).filter((x) => x.method && x.amount > 0);
+  if (!parts.length) return null;
+  const sum = round2(parts.reduce((a, x) => a + x.amount, 0));
+  if (sum > total + 0.01) throw new HttpError(400, `Сумма частей оплаты (${sum} zł) больше суммы фактуры (${total} zł)`);
+  return parts;
+}
+/** Фактура без заказа (продажа запчастей, услуга): покупатель + свои позиции + авто + оплата частями */
 crm.post('/sales-docs', async (req, res) => {
   const s = who(req, 'invoices.create');
   const b = req.body || {};
   const kind = b.kind === 'proforma' ? 'proforma' : 'vat';
-  const lines = (b.lines || []).map((l) => {
-    const qty = Number(l.qty) || 0, vat = Number(l.vat ?? 23), gross = round2(qty * (Number(l.unit_gross) || 0));
-    const net = round2(gross / (1 + vat / 100));
-    return { name: String(l.name || '').trim().slice(0, 250), code: l.code || null, kind: 'part', qty, unit: l.unit || 'szt.', unit_net: qty ? round2(net / qty) : 0, discount: 0, vat, net, vat_amt: round2(gross - net), gross, gtu: null };
-  }).filter((l) => l.name && l.qty > 0);
+  const lines = freeLines(b.lines);
   if (!lines.length) throw new HttpError(400, 'Добавьте хотя бы одну позицию');
   if (!String(b.buyer?.name || '').trim()) throw new HttpError(400, 'Укажите покупателя');
-  const viaKsef = kind === 'vat' && getSetting('invoice_mode', 'auto') === 'auto' && KSEF.ksefEnabled();
-  const d = DOC.createSaleDoc({ kind, buyer: b.buyer, lines, issue_date: viaKsef ? today() : b.issue_date, sale_date: b.sale_date, payment_method: b.payment_method, due_days: b.due_days, notes: b.notes, paid: b.paid ? lines.reduce((a, l) => a + l.gross, 0) : 0 }, s.name);
+  const total = round2(lines.reduce((a, l) => a + l.gross, 0));
+  const split = freeSplit(b, total);
+  const car = freeCar(b.car, b.buyer, b.save_car);
+  const viaKsef = kind === 'vat' && getSetting('invoice_mode', 'auto') === 'auto' && KSEF.ksefEnabled() && !b.draft;
+  const paid = split ? round2(split.reduce((a, x) => a + x.amount, 0)) : b.paid ? total : 0;
+  const d = DOC.createSaleDoc({ kind, buyer: b.buyer, lines, issue_date: viaKsef ? today() : b.issue_date, sale_date: b.sale_date, payment_method: b.payment_method, due_days: b.due_days, notes: b.notes, paid }, s.name);
+  run('UPDATE sales_docs SET car = ?, pay_split = ? WHERE id = ?', car ? JSON.stringify(car) : null, split ? JSON.stringify(split) : null, d.id);
   let ks = null, warning = null;
   if (viaKsef && (cfg('ksef')?.autoSend ?? true)) {
     try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
     if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил фактуру: ' + ks.ksef_error;
   }
   res.json({ ...d, ...(ks || {}), warning });
+});
+/** Карточка документа продажи (для просмотра и редактирования) */
+const docEditable = (d) => d.kind !== 'correction' && !d.ext_id && !d.ksef_number && !['sent', 'accepted'].includes(d.ksef_status || '');
+crm.get('/sales-docs/:id', (req, res) => {
+  who(req, 'invoices.create');
+  const d = one('SELECT d.*, o.number order_no, x.number corrects_no FROM sales_docs d LEFT JOIN orders o ON o.id = d.order_id LEFT JOIN sales_docs x ON x.id = d.corrects_id WHERE d.id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Документ не найден');
+  const j = (v, def) => { try { return v ? JSON.parse(v) : def; } catch { return def; } };
+  const { ksef_xml, ...rest } = d;
+  res.json({ ...rest, buyer: j(d.buyer, {}), items: j(d.items, []), car: j(d.car, null), pay_split: j(d.pay_split, null), editable: docEditable(d),
+    corrections: all('SELECT id, number, issue_date, total_gross FROM sales_docs WHERE corrects_id = ? ORDER BY id', d.id) });
+});
+/** Изменить фактуру, пока она не ушла в KSeF (номер и дата выставления сохраняются). После KSeF — только корректа */
+crm.put('/sales-docs/:id', async (req, res) => {
+  const s = who(req, 'invoices.create');
+  const d = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
+  if (!d) throw new HttpError(404, 'Документ не найден');
+  if (!docEditable(d)) throw new HttpError(409, 'Фактура уже в KSeF — изменить можно только корректой');
+  const b = req.body || {};
+  const lines = d.order_id && !b.lines ? JSON.parse(d.items || '[]') : freeLines(b.lines);
+  if (!lines.length) throw new HttpError(400, 'Добавьте хотя бы одну позицию');
+  if (!String(b.buyer?.name || '').trim()) throw new HttpError(400, 'Укажите покупателя');
+  const T = DOC.sumLines(lines);
+  const split = freeSplit(b, T.gross);
+  const car = freeCar(b.car, b.buyer, b.save_car);
+  const days = Math.max(0, Number(b.due_days) || 0);
+  const due = new Date(new Date(d.issue_date).getTime() + days * 86400000).toISOString().slice(0, 10);
+  const pm = ['cash', 'card', 'blik', 'transfer', 'mixed'].includes(b.payment_method) ? b.payment_method : d.payment_method;
+  const paid = d.kind === 'proforma' ? 0 : split ? round2(split.reduce((a, x) => a + x.amount, 0)) : b.paid ? T.gross : 0;
+  update('sales_docs', d.id, { buyer: JSON.stringify(b.buyer), items: JSON.stringify(lines), total_net: T.net, total_vat: T.vat, total_gross: T.gross,
+    payment_method: pm, paid, due_date: due, sale_date: /^\d{4}-\d{2}-\d{2}$/.test(b.sale_date || '') ? b.sale_date : d.sale_date, notes: b.notes || null,
+    car: car ? JSON.stringify(car) : null, pay_split: split ? JSON.stringify(split) : null,
+    ksef_status: null, ksef_error: null, ksef_xml: null, ksef_ref: null });
+  if (d.order_id) log('order', d.order_id, 'invoice', `${d.number} изменена`, s.name);
+  res.json({ ok: true, id: d.id });
 });
 /** KSeF: отправить (повторно), обновить статус, скачать UPO и XML FA(3) */
 crm.post('/sales-docs/:id/ksef', async (req, res) => {

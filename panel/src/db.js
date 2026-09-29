@@ -511,6 +511,9 @@ CREATE TABLE IF NOT EXISTS order_files (
 );
 `);
 for (const [c, t] of [['ksef_status', 'TEXT'], ['ksef_number', 'TEXT'], ['ksef_ref', 'TEXT'], ['ksef_session', 'TEXT'], ['ksef_hash', 'TEXT'], ['ksef_xml', 'TEXT'], ['ksef_env', 'TEXT'], ['ksef_error', 'TEXT'], ['ksef_sent_at', 'TEXT']]) addColumn('sales_docs', c, t);
+// фактура без заказа: данные автомобиля и раздел оплаты (нал / безнал / BLIK) — JSON
+addColumn('sales_docs', 'car', 'TEXT');
+addColumn('sales_docs', 'pay_split', 'TEXT');
 addColumn('products', 'price_group_id', 'INTEGER');
 addColumn('products', 'gtu', 'TEXT');
 addColumn('stations', 'slot_min', 'INTEGER');
