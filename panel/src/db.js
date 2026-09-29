@@ -449,6 +449,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS order_comments (
   at TEXT NOT NULL DEFAULT (datetime('now','localtime')), staff TEXT, text TEXT, followup TEXT, reason TEXT, followup_at TEXT)`);
 // хранение: парковка авто (цена за сутки) и оплата хранения / парковки
 addColumn('storage', 'paid', 'REAL NOT NULL DEFAULT 0');
+// модели, сохранённые с кодом варианта из CEPiK («540i            MR`16 E») — убираем хвост
+for (const k of all("SELECT id, model FROM cars WHERE model LIKE '%   %' OR model LIKE '% MR`%' OR model LIKE '% MR''%'")) {
+  const m = String(k.model).trim().split(/\s{3,}|\t/)[0].replace(/\s+MR[`'´]?\d{2}.*$/i, '').replace(/\s+/g, ' ').trim();
+  if (m && m !== k.model) run('UPDATE cars SET model = ? WHERE id = ?', m, k.id);
+}
 // ── Несколько касс (Kasy): наличные, терминал, счёт; перенос денег между ними ──
 db.exec(`CREATE TABLE IF NOT EXISTS cash_registers (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'cash', -- cash | card | bank

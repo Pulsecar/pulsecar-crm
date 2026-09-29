@@ -71,7 +71,7 @@ export function parseRegFields(f) {
   };
   const car = {
     plate: none(f[7]).replace(/\s+/g, ' ').toUpperCase(),
-    make: none(f[8]), type: none(f[9]), variant: none(f[10]), version: none(f[11]), model: none(f[12]),
+    make: cleanModel(none(f[8])), type: none(f[9]), variant: none(f[10]), version: none(f[11]), model: cleanModel(none(f[12])),
     vin: none(f[13]).toUpperCase(),
     reg_doc: none(f[1]), reg_doc_issued: none(f[14]),
     capacity: num(f[48]) ? Math.round(num(f[48])) : null,
@@ -124,10 +124,12 @@ export async function lookupPlate(plateRaw, opts = {}) {
   }, plate);
 }
 
+/** Модель из CEPiK приходит с кодом варианта через кучу пробелов: «540i            MR`16 E» → «540i» */
+export const cleanModel = (v) => String(v || '').replace(/\u00a0/g, ' ').trim().split(/\s{3,}|\t/)[0].replace(/\s+MR[`'´]?\d{2}.*$/i, '').replace(/\s+/g, ' ').trim();
 function normalize(x, plate) {
   const n = (v) => { const k = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(k) && k > 0 ? Math.round(k) : null; };
   return {
-    plate, make: String(x.make || '').trim(), model: String(x.model || '').trim(), year: String(x.year || '').slice(0, 4),
+    plate, make: cleanModel(x.make), model: cleanModel(x.model), year: String(x.year || '').slice(0, 4),
     vin: String(x.vin || '').toUpperCase().trim(), capacity: n(x.capacity), power_kw: n(x.power_kw), fuel: String(x.fuel || '').trim(),
     first_reg: String(x.first_reg || '').slice(0, 10), color: x.color || '', description: x.description || '',
   };
