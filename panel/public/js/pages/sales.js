@@ -64,7 +64,7 @@ const LINE0 = () => ({ name: '', qty: 1, unit: 'szt.', unit_gross: '', unit_net:
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const CAT_UNIT = { oper: 'usł.', h: 'godz.', rbh: 'godz.' };
 /** Строка позиции: название с поиском по прайсу работ и складу, цена нетто ⇄ брутто */
-function LineName({ l, onPick, onInput }) {
+export function LineName({ l, onPick, onInput, rawUnit }) {
   const app = useApp();
   const [open, setOpen] = useState(false);
   const [res, setRes] = useState([]);
@@ -82,7 +82,7 @@ function LineName({ l, onPick, onInput }) {
   const pick = (r) => {
     setOpen(false);
     if (r.t === 'p') onPick({ name: [r.x.name, r.x.manufacturer, r.x.code].filter(Boolean).join(' '), code: r.x.code || null, unit: r.x.unit || 'szt.', unit_gross: r.x.sell_price || '', price_mode: 'gross', vat: r.x.vat ?? 23, product_id: r.x.id, kind: 'part' });
-    else onPick({ name: r.x.name, unit: CAT_UNIT[r.x.unit] || r.x.unit || 'usł.', qty: r.x.qty || 1, unit_gross: r.x.price || '', price_mode: 'gross', vat: r.x.vat ?? 23, catalog_id: r.x.id, kind: 'labor' });
+    else onPick({ name: r.x.name, unit: rawUnit ? r.x.unit || 'oper' : CAT_UNIT[r.x.unit] || r.x.unit || 'usł.', qty: r.x.qty || 1, unit_gross: r.x.price || '', price_mode: 'gross', vat: r.x.vat ?? 23, catalog_id: r.x.id, kind: 'labor' });
   };
   return html`<div class="ac inv-ac">
     <input class="inline-input" value=${l.name} placeholder="Название или поиск по прайсу и складу…" onFocus=${() => setOpen(true)} onBlur=${() => setTimeout(() => setOpen(false), 180)}

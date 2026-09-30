@@ -1,9 +1,10 @@
 // Терминарз как harmonogram в Motowarsztat: слева «Неназначенные» (заказы с часами работ и заявки),
 // справа посты с загрузкой «4.5/9 ч»; заказы перетаскиваются на пост и время, карточки двигаются и растягиваются.
 import {
-  html, useState, useEffect, useRef, useData, api, act, go, useApp, Icon, Modal, Picker, ConfirmButton, todayStr, addDays, fdate, fdt, carName, toast,
+  html, useState, useEffect, useRef, useData, api, act, go, useApp, Icon, Modal, Picker, ConfirmButton, todayStr, addDays, fdate, fdt, carName, toast, zl,
 } from '../lib.js';
 import { CustomerCarPicker } from './orders.js';
+import { LineName } from './sales.js';
 
 const SLOT_PX = 30;
 const DAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -222,6 +223,12 @@ function NewOrderModal({ init, onClose, onSaved }) {
   const [cc, setCc] = useState({ customer: null, car: null });
   const [f, setF] = useState({ station_id: init.station_id || '', date: init.date, time: init.time || app.settings.hours_start || '09:00', duration_min: init.order ? '' : 60, complaint: '', mechanic_id: '', title: '' });
   const [busy, setBusy] = useState(false);
+  // работы и товары сразу при создании заказа (поиск по прайсу работ и складу)
+  const LINE = () => ({ name: '', qty: 1, unit: 'oper', unit_gross: '', vat: 23, kind: 'labor' });
+  const [lines, setLines] = useState([LINE()]);
+  const setLn = (i, patch) => setLines((L) => L.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const lineSum = (l) => Math.round((Number(l.qty) || 0) * (Number(l.unit_gross) || 0) * 100) / 100;
+  const total = lines.reduce((a, l) => a + lineSum(l), 0);
   const set = (p) => setF((v) => ({ ...v, ...p }));
   const slot = { station_id: f.station_id ? Number(f.station_id) : null, start_at: f.date && f.time ? `${f.date} ${f.time}` : null, duration_min: f.duration_min ? Number(f.duration_min) : undefined, mechanic_id: f.mechanic_id || null };
   const save = async (openAfter = true) => {
@@ -234,8 +241,10 @@ function NewOrderModal({ init, onClose, onSaved }) {
         await act(() => api('appointments', { body: { ...slot, order_id: init.order.id } }), 'Заказ в графике');
       } else {
         if (!cc.customer && !cc.newCustomer?.name && !cc.newCustomer?.phone && !cc.car) return toast('Выберите клиента или авто', 'error');
+        const items = lines.filter((l) => l.name.trim()).map((l) => ({ kind: l.kind === 'part' ? 'part' : 'labor', name: l.name.trim(), code: l.code || null, product_id: l.product_id || null,
+          qty: Number(l.qty) || 1, unit: l.unit || (l.kind === 'part' ? 'szt.' : 'oper'), price: Number(l.unit_gross) || 0, vat: Number(l.vat ?? 23) }));
         const r = await act(() => api('orders', { body: { kind: 'order', customer_id: cc.customer?.id, car_id: cc.car?.id, new_customer: cc.customer ? null : cc.newCustomer,
-          complaint: f.complaint, mechanic_id: f.mechanic_id || null, source: 'crm', appointment: { ...slot, duration_min: Number(f.duration_min) || 60, title: f.complaint.slice(0, 120) || undefined } } }), 'Заказ создан и поставлен в график');
+          items, complaint: f.complaint, mechanic_id: f.mechanic_id || null, source: 'crm', appointment: { ...slot, duration_min: Number(f.duration_min) || 60, title: f.complaint.slice(0, 120) || undefined } } }), 'Заказ создан и поставлен в график');
         // как в Motowarsztat: сразу в заказ — добавлять работы и товары
         if (openAfter) { onClose(); go('/orders/' + r.id); return; }
       }
@@ -260,7 +269,17 @@ function NewOrderModal({ init, onClose, onSaved }) {
         <section class="mw-panel"><header>Клиент</header><${CustomerCarPicker} only="customer" value=${cc} onChange=${setCc} /></section></div>
       <div class="grid g2"><label class="f">Что делаем (видит клиент)<textarea rows="2" value=${f.complaint} placeholder="Замена масла, диагностика, геометрия…" onInput=${(e) => set({ complaint: e.target.value })}></textarea></label>
         <label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label></div>
-      <div class="muted small">После «Создать и открыть заказ» сразу откроется заказ на вкладке «Работы и товары». Длительность в графике потом можно растянуть мышкой.</div>`}
+      <section class="mw-panel" style="margin-top:12px"><header>Работы и товары <span class="muted small" style="font-weight:400;text-transform:none">— начните печатать: поиск по прайсу работ и складу</span></header>
+        <table class="tbl inv-lines"><thead><tr><th>Позиция</th><th>Тип</th><th class="r">Кол-во</th><th class="r">Цена брутто</th><th class="r">Сумма</th><th></th></tr></thead><tbody>
+          ${lines.map((l, i) => html`<tr><td style="min-width:300px"><${LineName} rawUnit l=${l} onInput=${(v) => setLn(i, { name: v, product_id: null, catalog_id: null })} onPick=${(patch) => setLn(i, patch)} /></td>
+            <td><select class="inline-input" style="width:100px" value=${l.kind} onChange=${(e) => setLn(i, { kind: e.target.value, unit: e.target.value === 'part' ? 'szt.' : 'oper' })}><option value="labor">Работа</option><option value="part">Товар</option></select></td>
+            <td class="r"><input class="inline-input num qty" type="number" step="0.01" value=${l.qty} onInput=${(e) => setLn(i, { qty: e.target.value })} /></td>
+            <td class="r"><input class="inline-input num price" type="number" step="0.01" placeholder="0,00" value=${l.unit_gross} onInput=${(e) => setLn(i, { unit_gross: e.target.value })} /></td>
+            <td class="r nowrap">${zl(lineSum(l))}</td>
+            <td class="act">${lines.length > 1 && html`<button class="icon-btn" onClick=${() => setLines(lines.filter((_, j) => j !== i))}><${Icon} n="trash" /></button>`}</td></tr>`)}</tbody></table>
+        <div class="row" style="margin-top:8px"><button class="btn sm" onClick=${() => setLines([...lines, LINE()])}><${Icon} n="plus" />Позиция</button>
+          <span class="grow"></span><span>Итого брутто: <b>${zl(total)}</b></span></div></section>
+      <div class="muted small">Позиции можно не заполнять сейчас — после «Создать и открыть заказ» откроется заказ на вкладке «Работы и товары», там всё как обычно. Длительность в графике потом можно растянуть мышкой.</div>`}
     ${mode === 'block' && html`<label class="f">Причина<input value=${f.title} placeholder="Андрей — отпуск, обед, пост на ремонте…" onInput=${(e) => set({ title: e.target.value })} /></label>`}
     ${mode === 'existing' && html`<div class="card" style="background:var(--surface2)"><b>${init.order.number}</b> · ${init.order.customer_name || ''} · ${carName(init.order)} ${init.order.plate || ''}
       <div class="hg-jobs" style="margin-top:6px">${(init.order.jobs || []).map((j) => html`<div><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}</div></div>`}
