@@ -1,6 +1,7 @@
 // Документы заказа: печать (протоколы, спецификация, карта механика, kosztorys), фактуры VAT / Pro forma / корректы,
 // приём авто (схема повреждений, фото и файлы, подписи клиента)
 import { CorrectionModal } from './sales.js';
+import { printReceipt } from '../fiscal.js';
 import { html, useState, useRef, api, act, go, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast, METHOD } from '../lib.js';
 
 const PRINTS = [['intake', 'Протокол приёма', 'Protokół przyjęcia'], ['estimate', 'Kosztorys / выцена', 'Kosztorys'], ['spec', 'Спецификация заказа', 'Specyfikacja'],
@@ -32,6 +33,7 @@ export function SalesDocs({ o, reload }) {
   const app = useApp();
   const [form, setForm] = useState(null);
   const [corr, setCorr] = useState(null);
+  const [par, setPar] = useState(false);
   const hasVat = o.sales_docs?.some((d) => d.kind === 'vat');
   const open = (kind) => setForm({
     kind, payment_method: (() => { const m = [...new Set((o.payments || []).filter((p) => p.method !== 'points' && p.amount > 0).map((p) => p.method))]; return m.length > 1 ? 'mixed' : m[0]; })() || o.customer?.payment_method || app.settings.payment_method_default || 'cash', due_days: o.customer?.payment_term_days ?? app.settings.payment_term_days ?? 0,
@@ -58,7 +60,12 @@ export function SalesDocs({ o, reload }) {
         ${d.kind === 'vat' && html`<button class="btn sm" onClick=${() => startCorr(d)}>Корректа</button>`}
         ${d.kind === 'proforma' && html`<${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api('sales-docs/' + d.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table>`
       : html`<div class="muted small" style="margin-bottom:10px">Фактур пока нет. ${app.features.ksef ? 'Фактура VAT сразу уйдёт в KSeF.' : app.features.invoices ? 'Фактура VAT уйдёт в Fakturownia и KSeF.' : html`Фактура VAT будет выставлена в CRM без KSeF — <a href="#/settings/integrations">подключить KSeF</a>.`}</div>`}
-    <div class="row">${!hasVat && html`<button class="btn primary" disabled=${!o.items.length} onClick=${() => open('vat')}>Фактура VAT</button>`}
+    ${(o.receipts?.length || o.receipt_no) ? html`<table class="tbl" style="margin-bottom:10px"><tbody>
+      ${(o.receipts || []).map((r) => html`<tr><td><b>Чек (paragon)</b>${r.number ? html` <b>№ ${r.number}</b>` : ''}<div class="sub">${fdt(r.printed_at || r.created_at)}${r.nip ? ' · NIP ' + r.nip : ''} · ${r.status === 'printed' ? 'напечатан на кассе' : r.status === 'manual' ? 'номер вручную' : r.status === 'error' ? 'ошибка кассы' : 'ждёт кассы'}</div></td><td class="r nowrap">${zl(r.total)}</td><td></td></tr>`)}
+      ${o.receipt_no && !(o.receipts || []).length ? html`<tr><td><b>Чек (paragon)</b> <b>№ ${o.receipt_no}</b><div class="sub">пробит на кассовом аппарате</div></td><td class="r nowrap">${zl(o.total)}</td><td></td></tr>` : ''}
+      </tbody></table>` : ''}
+    <div class="row"><button class=${'btn' + (hasVat ? '' : ' primary')} disabled=${!o.items.length} onClick=${() => setPar(true)}><${Icon} n="print" />Чек (paragon)</button>
+      ${!hasVat && html`<button class="btn primary" disabled=${!o.items.length} onClick=${() => open('vat')}>Фактура VAT</button>`}
       ${app.settings.proforma_on !== '0' && html`<button class="btn" disabled=${!o.items.length} onClick=${() => open('proforma')}>Pro forma</button>`}</div>
     ${o.invoice_no && !o.sales_docs?.some((d) => d.kind === 'vat') ? html`<div class="small" style="margin-top:8px">Фактура из Fakturownia: <b>${o.invoice_no}</b> <a class="btn sm" href=${'/crm-api/orders/' + o.id + '/invoice.pdf'} target="_blank" rel="noopener">PDF</a></div>` : ''}
 
@@ -75,6 +82,7 @@ export function SalesDocs({ o, reload }) {
       <div class="muted small" style="margin-top:8px">Позиции берутся из заказа: ${o.items.length} шт. Номер — по настройке нумерации (${form.kind === 'vat' ? 'FV' : 'PRO'}).</div>
     </${Modal}>`}
 
+    ${par && html`<${ParagonModal} o=${o} onClose=${() => setPar(false)} onDone=${() => { setPar(false); reload(); }} />`}
     ${corr && html`<${CorrectionModal} docId=${corr} onClose=${() => setCorr(null)} onDone=${() => { setCorr(null); reload(); }} />`}
   </div>`;
 }
@@ -134,4 +142,49 @@ export function Intake({ o, reload }) {
         ${canEdit && html`<div class="row" style="margin-top:10px">${['intake', o.kind === 'quote' ? 'quote' : 'estimate', 'release'].filter((d) => o.kind !== 'quote' || d === 'quote').map((d) => html`<button class="btn sm" onClick=${async () => { await act(() => api(`orders/${o.id}/signatures`, { body: { doc: d } }), 'Отмечено'); reload(); }}>${DOCNAME[d]}: подписан на бумаге</button>`)}</div>`}
       </div>
   </div>`;
+}
+
+/** Чек (paragon) по заказу за один шаг: принять оплату (в т.ч. смешанную) + чек на фискальной кассе или номер чека с кассового аппарата */
+function ParagonModal({ o, onClose, onDone }) {
+  const app = useApp();
+  const fiscal = app.features.fiscal;
+  const due = Math.max(0, Math.round((o.total - o.paid) * 100) / 100);
+  const nip0 = (o.customer?.nip || '').replace(/\D/g, '');
+  const [f, set] = useState({ method: 'card', amount: due, split: { cash: '', card: '', blik: '', transfer: '' }, nip: nip0, withNip: !!nip0, no: '' });
+  const [busy, setBusy] = useState(false);
+  const mixed = f.method === 'mixed';
+  const splitSum = Math.round(['cash', 'card', 'blik', 'transfer'].reduce((a, k) => a + (Number(f.split[k]) || 0), 0) * 100) / 100;
+  const payAmt = mixed ? splitSum : Number(f.amount) || 0;
+  const go = async () => {
+    setBusy(true);
+    try {
+      if (payAmt > 0) {
+        const body = mixed ? { split: ['cash', 'card', 'blik', 'transfer'].map((k) => ({ method: k, amount: Number(f.split[k]) || 0 })).filter((x) => x.amount > 0) } : { method: f.method, amount: payAmt };
+        await api(`orders/${o.id}/payments`, { body });
+      }
+      if (fiscal) {
+        const x = await printReceipt(o.id, { nip: f.withNip ? f.nip : '', method: null });
+        if (x.manual) toast('Оплата принята. Чек создан — пробейте его на кассе и впишите номер');
+        else if (x.receipt?.status === 'printed') toast('Оплата принята, чек напечатан' + (x.receipt.number ? ' · № ' + x.receipt.number : ''));
+        else toast(x.receipt?.error || 'Оплата принята, но чек не напечатан', 'error');
+      } else {
+        if (f.no.trim()) await api('orders/' + o.id, { method: 'PUT', body: { receipt_no: f.no.trim() } });
+        toast(payAmt > 0 ? 'Оплата принята' + ' · ' + zl(payAmt) : 'Номер чека сохранён');
+      }
+      onDone();
+    } catch (e) { toast(e.message, 'error'); setBusy(false); }
+  };
+  return html`<${Modal} title=${'Paragon · ' + zl(o.total)} onClose=${onClose} foot=${html`<button class="btn" onClick=${onClose}>Отмена</button>
+      <button class="btn primary" disabled=${busy || (f.withNip && fiscal && f.nip.length !== 10) || (mixed && splitSum > due + 0.01)} onClick=${go}>${busy ? 'Провожу…' : payAmt > 0 ? (fiscal ? 'Принять оплату и пробить чек' : 'Принять оплату и закрыть чеком') : fiscal ? 'Пробить чек' : 'Сохранить'}${!busy && payAmt > 0 ? ' · ' + zl(payAmt) : ''}</button>`}>
+    ${due > 0.01 ? html`<div class="grid g2">
+        <label class="f">Способ оплаты<select value=${f.method} onChange=${(e) => set({ ...f, method: e.target.value })}>${['card', 'cash', 'blik', 'transfer', 'mixed'].map((k) => html`<option value=${k}>${METHOD[k]}</option>`)}</select></label>
+        ${!mixed && html`<label class="f">Сумма, zł<input type="number" step="0.01" value=${f.amount} onInput=${(e) => set({ ...f, amount: e.target.value })} /></label>`}</div>
+      ${mixed && html`<div class="pay-split">${['cash', 'card', 'blik', 'transfer'].map((k) => html`<label class="f">${METHOD[k]}<input type="number" step="0.01" min="0" placeholder="0,00" value=${f.split[k]} onInput=${(e) => set({ ...f, split: { ...f.split, [k]: e.target.value } })} /></label>`)}
+        <div class=${'small ' + (Math.abs(splitSum - due) < 0.01 ? 'pos' : 'muted')}>Итого ${zl(splitSum)} из ${zl(due)}</div></div>`}`
+      : html`<div class="muted small">${fiscal ? 'Заказ уже оплачен — остаётся пробить чек.' : 'Заказ уже оплачен — остаётся вписать номер чека.'}</div>`}
+    ${fiscal ? html`<label class="check" style="margin-top:10px"><input type="checkbox" checked=${f.withNip} onChange=${(e) => set({ ...f, withNip: e.target.checked })} />NIP покупателя на чеке</label>
+        ${f.withNip && html`<label class="f">NIP<input value=${f.nip} maxlength="13" onInput=${(e) => set({ ...f, nip: e.target.value.replace(/\D/g, '') })} /></label>`}`
+      : html`<label class="f" style="margin-top:10px">Номер чека с кассового аппарата (необязательно)<input value=${f.no} placeholder="np. 000123" onInput=${(e) => set({ ...f, no: e.target.value })} /></label>
+        <div class="muted small">Фискальная касса не подключена к CRM — пробейте чек на кассе как обычно и впишите его номер. Документ появится в «Продажах» как чек.</div>`}
+  </${Modal}>`;
 }

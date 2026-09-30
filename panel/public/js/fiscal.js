@@ -100,8 +100,8 @@ function ReceiptModal({ o, onClose, onDone }) {
     <div class="stack">
       <div>Сумма: <b>${zl(o.total)}</b> · позиций: ${o.items.length}</div>
       <label class="f">Оплата на чеке<select value=${method} onChange=${(e) => setMethod(e.target.value)}>
-        ${paidMethods.length ? html`<option value="">Как принято в заказе (${paidMethods.map((m) => ({ cash: 'наличные', card: 'карта', transfer: 'перевод' }[m])).join(' + ')})</option>` : ''}
-        <option value="card">Карта</option><option value="cash">Наличные</option><option value="transfer">Перевод</option></select></label>
+        ${paidMethods.length ? html`<option value="">Как принято в заказе (${paidMethods.map((m) => ({ cash: 'наличные', card: 'карта', blik: 'BLIK', transfer: 'перевод' }[m] || m)).join(' + ')})</option>` : ''}
+        <option value="card">Карта</option><option value="cash">Наличные</option><option value="blik">BLIK</option><option value="transfer">Перевод</option></select></label>
       <label class="check"><input type="checkbox" checked=${withNip} onChange=${(e) => setWithNip(e.target.checked)} />NIP покупателя на чеке</label>
       ${withNip && html`<label class="f">NIP<input value=${nip} inputmode="numeric" maxlength="13" onInput=${(e) => setNip(e.target.value.replace(/\D/g, ''))} /></label>`}
       <div class="muted small">Чек с NIP до 450 zł брутто заменяет фактуру (faktura uproszczona).</div>

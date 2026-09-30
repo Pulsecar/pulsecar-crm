@@ -220,11 +220,11 @@ function NewOrderModal({ init, onClose, onSaved }) {
   const app = useApp();
   const [mode, setMode] = useState(init.order ? 'existing' : 'order');
   const [cc, setCc] = useState({ customer: null, car: null });
-  const [f, setF] = useState({ station_id: init.station_id || '', date: init.date, time: init.time || app.settings.hours_start || '09:00', duration_min: init.order ? '' : 60, complaint: '', mechanic_id: '', title: '', open: store('pc_cal_open', '0') === '1' });
+  const [f, setF] = useState({ station_id: init.station_id || '', date: init.date, time: init.time || app.settings.hours_start || '09:00', duration_min: init.order ? '' : 60, complaint: '', mechanic_id: '', title: '' });
   const [busy, setBusy] = useState(false);
   const set = (p) => setF((v) => ({ ...v, ...p }));
   const slot = { station_id: f.station_id ? Number(f.station_id) : null, start_at: f.date && f.time ? `${f.date} ${f.time}` : null, duration_min: f.duration_min ? Number(f.duration_min) : undefined, mechanic_id: f.mechanic_id || null };
-  const save = async () => {
+  const save = async (openAfter = true) => {
     setBusy(true);
     try {
       if (mode === 'block') {
@@ -236,15 +236,16 @@ function NewOrderModal({ init, onClose, onSaved }) {
         if (!cc.customer && !cc.newCustomer?.name && !cc.newCustomer?.phone && !cc.car) return toast('Выберите клиента или авто', 'error');
         const r = await act(() => api('orders', { body: { kind: 'order', customer_id: cc.customer?.id, car_id: cc.car?.id, new_customer: cc.customer ? null : cc.newCustomer,
           complaint: f.complaint, mechanic_id: f.mechanic_id || null, source: 'crm', appointment: { ...slot, duration_min: Number(f.duration_min) || 60, title: f.complaint.slice(0, 120) || undefined } } }), 'Заказ создан и поставлен в график');
-        keep('pc_cal_open', f.open ? '1' : '0');
-        if (f.open) { onClose(); go('/orders/' + r.id); return; }
+        // как в Motowarsztat: сразу в заказ — добавлять работы и товары
+        if (openAfter) { onClose(); go('/orders/' + r.id); return; }
       }
       onSaved();
     } catch {} finally { setBusy(false); }
   };
   return html`<${Modal} xl title=${mode === 'block' ? 'Блокировка времени' : mode === 'existing' ? 'Заказ ' + init.order.number + ' в график' : 'Новый заказ в терминарз'} onClose=${onClose}
-    foot=${html`${mode === 'order' && html`<label class="check" style="margin-right:auto"><input type="checkbox" checked=${f.open} onChange=${(e) => set({ open: e.target.checked })} />Открыть заказ после создания</label>`}
-      <button class="btn" onClick=${onClose}>Отмена</button><button class="btn primary" disabled=${busy} onClick=${save}>${mode === 'block' ? 'Заблокировать' : mode === 'existing' ? 'Поставить в график' : 'Создать заказ'}</button>`}>
+    foot=${html`<button class="btn" style="margin-right:auto" onClick=${onClose}>Отмена</button>
+      ${mode === 'order' && html`<button class="btn" disabled=${busy} onClick=${() => save(false)}>Только в график</button>`}
+      <button class="btn primary" disabled=${busy} onClick=${() => save(true)}>${mode === 'block' ? 'Заблокировать' : mode === 'existing' ? 'Поставить в график' : 'Создать и открыть заказ'}</button>`}>
     ${!init.order && html`<div class="seg sel">${[['order', 'Заказ'], ['block', 'Блокировка (отпуск, перерыв)']].map(([k, l]) => html`<button type="button" class=${mode === k ? 'on' : ''} onClick=${() => setMode(k)}>${l}</button>`)}</div>`}
     <div class="grid g4">
       <label class="f">Пост<select value=${f.station_id} onChange=${(e) => set({ station_id: e.target.value })}><option value="">Не назначен</option>${app.stations.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
@@ -259,7 +260,7 @@ function NewOrderModal({ init, onClose, onSaved }) {
         <section class="mw-panel"><header>Клиент</header><${CustomerCarPicker} only="customer" value=${cc} onChange=${setCc} /></section></div>
       <div class="grid g2"><label class="f">Что делаем (видит клиент)<textarea rows="2" value=${f.complaint} placeholder="Замена масла, диагностика, геометрия…" onInput=${(e) => set({ complaint: e.target.value })}></textarea></label>
         <label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label></div>
-      <div class="muted small">Работы и товары добавите в заказе. Длительность в графике потом можно растянуть мышкой.</div>`}
+      <div class="muted small">После «Создать и открыть заказ» сразу откроется заказ на вкладке «Работы и товары». Длительность в графике потом можно растянуть мышкой.</div>`}
     ${mode === 'block' && html`<label class="f">Причина<input value=${f.title} placeholder="Андрей — отпуск, обед, пост на ремонте…" onInput=${(e) => set({ title: e.target.value })} /></label>`}
     ${mode === 'existing' && html`<div class="card" style="background:var(--surface2)"><b>${init.order.number}</b> · ${init.order.customer_name || ''} · ${carName(init.order)} ${init.order.plate || ''}
       <div class="hg-jobs" style="margin-top:6px">${(init.order.jobs || []).map((j) => html`<div><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}</div></div>`}
