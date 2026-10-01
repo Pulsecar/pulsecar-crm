@@ -1,5 +1,5 @@
 // Логика заказов: пересчёт сумм, статусы, выдача со склада, баллы, уведомления
-import { all, one, run, tx, insert, update, log, getSetting } from './db.js';
+import { all, one, run, tx, insert, update, log, getSetting, quoteConvertedStatus } from './db.js';
 import { HttpError, nextNumber, round2 } from './util.js';
 import { earnForOrder } from './loyalty.js';
 import { sendSms } from './sms.js';
@@ -191,8 +191,7 @@ export function quoteToOrder(quoteId, staffName) {
 }
 /** Выцена отработана (стала заказом / добавлена в заказ): статус «завершено», обзвон — «записан» */
 function closeQuote(qid) {
-  const fin = one('SELECT id FROM order_statuses WHERE is_final = 1 ORDER BY pos LIMIT 1');
-  if (fin) run(`UPDATE orders SET status_id = ?, closed_at = COALESCE(closed_at, datetime('now')) WHERE id = ?`, fin.id, qid);
+  run(`UPDATE orders SET status_id = ?, closed_at = COALESCE(closed_at, datetime('now')) WHERE id = ?`, quoteConvertedStatus(), qid);
   run(`UPDATE orders SET followup = 'accepted' WHERE id = ? AND COALESCE(followup,'') IN ('', 'new', 'call_back', 'thinking', 'scheduled', 'no_answer')`, qid);
 }
 const itemCopy = ({ id: _i, order_id: _o, pos: _p, done: _d, ...it }) => it;

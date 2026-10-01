@@ -39,7 +39,7 @@ const upload = (name, content) => { const fd = new FormData(); fd.append('file',
 try {
   ok(await req('/crm-api/login', { body: { login: 'admin', password: 'test-pass-123' } }), 'admin login');
   const me = ok(await req('/crm-api/me'), 'me');
-  assert.equal(me.statuses.length, 9); assert.equal(me.stations.length, 5);
+  assert.equal(me.statuses.length, 10); assert.ok(me.statuses.some((s) => s.name === 'Создан заказ' && s.scope === 'quote')); assert.equal(me.stations.length, 5);
   const done = me.statuses.find((s) => s.is_final && s.lock_edit);
   const inRepair = me.statuses.find((s) => s.name === 'В ремонте');
   console.log('✓ вход в панель, справочники: 9 статусов, 5 постов,', me.staff.length, 'сотрудников');
@@ -384,7 +384,7 @@ try {
   const tgd = ok(await req('/crm-api/orders/' + tgt.id), 'target get');
   assert.equal(tgd.items.length, 3); assert.equal(tgd.total, 359); assert.ok(tgd.linked_quotes.some((x) => x.id === wq2.id));
   const wq2d = ok(await req('/crm-api/orders/' + wq2.id), 'quote2 get');
-  assert.ok(wq2d.status.is_final, 'выцена завершена'); assert.equal(wq2d.linked_orders[0].id, tgt.id); assert.equal(wq2d.linked_orders[0].how, 'merged');
+  assert.ok(wq2d.status.is_final, 'выцена завершена'); assert.equal(wq2d.status.name, 'Создан заказ'); assert.equal(wq2d.status.color, '#1BF372'); assert.equal(wq2d.linked_orders[0].id, tgt.id); assert.equal(wq2d.linked_orders[0].how, 'merged');
   // документ кассы: карточка, комментарий, удаление с пересчётом заказа
   const kw = ok(await req('/crm-api/cash', { body: { direction: 'out', amount: 40, note: 'x' } }), 'kw');
   const cashL = ok(await req('/crm-api/cash?from=2000-01-01&to=2100-01-01'), 'cash list');

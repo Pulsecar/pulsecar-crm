@@ -173,7 +173,7 @@ export function OrderPage({ id }) {
       <div class="title grow">
         <h1>${o.number}
           <select class="status-select" value=${o.status_id} onChange=${(e) => setStatus(e.target.value)} style=${`border-color:${o.status?.color};color:${o.status?.color}`}>
-            ${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>${isQuote && o.followup ? html` <${FuBadge} k=${o.followup} />` : ''}</h1>
+            ${app.statuses.filter((s) => s.id === o.status_id || (s.scope || 'all') === 'all' || s.scope === (isQuote ? 'quote' : 'order')).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>${isQuote && o.followup ? html` <${FuBadge} k=${o.followup} />` : ''}</h1>
         <div class="muted">
           ${o.customer ? html`<a href=${'#/customers/' + o.customer.id}>${o.customer.name || o.customer.phone}</a> · <a href=${'tel:' + o.customer.phone}>${o.customer.phone || ''}</a>` : 'Клиент не выбран'}
           ${o.car ? html` · <a href=${'#/cars/' + o.car.id}>${carName(o.car)}</a> <span class="plate">${o.car.plate || ''}</span>` : ''}

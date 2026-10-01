@@ -516,6 +516,20 @@ addColumn('sales_docs', 'car', 'TEXT');
 addColumn('sales_docs', 'pay_split', 'TEXT');
 addColumn('sales_docs', 'proforma_id', 'INTEGER');
 addColumn('orders', 'merged_into', 'INTEGER'); // выцена, позиции которой добавлены в уже существующий заказ // фактура VAT, выставленная на основании Pro forma
+// статус выцены «Создан заказ» (зелёный, финальный, только для выцен): ставится сам, когда по выцене создан / дополнен заказ
+addColumn('order_statuses', 'scope', "TEXT NOT NULL DEFAULT 'all'"); // all | order | quote
+export function quoteConvertedStatus() {
+  let st = one(`SELECT id FROM order_statuses WHERE id = (SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'quote_converted_status')`);
+  if (!st) {
+    const pos = (one('SELECT MAX(pos) m FROM order_statuses')?.m || 0) + 1;
+    const id = insert('order_statuses', { name: 'Создан заказ', color: '#1BF372', pos, is_final: 1, lock_edit: 1, notify_client: 0, client_label: 'Zlecenie utworzone', scope: 'quote' });
+    run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('quote_converted_status', ?)`, String(id));
+    st = { id };
+    // выцены, по которым заказ уже создан раньше, — тоже в «Создан заказ»
+    run(`UPDATE orders SET status_id = ? WHERE kind = 'quote' AND (merged_into IS NOT NULL OR EXISTS (SELECT 1 FROM orders z WHERE z.quote_id = orders.id AND z.kind = 'order'))`, id);
+  }
+  return st.id;
+}
 addColumn('products', 'price_group_id', 'INTEGER');
 addColumn('products', 'gtu', 'TEXT');
 addColumn('stations', 'slot_min', 'INTEGER');
@@ -619,6 +633,7 @@ function seed() {
   }
 }
 seed();
+quoteConvertedStatus();
 seedMessaging();
 seedMotowarsztat();
 
