@@ -14,6 +14,15 @@ export function setLang(l) {
 }
 
 let dict = null;
+// индекс словаря без крайних знаков препинания: «Операционная прибыль ·» → «Операционная прибыль»
+const norm = (x) => String(x).trim().replace(/^[\s«"(·:—–,;-]+|[\s»")·:—–.,-]+$/g, '').trim();
+let nidx = null;
+function normIdx() {
+  if (nidx) return nidx;
+  nidx = new Map();
+  for (const [k, v] of Object.entries(dict || {})) { const nk = norm(k); if (nk && !nidx.has(nk)) nidx.set(nk, norm(v)); }
+  return nidx;
+}
 const cache = new Map();
 /** Перевод строки: целиком по словарю, иначе — по кускам (слова между числами и значками) */
 export function tr(s) {
@@ -29,6 +38,9 @@ export function tr(s) {
       // «Слово:» / «(слово)» — без крайних знаков
       const bare = t.replace(/^[«"(]+|[»"):.,]+$/g, '');
       if (bare && dict[bare] !== undefined) return m.replace(bare, dict[bare]);
+      // ключ словаря с хвостовым знаком («Прибыль ·», «Итого:», «Оплата —»), а в тексте после него число
+      const nk = norm(t);
+      if (nk && normIdx().has(nk)) return m.replace(t, normIdx().get(nk));
       // по словам: самая длинная известная фраза с начала
       const w = t.split(' '), res = [];
       let hit = false;
