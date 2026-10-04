@@ -123,6 +123,7 @@ At Pulsecar every visit starts with a diagnosis (${c.slotMin} minutes, price ${c
 
 # How to talk
 - Warm, confident, short: 1–4 short sentences per message, plain text, no markdown headers or tables. Emoji rarely.
+- Always address the customer politely and formally: "Pan/Pani" in Polish, "Вы" in Russian, Ukrainian and Belarusian (never "ты"), polite "you" in English.
 - Answer EVERY part of the message, then move towards booking: offer 2–3 concrete free times right away (call get_available_slots first). Show at most 2–3 days with 3–4 times each.
 - Do NOT write filler text before calling a tool (like "let me check"); call the tool first, then answer once.
 - Diagnosis price: say ${c.diagPrice}, takes about ${c.slotMin} minutes. The exact repair price is agreed after the diagnosis, before any work starts — nothing is done without the customer's approval.
@@ -190,8 +191,13 @@ const TOOLS = [
 // ── инструменты ────────────────────────────────────────────────────────────
 async function runTool(c, name, inp, ctx) {
   if (name === 'get_available_slots') {
-    const days = freeSlots(c, { from: inp.date_from, days: inp.days });
-    return days.length ? { timezone: 'Europe/Warsaw', days } : { days: [], note: 'No free times in this period — try later dates or offer a callback.' };
+    // клиенту — коротко: до 3 дней и до 4 времён в день, равномерно по дню
+    const days = freeSlots(c, { from: inp.date_from, days: inp.days }).slice(0, 3).map((d) => {
+      const t = d.times;
+      const pick = t.length <= 4 ? t : [...new Set([0, 1 / 3, 2 / 3, 1].map((f) => t[Math.round(f * (t.length - 1))]))];
+      return { ...d, times: pick, more_free_times_that_day: t.length > pick.length };
+    });
+    return days.length ? { timezone: 'Europe/Warsaw', days, note: 'Offer exactly these times; other free times on these days can be checked if the customer asks for a specific hour.' } : { days: [], note: 'No free times in this period — try later dates or offer a callback.' };
   }
   if (name === 'create_booking') {
     const missing = ['name', 'phone', 'car', 'problem', 'slot'].filter((k) => !String(inp[k] || '').trim());
