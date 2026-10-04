@@ -250,12 +250,15 @@ async function runTool(c, name, inp, ctx) {
         carId = createCar({ plate: plate || undefined, vin: vin || undefined, ...carInfo, customer_id: customerId, notes: `AI-czat: ${String(inp.car).slice(0, 120)}` });
       }
       linkCar(carId, customerId);
+      // новый клиент = не было в базе или ещё ни одного злецения → диагностика бесплатно (клиенту не говорим)
+      const free = c.freeForNew !== false && (newCustomer || !one(`SELECT 1 FROM orders WHERE customer_id = ? AND kind = 'order' LIMIT 1`, customerId));
       const orderId = createOrder({
         customer_id: customerId, car_id: carId, source: 'chat', contact_person: name, contact_phone: phone,
         complaint: [problem, inp.description && String(inp.description).slice(0, 1000)].filter(Boolean).join('\n'),
         internal_note: [`AI-czat (${LANG_TAG[ctx.lang]}) · diagnostyka ${c.slotMin} min · cena podana klientowi: ${price}`,
+          free && 'NOWY KLIENT — diagnostyka BEZPŁATNA (klient o tym nie wie, cena w czacie jak wyżej)',
           inp.referral_code && `Kod polecenia: ${String(inp.referral_code).slice(0, 40)}`].filter(Boolean).join('\n'),
-        items: [{ kind: 'labor', name: `Diagnostyka (${price})`, qty: 1, price: priceFrom }],
+        items: [{ kind: 'labor', name: free ? 'Diagnostyka — bezpłatna (nowy klient)' : `Diagnostyka (${price})`, qty: 1, price: free ? 0 : priceFrom }],
       }, 'AI-czat');
       const order = one('SELECT number FROM orders WHERE id = ?', orderId);
       const note = [`Diagnostyka (${c.slotMin} min) · cena podana w czacie: ${price}`, `Zlecenie: ${order.number}`, `Problem: ${problem}`, `Auto: ${String(inp.car).slice(0, 120)}`,
@@ -267,7 +270,7 @@ async function runTool(c, name, inp, ctx) {
         title: `Diagnostyka · ${problem}${plate ? ' · ' + plate : ''}`.slice(0, 120), note, start_at: inp.slot, duration_min: c.slotMin,
         status: st ? 'planned' : 'request', source: 'chat', contact_name: name, contact_phone: phone, preferred: inp.slot,
       });
-      return { apptId, orderId, orderNo: order.number, customerId, carId, newCustomer, newCar, station: st?.name || null };
+      return { apptId, orderId, orderNo: order.number, customerId, carId, newCustomer, newCar, free, station: st?.name || null };
     });
     run('UPDATE chat_sessions SET appointment_id = ?, contact_name = ?, contact_phone = ? WHERE id = ?', res.apptId, name, phone, ctx.sessionId);
     let sms = 'off';
@@ -276,7 +279,7 @@ async function runTool(c, name, inp, ctx) {
       catch (e) { sms = 'failed'; console.error('assistant sms:', e.message); }
     }
     const smsInfo = { sent: '✅ SMS отправлено', logged: '⚠️ SMS не отправлено — SMS-провайдер не подключён', failed: '❌ SMS не ушло — проверьте SMS-интеграцию', off: 'SMS выключено' }[sms] || sms;
-    notify('booking', `🤖 Запись на диагностику из AI-чата: ${name} ${phone}${res.newCustomer ? ' (новый клиент)' : ''}\n🕒 ${inp.slot} (${c.slotMin} мин)\n📄 Злецение ${res.orderNo}\n💰 ${price}\n🚗 ${inp.car}${plate ? ' · ' + plate : ''}${vin ? ' · VIN ' + vin : ''}${res.newCar ? ' (новое авто)' : ''}\n🔧 ${problem}${inp.description ? '\n📝 ' + String(inp.description).slice(0, 300) : ''}${inp.referral_code ? '\n🎁 ' + inp.referral_code : ''}\n🌐 ${LANG_TAG[ctx.lang]} · ${smsInfo}\nТерминарз → ${res.station || '«Не распределено»'}`,
+    notify('booking', `🤖 Запись на диагностику из AI-чата: ${name} ${phone}${res.newCustomer ? ' (новый клиент)' : ''}\n🕒 ${inp.slot} (${c.slotMin} мин)\n📄 Злецение ${res.orderNo}\n💰 ${price}${res.free ? ' → 🎁 новый клиент: диагностика БЕСПЛАТНО (клиенту не сообщали)' : ''}\n🚗 ${inp.car}${plate ? ' · ' + plate : ''}${vin ? ' · VIN ' + vin : ''}${res.newCar ? ' (новое авто)' : ''}\n🔧 ${problem}${inp.description ? '\n📝 ' + String(inp.description).slice(0, 300) : ''}${inp.referral_code ? '\n🎁 ' + inp.referral_code : ''}\n🌐 ${LANG_TAG[ctx.lang]} · ${smsInfo}\nТерминарз → ${res.station || '«Не распределено»'}`,
       { appointment: res.apptId, order: res.orderNo, source: 'chat' });
     return { ok: true, booking_id: res.apptId, order_number: res.orderNo, status: 'booked', slot: inp.slot, duration_min: c.slotMin, price, sms_sent: sms === 'sent' };
   }

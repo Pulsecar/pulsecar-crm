@@ -133,7 +133,9 @@ try {
   const o = ord.order || ord;
   assert.equal(o.source, 'chat'); assert.match(o.complaint, /stuk z przodu/); assert.equal(o.customer_id, a.customer_id); assert.equal(o.car_id, a.car_id);
   const items = ord.items || o.items || [];
-  assert.ok(items.some((i) => /^Diagnostyka/.test(i.name)), 'в злецении позиция «Diagnostyka»');
+  const dItem = items.find((i) => /^Diagnostyka/.test(i.name));
+  assert.ok(dItem, 'в злецении позиция «Diagnostyka»');
+  assert.equal(Number(dItem.price), 0, 'новому клиенту диагностика бесплатно'); assert.match(o.internal_note, /NOWY KLIENT/);
   const cust = (await req('/crm-api/customers/' + a.customer_id)).j;
   const cu = cust.customer || cust;
   assert.equal(cu.name, 'Jan Test'); assert.equal(cu.phone, '+48600100200');
@@ -144,6 +146,9 @@ try {
   const a2 = (await req(`/crm-api/appointments?from=${days[0].date}&to=${days[0].date}`)).j.rows.find((x) => x.id === j2.booking.booking_id);
   assert.equal(a2.customer_id, a.customer_id, 'тот же клиент по телефону — без дубля');
   assert.notEqual(a2.car_id, a.car_id, 'второе авто клиента по VIN');
+  const ord2 = (await req('/crm-api/orders/' + a2.order_id)).j;
+  const it2 = (ord2.items || (ord2.order || ord2).items || []).find((i) => /^Diagnostyka/.test(i.name));
+  assert.equal(Number(it2.price), 50, 'повторному клиенту — обычная цена');
   const cust2 = JSON.stringify((await req('/crm-api/customers/' + a.customer_id)).j);
   assert.ok(cust2.includes('WVWZZZ1KZAW000001') && cust2.includes('Volkswagen'), 'VIN расшифрован в марку');
   console.log('✓ повторный клиент без дубля, авто по VIN с маркой');

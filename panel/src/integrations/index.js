@@ -242,6 +242,7 @@ export const DEFS = [
       { k: 'diagPrice', label: 'Цена диагностики, которую называет чат', def: '50–150 zł' },
       { k: 'diagMinPrice', label: 'Минимальная цена, до которой чат может опустить, если клиент сомневается', def: 'od 30 zł' },
       { k: 'smsConfirm', label: 'Отправлять клиенту SMS с подтверждением записи', type: 'bool', def: true },
+      { k: 'freeForNew', label: 'Новым клиентам диагностика бесплатно (в злецении 0 zł; в чате и SMS клиенту не сообщается)', type: 'bool', def: true },
       { k: 'minHoursAhead', label: 'Записывать не раньше чем через, часов', type: 'number', def: 2 },
       { k: 'daysAhead', label: 'Записывать максимум на, дней вперёд', type: 'number', def: 14 },
       { k: 'closedDates', label: 'Выходные дни (ГГГГ-ММ-ДД через запятую)', placeholder: '2026-11-01, 2026-11-11, 2026-12-24' },
