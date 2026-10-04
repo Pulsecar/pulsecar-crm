@@ -26,7 +26,7 @@ const mock = createServer(async (req, res) => {
     const r = JSON.parse(last.content[0].content);
     if (r.days) {
       const user = [...b.messages].reverse().find((m) => typeof m.content === 'string').content;
-      if (/book/.test(user)) return tool('create_booking', { name: 'Jan Test', phone: '600 100 200', car: 'Skoda Octavia 2016', plate: 'WX 12345', service: 'Wymiana oleju', slot: `${r.days[0].date} ${r.days[0].times[0]}`, consent: true });
+      if (/book/.test(user)) return tool('create_booking', { name: 'Jan Test', phone: '600 100 200', car: 'Skoda Octavia 2016', plate: 'WX 12345', problem: 'stuk z przodu', quoted_price: 'od 10 zł', slot: `${r.days[0].date} ${r.days[0].times[0]}`, consent: true });
       return text('SLOTS ' + JSON.stringify(r.days));
     }
     return text('RESULT ' + last.content[0].content);
@@ -34,7 +34,7 @@ const mock = createServer(async (req, res) => {
   if (/price\+slots/.test(last.content)) return json(200, { content: [{ type: 'text', text: 'Diagnostyka od 100 zł.' }, { type: 'tool_use', id: 'tu_ps', name: 'get_available_slots', input: { days: 2 } }], stop_reason: 'tool_use' });
   if (/book|slots/.test(last.content)) return tool('get_available_slots', { days: 7 });
   if (/human/.test(last.content)) return tool('request_human', { name: 'Ola', phone: '+48 500 200 300', topic: 'laweta' });
-  if (/noconsent/.test(last.content)) return tool('create_booking', { name: 'A', phone: '600100200', car: 'x', service: 'y', slot: '2099-01-01 10:00', consent: false });
+  if (/noconsent/.test(last.content)) return tool('create_booking', { name: 'A', phone: '600100200', car: 'x', problem: 'y', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: false });
   return text('Dzień dobry!');
 });
 await new Promise((r) => mock.listen(MOCK, r));
@@ -114,6 +114,13 @@ try {
   assert.ok(a, 'заявка в «Не распределено»');
   assert.equal(a.status, 'request'); assert.equal(a.source, 'chat'); assert.equal(a.start_at, first);
   assert.equal(a.contact_phone, '+48600100200'); assert.match(a.note, /Nr: WX12345/); assert.match(a.note, /AI-czat \(RU\)/);
+  assert.equal(a.duration_min, 30, 'диагностика 30 минут'); assert.match(a.title, /^Diagnostyka · stuk z przodu/);
+  assert.match(a.note, /cena podana w czacie: od 30 zł/, 'цена не ниже минимальной');
+  assert.equal(j.booking.sms_sent, false, 'без SMS-провайдера SMS только в журнале');
+  const smsLog = JSON.stringify((await req('/crm-api/sms')).j);
+  assert.match(smsLog, /podtverzhdaem vizit - diagnostika/, 'SMS-подтверждение на языке клиента в журнале SMS');
+  const sysB = seen.find((x) => x.system)?.system[0].text;
+  assert.match(sysB, /DIAGNOSTICS/); assert.match(sysB, /50–150 zł/); assert.match(sysB, /od 30 zł/);
   console.log('✓ запись → Терминарз «Не распределено»', first);
 
   // ёмкость 1: окно занято → больше не предлагается; повторная запись на то же время — отказ
