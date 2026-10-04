@@ -1769,6 +1769,7 @@ crm.put('/integrations/:key', (req, res) => {
   res.json({ ok: true });
 });
 const TESTS = {
+  assistant: async () => (await import('./assistant.js')).testAssistant(),
   intercars: () => IC.testIntercars(), tecrmi: () => RMI.testTecrmi(), fakturownia: () => testFakturownia(), ksef: () => KSEF.testKsef(), smsapi: () => testSms(), email: () => testEmail(), tpay: () => testTpay(),
   hart: () => SUP.testHart(), mailbox: () => SUP.testMailbox(),
   smsgate: () => testSmsgate(), serwersms: () => testSerwersms(), smsplanet: () => testSmsplanet(), twilio: () => testTwilio(), smshttp: () => testSmshttp(), plate: () => testPlate(),

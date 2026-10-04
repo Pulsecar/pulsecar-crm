@@ -175,7 +175,7 @@ export const DEFS = [
     fields: [
       { k: 'botToken', label: 'Токен бота', secret: true, required: true },
       { k: 'chatId', label: 'ID чата' },
-      { k: 'events', label: 'События', type: 'multi', options: [['booking', 'Заявка из приложения'], ['payment', 'Оплата'], ['status', 'Смена статуса'], ['stock', 'Мало на складе'], ['supplier', 'Новые документы поставщиков']], def: ['booking', 'payment', 'supplier'] },
+      { k: 'events', label: 'События', type: 'multi', options: [['booking', 'Заявка (приложение, сайт, AI-чат)'], ['payment', 'Оплата'], ['status', 'Смена статуса'], ['stock', 'Мало на складе'], ['supplier', 'Новые документы поставщиков']], def: ['booking', 'payment', 'supplier'] },
     ],
   },
   {
@@ -227,6 +227,24 @@ export const DEFS = [
       { k: 'url', label: 'Свой сервис: адрес с {plate}', advanced: true },
       { k: 'headers', label: 'Свой сервис: заголовки (JSON)', secret: true, advanced: true },
       { k: 'testPlate', label: 'Номер для проверки связи', def: 'WX1234A' },
+    ],
+  },
+  {
+    key: 'assistant', group: 'Сайт', title: 'AI-ассистент на сайте (чат)',
+    about: 'Чат на pulsecar.pl на 5 языках: отвечает на вопросы, называет цены из прайса работ, предлагает свободные окна из Терминарза и записывает клиента — заявка сразу падает в Терминарз → «Не распределено» и в Telegram.',
+    howto: 'Ключ Claude API: console.anthropic.com → API Keys → Create Key (и пополните баланс). На сайт вставляется одна строка перед </body>: <script src="https://panel.pulsecar.tech/chat/widget.js" defer></script>. Цены берутся из Настройки → Прайс работ (позиции с сайта), часы — из Терминарз → Часы работы.',
+    fields: [
+      { k: 'apiKey', label: 'Ключ Claude API', secret: true, required: true },
+      { k: 'model', label: 'Модель', type: 'select', options: [['claude-haiku-4-5-20251001', 'Claude Haiku 4.5 — быстро и дёшево (рекомендуется)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 — умнее, дороже']], def: 'claude-haiku-4-5-20251001' },
+      { k: 'capacity', label: 'Сколько машин можно принять на одно время (0 — по числу постов)', type: 'number', def: 0 },
+      { k: 'slotMin', label: 'Длина окна для записи, минут', type: 'number', def: 60 },
+      { k: 'minHoursAhead', label: 'Записывать не раньше чем через, часов', type: 'number', def: 2 },
+      { k: 'daysAhead', label: 'Записывать максимум на, дней вперёд', type: 'number', def: 14 },
+      { k: 'closedDates', label: 'Выходные дни (ГГГГ-ММ-ДД через запятую)', placeholder: '2026-11-01, 2026-11-11, 2026-12-24' },
+      { k: 'facts', label: 'Что ассистент должен знать о сервисе (гарантия, акции, парковка, оплата…)', type: 'textarea',
+        def: 'Gwarancja: 6 miesięcy na robociznę; 12–24 miesiące na nowe części zgodnie z gwarancją producenta; brak gwarancji warsztatu na części dostarczone przez klienta.\nProgram „Poleć znajomego”: nowy klient (znajomy) dostaje 10% rabatu na robociznę przy pierwszej wizycie, polecający — 10% rabatu na kolejną wizytę po zakończonej wizycie znajomego. Kod polecenia podaje się przy rezerwacji.\nNie wykonujemy: blacharstwa (naprawy karoserii) i lakiernictwa.\nMamy własną lawetę do przywiezienia auta klienta do warsztatu — szczegóły i koszt ustala obsługa.\nWystawiamy faktury VAT.\nMówimy po polsku, angielsku, ukraińsku, rosyjsku i białorusku.' },
+      { k: 'origins', label: 'С каких сайтов разрешён чат', def: 'https://pulsecar.pl, https://www.pulsecar.pl', advanced: true },
+      { k: 'retentionDays', label: 'Хранить переписки, дней (RODO)', type: 'number', def: 90, advanced: true },
     ],
   },
   {

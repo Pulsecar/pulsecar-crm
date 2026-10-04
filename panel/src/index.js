@@ -7,6 +7,7 @@ import './db.js';
 import { api } from './api.js';
 import { crm } from './crm.js';
 import { pub } from './public.js';
+import { assistant, pruneChats } from './assistant.js';
 import { icalFeed, checkPayment } from './integrations/services.js';
 import { startJobs } from './integrations/jobs.js';
 import { recalc } from './orders.js';
@@ -50,6 +51,9 @@ app.use('/api', api);
 // API панели (CRM)
 app.use('/crm-api', crm);
 
+// AI-ассистент для сайта: /chat/widget.js и /chat-api/*
+app.use(assistant);
+
 // Страницы для клиентов: электронная карта заказа /k/<токен>, онлайн-запись /rezerwacja
 app.use(pub);
 
@@ -83,7 +87,7 @@ app.use(express.static(join(root, 'public'), { index: 'index.html', maxAge: '1h'
 // приложение для клиентов (веб-версия Expo): https://…/app/
 app.get(/^\/app(\/[^.]*)?$/, (_req, res) => res.sendFile(join(root, 'public/app/index.html')));
 // SPA: все остальные пути — index.html
-app.get(/^\/(?!api|crm-api|vendor|ical|hooks|k\/|rezerwacja).*/, (_req, res) => res.sendFile(join(root, 'public/index.html')));
+app.get(/^\/(?!api|crm-api|chat-api|chat\/|vendor|ical|hooks|k\/|rezerwacja).*/, (_req, res) => res.sendFile(join(root, 'public/index.html')));
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
@@ -114,4 +118,6 @@ function backup() {
   }
 }
 setTimeout(backup, 10_000);
+// переписки AI-чата старше срока хранения (RODO)
+setInterval(() => forEachDb(() => { try { pruneChats(); } catch (e) { console.error('pruneChats', e.message); } }), 12 * 3600_000).unref();
 setInterval(backup, 6 * 3600_000);

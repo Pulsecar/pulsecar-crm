@@ -691,4 +691,14 @@ addColumn('cars', 'tecrmi_type_id', 'INTEGER');
 addColumn('cars', 'tecrmi_type_name', 'TEXT');
 addColumn('order_items', 'norm_src', 'TEXT');        // откуда время: «TecRMI 2,4 h · Alternator — wymiana»
 db.exec(`CREATE TABLE IF NOT EXISTS tecrmi_map (name_key TEXT PRIMARY KEY, item_mp_id INTEGER NOT NULL, kor_id INTEGER NOT NULL, text TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+// AI-ассистент на сайте: диалоги (история для модели + переписка для CRM)
+db.exec(`CREATE TABLE IF NOT EXISTS chat_sessions (
+  id TEXT PRIMARY KEY, lang TEXT, page TEXT,
+  history TEXT NOT NULL DEFAULT '[]',      -- сообщения для модели (с вызовами инструментов)
+  transcript TEXT NOT NULL DEFAULT '[]',   -- что писали клиент и ассистент
+  msg_count INTEGER NOT NULL DEFAULT 0,
+  appointment_id INTEGER, contact_name TEXT, contact_phone TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS chat_sessions_updated ON chat_sessions(updated_at)');
 }

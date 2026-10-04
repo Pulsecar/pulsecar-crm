@@ -37,6 +37,7 @@ function Card({ it, open, onToggle, reload, feed, stations }) {
     if (f.type === 'multi') return html`<div class="f">${f.label}<div class="row" style="gap:12px">${f.options.map(([k, l]) => html`<label class="check"><input type="checkbox" checked=${(v || []).includes(k)}
       onChange=${(e) => set(e.target.checked ? [...(v || []), k] : (v || []).filter((x) => x !== k))} />${l}</label>`)}</div></div>`;
     if (f.auto) return '';
+    if (f.type === 'textarea') return html`<label class="f" style="grid-column:1/-1">${f.label}<textarea rows="7" value=${v ?? ''} placeholder=${f.placeholder || ''} onInput=${(e) => set(e.target.value)}></textarea></label>`;
     return html`<label class="f">${f.label}${f.required ? ' *' : ''}<input type=${f.secret ? 'password' : f.type === 'number' ? 'number' : 'text'} value=${v ?? ''} autocomplete="off"
       placeholder=${f.secret && v ? 'сохранено — введите новый, чтобы заменить' : f.placeholder || ''} onFocus=${(e) => f.secret && String(v || '').startsWith('••••') && (e.target.value = '', set(''))}
       onInput=${(e) => set(e.target.value)} /></label>`;
