@@ -32,7 +32,7 @@ export function downloadCsv(name, cols, rows) {
  * actions: [{ key, label, icon, danger, confirm: 'текст', input: { label, type: 'select'|'number'|'text', options: [[v,l]] } }]
  * entity — для POST /crm-api/bulk/<entity>; csv — [[ключ|функция, заголовок]] для «Экспорт в Excel (CSV)»
  */
-export function BulkBar({ sel, entity, actions = [], csv, csvName, onDone }) {
+export function BulkBar({ sel, entity, actions = [], csv, csvName, onDone, extra = [] }) {
   const [ask, setAsk] = useState(null);
   const [val, setVal] = useState('');
   const [report, setReport] = useState(null);
@@ -49,6 +49,7 @@ export function BulkBar({ sel, entity, actions = [], csv, csvName, onDone }) {
     <button class="btn ghost sm" onClick=${sel.clear}>Снять выбор</button>
     <span class="grow"></span>
     ${actions.map((a) => html`<button class=${'btn sm' + (a.danger ? ' danger' : '')} onClick=${() => start(a)}>${a.icon ? html`<${Icon} n=${a.icon} />` : ''}${a.label}</button>`)}
+    ${extra.map((x) => html`<button class="btn sm" onClick=${() => x.onClick([...sel.ids.keys()], [...sel.ids.values()])}>${x.icon ? html`<${Icon} n=${x.icon} />` : ''}${x.label}</button>`)}
     ${csv && html`<button class="btn sm" onClick=${() => downloadCsv(csvName || entity, csv, [...sel.ids.values()])}><${Icon} n="download" />Экспорт в Excel (CSV)</button>`}
     ${ask && html`<${Modal} title=${`${ask.label} · выбрано ${sel.size}`} onClose=${() => setAsk(null)} foot=${html`
         <button class="btn" onClick=${() => setAsk(null)}>Отмена</button>

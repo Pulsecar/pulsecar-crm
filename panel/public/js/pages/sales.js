@@ -1,6 +1,7 @@
 // Продажи (как Sprzedaż в Motowarsztat): все фактуры VAT, корректы, Pro forma и чеки за период; фактура без заказа; статус KSeF
 import { html, useState, useEffect, useData, api, act, qs, go, useApp, ErrorBox, Loading, Icon, Modal, Picker, zl, fdate, toast, useDebounced, todayStr } from '../lib.js';
 import { AztecButton, PlateButton } from '../vehicle.js';
+import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
 
 const TYPE = { vat: 'Фактура VAT', correction: 'Корректа', proforma: 'Pro forma', receipt: 'Чек (paragon)' };
 const PAYM = { cash: 'Наличные', card: 'Карта', blik: 'BLIK', transfer: 'Перевод', mixed: 'Смешанная оплата', points: 'Баллы' };
@@ -16,6 +17,8 @@ export default function Sales() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q);
   const [inv, setInv] = useState(null);
+  const [pack, setPack] = useState(false);
+  const sel = useSel();
   const { data, error, reload } = useData('sales?' + qs({ from, to, type, q: dq }), [from, to, type, dq]);
   const csv = () => {
     const rows = [['Тип', 'Номер', 'Дата', 'Покупатель', 'NIP', 'Заказ', 'Нетто', 'Брутто', 'Оплата', 'KSeF'], ...(data?.rows || []).map((r) => [TYPE[r.type], r.number || '', r.date, r.buyer || '', r.nip || '', r.order_no || '',
@@ -25,7 +28,7 @@ export default function Sales() {
   };
   return html`
     <div class="page-head"><h1>Продажи</h1>
-      <div class="actions"><button class="btn" onClick=${csv} disabled=${!data?.rows?.length}><${Icon} n="download" />CSV</button>
+      <div class="actions"><button class="btn" onClick=${() => setPack(true)}><${Icon} n="download" />Пакет для бухгалтера</button><button class="btn" onClick=${csv} disabled=${!data?.rows?.length}><${Icon} n="download" />CSV</button>
         <button class="btn" onClick=${() => setInv({ kind: 'proforma' })}>Pro forma</button>
         <button class="btn primary" onClick=${() => setInv({ kind: 'vat' })}><${Icon} n="plus" />Фактура без заказа</button></div></div>
     <div class="grid g4" style="margin-bottom:12px">
@@ -41,12 +44,12 @@ export default function Sales() {
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
       <button class="btn sm" onClick=${() => { setFrom(t); setTo(t); }}>Сегодня</button></div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="sales">
-      <thead><tr><th data-c="doc">Документ</th><th data-c="date">Дата</th><th data-c="buyer">Покупатель</th><th data-c="order">Заказ</th><th data-c="pay">Оплата</th><th data-c="net" class="r">Нетто</th><th data-c="gross" class="r">Брутто</th><th data-c="status">Статус</th><th></th></tr></thead>
+      <thead><tr><${SelHead} sel=${sel} rows=${(data?.rows || []).filter((r) => r.type !== 'receipt')} /><th data-c="doc">Документ</th><th data-c="date">Дата</th><th data-c="buyer">Покупатель</th><th data-c="order">Заказ</th><th data-c="pay">Оплата</th><th data-c="net" class="r">Нетто</th><th data-c="gross" class="r">Брутто</th><th data-c="status">Статус</th><th></th></tr></thead>
       <tbody>${(data?.rows || []).map((r) => {
         const st = r.type === 'receipt' ? RS[r.receipt_status] : r.type !== 'proforma' ? KS[r.ksef_status] : null;
         const link = r.type === 'receipt' ? (r.order_id ? '#/orders/' + r.order_id : null) : '#/sales/' + r.id;
-        return html`<tr>
-          <td><b>${r.number || '—'}</b><div class="sub">${TYPE[r.type]}</div></td><td class="nowrap">${fdate(r.date)}</td>
+        return html`<tr class=${sel.has(r.id) && r.type !== 'receipt' ? 'on' : ''}>
+          ${r.type === 'receipt' ? html`<td class="sel-col"></td>` : html`<${SelCell} sel=${sel} row=${r} />`}<td><b>${r.number || '—'}</b><div class="sub">${TYPE[r.type]}</div></td><td class="nowrap">${fdate(r.date)}</td>
           <td>${r.buyer || '—'}${r.nip ? html`<div class="sub">NIP ${r.nip}</div>` : ''}</td>
           <td>${r.order_id && r.order_no ? html`<a href=${'#/orders/' + r.order_id}>${r.order_no}</a>` : ''}</td><td class="sub">${PAYM[r.payment_method] || ''}</td>
           <td class="r nowrap">${r.net == null ? '' : zl(r.net)}</td><td class="r nowrap"><b>${zl(r.gross)}</b></td>
@@ -57,6 +60,11 @@ export default function Sales() {
             ${r.ksef_number && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + r.id + '/upo'}>UPO</a>`}</td></tr>`;
       })}</tbody></table></div>
       ${!data?.rows?.length ? html`<div class="empty">За период документов нет</div>` : ''}</div>`}
+    <${BulkBar} sel=${sel} entity="sales" extra=${[
+      { label: 'Скачать ZIP', icon: 'download', onClick: (ids) => { location.href = '/crm-api/sales-docs/export.zip?' + qs({ ids: ids.join(','), receipts: 0 }); } },
+      { label: 'Печать / один PDF', icon: 'print', onClick: (ids) => window.open('/crm-api/sales-docs/print-all?' + qs({ ids: ids.join(',') }), '_blank') },
+    ]} />
+    ${pack && html`<${AccountantPack} onClose=${() => setPack(false)} />`}
     ${inv && html`<${InvoiceForm} kind=${inv.kind} onClose=${() => setInv(null)} onDone=${(id) => { setInv(null); go('/sales/' + id); }} />`}`;
 }
 
@@ -252,4 +260,29 @@ export function SaleDocPage({ id }) {
     ${d.corrections?.length ? html`<div class="card" style="margin-top:12px"><h3 class="small muted">Корректы</h3>${d.corrections.map((x) => html`<div><a href=${'#/sales/' + x.id}>${x.number}</a> <span class="sub">${fdate(x.issue_date)} · ${zl(x.total_gross)}</span></div>`)}</div>` : ''}
     ${corr && html`<${CorrectionModal} docId=${d.id} onClose=${() => setCorr(false)} onDone=${(id) => { setCorr(false); go('/sales/' + id); }} />`}
     ${edit && html`<${InvoiceForm} kind=${d.kind} doc=${d} onClose=${() => setEdit(false)} onDone=${() => { setEdit(false); reload(); }} />`}`;
+}
+
+/** Пакет для бухгалтера: всё за месяц одним архивом или одним PDF */
+function AccountantPack({ onClose }) {
+  const d = new Date();
+  const ym = (y, m) => { const a = new Date(y, m, 1), b = new Date(y, m + 1, 0); const f = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; return [f(a), f(b)]; };
+  const [[from, to], setRange] = useState(ym(d.getFullYear(), d.getMonth() - 1));
+  const [k, setK] = useState({ vat: true, correction: true, proforma: false, receipts: true, html: true, xml: true });
+  const kinds = ['vat', 'correction', 'proforma'].filter((x) => k[x]).join(',');
+  const q = qs({ from, to, kinds, receipts: k.receipts ? 1 : 0, html: k.html ? 1 : 0, xml: k.xml ? 1 : 0 });
+  const box = (key, label) => html`<label class="check"><input type="checkbox" checked=${k[key]} onChange=${(e) => setK({ ...k, [key]: e.target.checked })} />${label}</label>`;
+  return html`<${Modal} title="Пакет для бухгалтера" onClose=${onClose} foot=${html`
+      <button class="btn" onClick=${() => window.open('/crm-api/sales-docs/print-all?' + qs({ from, to, kinds }), '_blank')}><${Icon} n="print" />Все фактуры одним PDF</button>
+      <a class="btn primary" style="margin-left:auto" href=${'/crm-api/sales-docs/export.zip?' + q} onClick=${() => setTimeout(onClose, 300)}><${Icon} n="download" />Скачать ZIP</a>`}>
+    <div class="row wrap" style="gap:6px;margin-bottom:10px">
+      <button class="btn sm" onClick=${() => setRange(ym(d.getFullYear(), d.getMonth() - 1))}>Прошлый месяц</button>
+      <button class="btn sm" onClick=${() => setRange(ym(d.getFullYear(), d.getMonth()))}>Этот месяц</button>
+      <button class="btn sm" onClick=${() => { const q = Math.floor(d.getMonth() / 3); setRange([ym(d.getFullYear(), (q - 1) * 3)[0], ym(d.getFullYear(), q * 3 - 1)[1]]); }}>Прошлый квартал</button></div>
+    <div class="grid g2"><label class="f">С<input type="date" value=${from} onInput=${(e) => setRange([e.target.value, to])} /></label><label class="f">По<input type="date" value=${to} onInput=${(e) => setRange([from, e.target.value])} /></label></div>
+    <div class="stack" style="margin-top:10px;gap:4px"><b class="small">Какие документы</b>${box('vat', 'Фактуры VAT')}${box('correction', 'Фактуры корректирующие')}${box('proforma', 'Pro forma')}${box('receipts', 'Чеки (paragony) — в реестр Excel')}</div>
+    <div class="stack" style="margin-top:10px;gap:4px"><b class="small">Что положить в архив</b>
+      <div class="muted small">Всегда: реестр продаж Excel (по ставкам VAT, корректы — разницей, итоги).</div>
+      ${box('html', 'Каждая фактура отдельным файлом (открыть → печать → PDF)')}${box('xml', 'XML из KSeF (юридическая e-фактура)')}</div>
+    <div class="muted small" style="margin-top:10px">«Все фактуры одним PDF» откроет все документы подряд — нажмите «Drukuj / zapisz jako jeden PDF» и выберите «Сохранить как PDF».</div>
+  </${Modal}>`;
 }

@@ -150,6 +150,18 @@ try {
   assert.equal((await req(`/crm-api/orders/${o.id}/sales-docs`, { body: { kind: 'vat' } })).status, 409, 'вторая фактура VAT — нельзя');
   const fvh = await req('/crm-api/print/sale/' + fv.id); assert.ok(fvh.j.includes('Faktura VAT') && fvh.j.includes('Słownie') && fvh.j.includes('Nabywca'));
   const fk = ok(await req(`/crm-api/sales-docs/${fv.id}/correct`, { body: { reason: 'Zwrot', lines: [{ qty: 0 }] } }), 'fk');
+  // пакет для бухгалтера: ZIP (реестр + фактуры) и печать всех одной страницей
+  {
+    const r = await fetch(BASE + '/crm-api/sales-docs/export.zip?kinds=vat,correction,proforma', { headers: { Cookie: jars.admin } });
+    assert.equal(r.status, 200); assert.match(r.headers.get('content-type'), /zip/);
+    const buf = Buffer.from(await r.arrayBuffer());
+    assert.equal(buf.slice(0, 2).toString(), 'PK');
+    const names = buf.toString('latin1');
+    assert.ok(names.includes('Rejestr_sprzedazy_') && names.includes('Faktury/') && names.includes('Korekty/') && names.includes('Pro forma/'), 'в архиве реестр и документы');
+    const pa = await (await fetch(BASE + '/crm-api/sales-docs/print-all?kinds=vat,correction', { headers: { Cookie: jars.admin } })).text();
+    const fvd = ok(await req('/crm-api/sales-docs/' + fv.id), 'fv doc');
+    assert.ok(pa.includes((fvd.doc || fvd).number), 'все фактуры одной страницей');
+  }
   assert.ok(fk.total_gross < fv.total_gross);
   console.log('✓ документы: протоколы, спецификация, карта механика, kosztorys, фактура VAT, Pro forma, корректа');
   assert.equal((await req(`/crm-api/orders/${co.id}/invoice`, { body: {} })).status, 400);

@@ -21,6 +21,7 @@ import { publicList, save as saveIntegration, cfg, setState, def as integrationD
 import * as IC from './integrations/intercars.js';
 import * as RMI from './integrations/tecrmi.js';
 import * as DASH from './dashboard.js';
+import * as SEXP from './sales-export.js';
 import * as SUP from './integrations/suppliers.js';
 import { polishNames, glossaryPl, hasCyr } from './pl-names.js';
 import { notify, testTelegram } from './integrations/notify.js';
@@ -2241,6 +2242,27 @@ crm.get('/print/:type/:id', (req, res, next) => {
 });
 
 // ── Документы продажи: фактура VAT (через Fakturownia → KSeF или своя), Pro forma, корректа ──
+/** Документы продажи пакетом — для бухгалтера: ZIP (реестр Excel + фактуры + XML KSeF) или все фактуры одной страницей (PDF) */
+const exportArgs = (q) => {
+  const d = today();
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from || '') ? q.from : d.slice(0, 8) + '01';
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to || '') ? q.to : d;
+  const kinds = String(q.kinds || 'vat,correction').split(',').filter(Boolean);
+  const ids = String(q.ids || '').split(',').map(Number).filter((x) => x > 0).slice(0, 2000);
+  return { from, to, kinds, ids, receipts: q.receipts !== '0', html: q.html !== '0', xml: q.xml !== '0' };
+};
+crm.get('/sales-docs/export.zip', (req, res) => {
+  const s = who(req, 'invoices.create');
+  const r = SEXP.exportZip(exportArgs(req.query));
+  log('sales', 0, 'export', `${r.name}: ${r.count} док.`, s.name);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${r.name}"; filename*=UTF-8''${encodeURIComponent(r.name)}`);
+  res.send(r.buffer);
+});
+crm.get('/sales-docs/print-all', (req, res) => {
+  who(req, 'invoices.create');
+  res.type('html').send(SEXP.printAll(exportArgs(req.query)));
+});
 crm.get('/sales-docs', (req, res) => {
   who(req, 'invoices.create');
   const q = `%${String(req.query.q || '').trim()}%`;
