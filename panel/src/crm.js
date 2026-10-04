@@ -1705,7 +1705,7 @@ crm.post('/staff', (req, res) => {
     phone: b.phone ?? undefined, email: b.email ?? undefined,
     permissions: b.permissions !== undefined ? JSON.stringify(b.permissions || {}) : undefined,
     stations: b.stations !== undefined ? JSON.stringify(b.stations || []) : undefined,
-    ui: Array.isArray(b.ui) ? JSON.stringify([...new Set(b.ui.filter((x) => typeof x === 'string' && x.length < 60))].slice(0, 500)) : undefined,
+    ui: Array.isArray(b.ui) ? JSON.stringify([...new Set(b.ui.filter((x) => typeof x === 'string' && x.length < (x.startsWith('@') ? 600 : 60)))].slice(0, 500)) : undefined,
   };
   if (b.revoke) { d.login = null; d.pass_hash = null; }
   if (d.login && one('SELECT 1 FROM staff WHERE login = ? AND id <> ?', d.login, Number(b.id) || 0)) throw new HttpError(409, 'Такой логин уже есть');

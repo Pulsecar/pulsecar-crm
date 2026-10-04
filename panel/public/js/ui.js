@@ -45,13 +45,26 @@ export const UI_PRESETS = {
 };
 
 let hidden = new Set();
+// блоки главной, которые можно переставлять (внутри своей группы: плитки — между собой, блоки — между собой)
+export const DASH_TILES = ['dash.stat.today', 'dash.stat.month', 'dash.stat.closed', 'dash.stat.inwork'];
+export const DASH_CARDS = ['dash.myorders', 'dash.calendar', 'dash.requests', 'dash.unpaid', 'dash.attention'];
+export const DASH_OTHER = ['dash.btn.calendar', 'dash.btn.neworder', 'dash.statuses'];
+/** Порядок из «@dash:…»; недостающие — в конце по умолчанию */
+export function dashOrder(list) {
+  const raw = (list || []).find((k) => k.startsWith('@dash:'));
+  const saved = raw ? raw.slice(6).split(',').filter(Boolean) : [];
+  return [...saved.filter((k) => DASH_TILES.includes(k) || DASH_CARDS.includes(k)), ...[...DASH_TILES, ...DASH_CARDS].filter((k) => !saved.includes(k))];
+}
 export const uiOn = (k) => !hidden.has(k);
 
 let styleEl, obs, raf = 0;
 export function applyUi(list) {
-  hidden = new Set(Array.isArray(list) ? list : []);
+  const all = Array.isArray(list) ? list : [];
+  hidden = new Set(all.filter((k) => !k.startsWith('@')));
   if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = 'ui-hide'; document.head.appendChild(styleEl); }
-  styleEl.textContent = [...hidden].map((k) => `[data-ui="${CSS.escape(k)}"]`).join(',') + (hidden.size ? '{display:none!important}' : '') + '.ui-hc{display:none!important}';
+  // порядок блоков главной: элемент «@dash:ключ1,ключ2,…» → CSS order внутри своей сетки
+  const order = dashOrder(all).map((k, i) => `[data-ui="${CSS.escape(k)}"]{order:${i + 1}}`).join('');
+  styleEl.textContent = [...hidden].map((k) => `[data-ui="${CSS.escape(k)}"]`).join(',') + (hidden.size ? '{display:none!important}' : '') + '.ui-hc{display:none!important}' + order;
   if (!obs) {
     obs = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; hideCols(); }); });
     obs.observe(document.body, { childList: true, subtree: true });
