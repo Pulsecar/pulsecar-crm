@@ -125,8 +125,10 @@ try {
   assert.equal(j.booking.sms_sent, false, 'без SMS-провайдера SMS только в журнале');
   const smsLog = JSON.stringify((await req('/crm-api/sms')).j);
   assert.match(smsLog, /podtverzhdaem vizit - diagnostika/, 'SMS-подтверждение на языке клиента в журнале SMS');
+  assert.match(smsLog, /besplatno \(novyi klient\)/, 'в SMS новому клиенту — бесплатно');
+  assert.equal(j.booking.free_diagnosis, true);
   const sysB = seen.find((x) => x.system)?.system[0].text;
-  assert.match(sysB, /DIAGNOSTICS/); assert.match(sysB, /50–150 zł/); assert.match(sysB, /od 30 zł/);
+  assert.match(sysB, /DIAGNOSTICS/); assert.match(sysB, /FREE for new customers/); assert.match(sysB, /50–150 zł/); assert.match(sysB, /od 30 zł/);
   assert.ok(a.order_id, 'запись связана со злецением'); assert.ok(a.customer_id && a.car_id, 'запись связана с клиентом и авто');
   assert.match(j.booking.order_number, /^ZL /);
   const ord = (await req('/crm-api/orders/' + a.order_id)).j;

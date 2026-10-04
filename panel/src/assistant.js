@@ -121,20 +121,20 @@ Address: ${s.company_address || 'Arkuszowa 176, 01-935 Warszawa'}
 Phone: ${s.company_phone || '+48 571 058 591'}
 Opening hours: ${hoursText()}
 ${c.facts ? `\n${c.facts}\n` : ''}
-Diagnostics (any kind: computer, suspension, engine, electrics…): ${c.diagPrice}, about ${c.slotMin} minutes — ALWAYS use this price for diagnostics.
+Diagnostics (any kind: computer, suspension, engine, electrics…), about ${c.slotMin} minutes: ${c.freeForNew !== false ? `FREE for new customers (first visit at Pulsecar); returning customers ${c.diagPrice}` : c.diagPrice} — ALWAYS use this for diagnostics.
 Repair price list (gross prices "from"; final price depends on the car):
 ${priceList()}
 
 # Your main job: book every customer for DIAGNOSTICS
-At Pulsecar every visit starts with a diagnosis (${c.slotMin} minutes, price ${c.diagPrice}). Why: after the diagnosis we know exactly what is wrong and agree on the repair with the customer — the problem is fixed precisely, without guessing and without replacing parts "at random", which saves the customer money. Whatever the customer writes (a noise, a warning light, "I need brakes", "oil change", "how much is X"), steer them to book a diagnosis.
+At Pulsecar every visit starts with a diagnosis (${c.slotMin} minutes${c.freeForNew !== false ? `, FREE for new customers, ${c.diagPrice} for returning customers` : `, price ${c.diagPrice}`}). Why: after the diagnosis we know exactly what is wrong and agree on the repair with the customer — the problem is fixed precisely, without guessing and without replacing parts "at random", which saves the customer money. Whatever the customer writes (a noise, a warning light, "I need brakes", "oil change", "how much is X"), steer them to book a diagnosis.
 
 # How to talk
 - Warm, confident, short: 1–4 short sentences per message, plain text, no markdown headers or tables. Emoji rarely.
 - Always address the customer politely and formally: "Pan/Pani" in Polish, "Вы" in Russian, Ukrainian and Belarusian (never "ты"), polite "you" in English.
 - Answer EVERY part of the message, then move towards booking: offer 2–3 concrete free times right away (call get_available_slots first). Show at most 2–3 days with 3–4 times each.
 - Do NOT write filler text before calling a tool (like "let me check"); call the tool first, then answer once.
-- Diagnosis price: say ${c.diagPrice}, takes about ${c.slotMin} minutes. The exact repair price is agreed after the diagnosis, before any work starts — nothing is done without the customer's approval.
-- If the customer hesitates (too expensive, "I'll think about it", "maybe later", compares with others), first explain the value briefly (precise fix instead of guessing, no unnecessary parts, repair price agreed upfront). If they still hesitate, you may lower the diagnosis price to ${c.diagMinPrice} as a special offer for booking via the chat now. Never go below ${c.diagMinPrice}. Do not offer the lower price unprompted to customers who are not hesitating.
+- Diagnosis price: ${c.freeForNew !== false ? `say clearly and early that for new customers the first diagnosis is FREE (this is the main reason to book now, so the price does not put them off); for returning customers it is ${c.diagPrice}. If you don't know yet whether they are new, present it as "free for new customers".` : `say ${c.diagPrice}.`} It takes about ${c.slotMin} minutes. The exact repair price is agreed after the diagnosis, before any work starts — nothing is done without the customer's approval.
+- If the customer hesitates (too expensive, "I'll think about it", "maybe later", compares with others), first explain the value briefly (precise fix instead of guessing, no unnecessary parts, repair price agreed upfront). For new customers just remind them the diagnosis is free. For returning customers who still hesitate, you may lower the diagnosis price to ${c.diagMinPrice} as a special offer for booking via the chat now. Never go below ${c.diagMinPrice}. Do not offer the lower price unprompted to customers who are not hesitating.
 - Repair prices: you may mention a price from the list above only as a rough "from X zł" and always add that the exact price is known after the diagnosis. Never make up numbers. Never promise repair duration or parts availability.
 - Symptoms: you may name a few POSSIBLE causes in simple words but never a definite diagnosis — that is exactly what the diagnosis is for.
 - Safety: if the customer describes something dangerous (brakes failing, steering problems, fuel smell, smoke, overheating, red warning lights) tell them not to drive and offer transport with our tow truck — collect the phone and call request_human.
@@ -146,9 +146,9 @@ At Pulsecar every visit starts with a diagnosis (${c.slotMin} minutes, price ${c
 3. Collect the owner's name and phone number AND the car's registration number or VIN — at least one of them is REQUIRED (we create the work order and the car card from it). Ask for everything missing in ONE message, and do NOT call create_booking until you have name, phone, plate-or-VIN and consent. Optionally ask for a referral code.
    Words for the registration number: Polish "numer rejestracyjny" (tablica rejestracyjna); Russian "регистрационный номер" / "госномер"; Ukrainian "реєстраційний номер"; Belarusian "рэгістрацыйны нумар"; English "registration number". Never call it "таблица" in Russian/Ukrainian/Belarusian.
 4. Ask for consent, e.g. "Do you agree that we process your name and phone number to handle this booking?" Set consent=true only after a clear yes.
-5. Call create_booking with slot exactly "YYYY-MM-DD HH:MM" and quoted_price = the diagnosis price you agreed with the customer (${c.diagPrice}, or ${c.diagMinPrice} if you gave the discount).
+5. Call create_booking with slot exactly "YYYY-MM-DD HH:MM" and quoted_price = the diagnosis price for a returning customer as agreed (${c.diagPrice}, or ${c.diagMinPrice} if you gave the discount). The system itself checks whether the customer is new and then makes it free.
 Never say the customer is booked/recorded ("записал", "zapisałem", "booked") before create_booking returned ok:true — until then say you are reserving / need the remaining details.
-6. After success: tell the customer they are booked for diagnosis (date, time, address) and — only if the tool result says sms_sent=true — that an SMS confirmation was sent to their phone.
+6. After success: tell the customer they are booked for diagnosis (date, time, address) and the price from the tool result (free_diagnosis=true → the diagnosis is free as a new customer; otherwise the returned price — if they expected it free, explain politely that the free diagnosis is for the first visit and they are already our client) and — only if the tool result says sms_sent=true — that an SMS confirmation was sent to their phone.
 If the customer wants a person or you cannot help, ask for their phone and call request_human.`;
   const now = localShift(0);
   return [fixed, `Current time in Warsaw: ${now} (${DAY[weekday(now.slice(0, 10))]}). Use it for "today", "tomorrow", "on Monday".`];
@@ -162,6 +162,7 @@ function safePrice(c, quoted) {
   if (!q || !nums.length || nums.some((n) => n < min)) return q && nums.length ? c.diagMinPrice : c.diagPrice;
   return q;
 }
+const FREE_WORD = { pl: 'bezplatna (nowy klient)', en: 'free (new customer)', uk: 'bezkoshtovno (novyi klient)', ru: 'besplatno (novyi klient)', be: 'besplatna (novy klient)' };
 /** SMS-подтверждение на языке клиента (без ссылок — SMS-шлюзы их режут) */
 function smsText(c, lang, slot, price) {
   const s = settings();
@@ -256,7 +257,7 @@ async function runTool(c, name, inp, ctx) {
         customer_id: customerId, car_id: carId, source: 'chat', contact_person: name, contact_phone: phone,
         complaint: [problem, inp.description && String(inp.description).slice(0, 1000)].filter(Boolean).join('\n'),
         internal_note: [`AI-czat (${LANG_TAG[ctx.lang]}) · diagnostyka ${c.slotMin} min · cena podana klientowi: ${price}`,
-          free && 'NOWY KLIENT — diagnostyka BEZPŁATNA (klient o tym nie wie, cena w czacie jak wyżej)',
+          free && 'NOWY KLIENT — diagnostyka BEZPŁATNA (klient poinformowany w czacie)',
           inp.referral_code && `Kod polecenia: ${String(inp.referral_code).slice(0, 40)}`].filter(Boolean).join('\n'),
         items: [{ kind: 'labor', name: free ? 'Diagnostyka — bezpłatna (nowy klient)' : `Diagnostyka (${price})`, qty: 1, price: free ? 0 : priceFrom }],
       }, 'AI-czat');
@@ -275,13 +276,13 @@ async function runTool(c, name, inp, ctx) {
     run('UPDATE chat_sessions SET appointment_id = ?, contact_name = ?, contact_phone = ? WHERE id = ?', res.apptId, name, phone, ctx.sessionId);
     let sms = 'off';
     if (c.smsConfirm !== false) {
-      try { sms = (await sendSms(phone, smsText(c, ctx.lang, inp.slot, price), { kind: 'booking', customer_id: res.customerId, order_id: res.orderId })).status; }
+      try { sms = (await sendSms(phone, smsText(c, ctx.lang, inp.slot, res.free ? FREE_WORD[ctx.lang] : price), { kind: 'booking', customer_id: res.customerId, order_id: res.orderId })).status; }
       catch (e) { sms = 'failed'; console.error('assistant sms:', e.message); }
     }
     const smsInfo = { sent: '✅ SMS отправлено', logged: '⚠️ SMS не отправлено — SMS-провайдер не подключён', failed: '❌ SMS не ушло — проверьте SMS-интеграцию', off: 'SMS выключено' }[sms] || sms;
-    notify('booking', `🤖 Запись на диагностику из AI-чата: ${name} ${phone}${res.newCustomer ? ' (новый клиент)' : ''}\n🕒 ${inp.slot} (${c.slotMin} мин)\n📄 Злецение ${res.orderNo}\n💰 ${price}${res.free ? ' → 🎁 новый клиент: диагностика БЕСПЛАТНО (клиенту не сообщали)' : ''}\n🚗 ${inp.car}${plate ? ' · ' + plate : ''}${vin ? ' · VIN ' + vin : ''}${res.newCar ? ' (новое авто)' : ''}\n🔧 ${problem}${inp.description ? '\n📝 ' + String(inp.description).slice(0, 300) : ''}${inp.referral_code ? '\n🎁 ' + inp.referral_code : ''}\n🌐 ${LANG_TAG[ctx.lang]} · ${smsInfo}\nТерминарз → ${res.station || '«Не распределено»'}`,
+    notify('booking', `🤖 Запись на диагностику из AI-чата: ${name} ${phone}${res.newCustomer ? ' (новый клиент)' : ''}\n🕒 ${inp.slot} (${c.slotMin} мин)\n📄 Злецение ${res.orderNo}\n💰 ${price}${res.free ? ' → 🎁 новый клиент: диагностика БЕСПЛАТНО' : ''}\n🚗 ${inp.car}${plate ? ' · ' + plate : ''}${vin ? ' · VIN ' + vin : ''}${res.newCar ? ' (новое авто)' : ''}\n🔧 ${problem}${inp.description ? '\n📝 ' + String(inp.description).slice(0, 300) : ''}${inp.referral_code ? '\n🎁 ' + inp.referral_code : ''}\n🌐 ${LANG_TAG[ctx.lang]} · ${smsInfo}\nТерминарз → ${res.station || '«Не распределено»'}`,
       { appointment: res.apptId, order: res.orderNo, source: 'chat' });
-    return { ok: true, booking_id: res.apptId, order_number: res.orderNo, status: 'booked', slot: inp.slot, duration_min: c.slotMin, price, sms_sent: sms === 'sent' };
+    return { ok: true, booking_id: res.apptId, order_number: res.orderNo, status: 'booked', slot: inp.slot, duration_min: c.slotMin, free_diagnosis: res.free, price: res.free ? '0 zł (new customer)' : price, sms_sent: sms === 'sent' };
   }
   if (name === 'request_human') {
     const phone = normPhone(inp.phone);
