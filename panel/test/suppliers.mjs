@@ -215,6 +215,8 @@ try {
   assert.equal(fp.price, 75.62); assert.equal(fp.cost, 31.29); assert.ok(fp.product_id);
   assert.ok(ok(await req('/crm-api/orders/' + q.id), 'qf').items.some((i) => i.code === 'PUR-PC2015AG-2' && i.price === 75.62));
   const prod = ok(await req('/crm-api/products?q=PUR-PC2015AG-2'), 'prod').rows[0];
+  assert.equal(prod.name, 'Filtr kabinowy', 'кириллица со страницы поставщика → польское название');
+  assert.ok(fp.name === 'Filtr kabinowy');
   assert.equal(prod.sell_price, 75.62); assert.equal(prod.purchase_price, 31.29); assert.equal(prod.stock, 1); assert.equal(prod.supplier_sku, 'G0XEXU');
   const pre = ok(await ext('ext/prepare', { items: [item] }), 'prepare');
   assert.equal(pre.items[0].product.id, prod.id);
@@ -235,6 +237,8 @@ try {
   assert.equal(spark.sell_price, 39.9, 'цена продажи = розничная цена поставщика');
   r = ok(await ext('ext/doc', { ...inv, kind: 'cart', number: '', quote_id: q.id }), 'cart → quote');
   assert.ok(r.quote && !r.stock);
+  r = ok(await ext('ext/doc', { supplier: 'autopartner', kind: 'cart', number: 'CART-CYR', quote_id: q.id, lines: [{ code: 'ZZ-1', name: 'Хреновина особая', brand: 'FEBI', qty: 1, price_net: 5 }] }), 'cyr cart');
+  assert.ok(ok(await req('/crm-api/orders/' + q.id), 'qcyr').items.some((i) => i.code === 'ZZ-1' && i.name === 'Część FEBI ZZ-1'), 'непереводимое → Część бренд код');
   ok(await req('/crm-api/me/ext-token', { method: 'DELETE' }), 'revoke token');
   assert.equal((await ext('ext/hello')).status, 401);
   console.log('✓ расширение: фактура / WZ / корзина со страницы поставщика → документ поставщика без дублей, приход PZ, в заказ и смету');

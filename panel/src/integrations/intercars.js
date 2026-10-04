@@ -114,7 +114,7 @@ export function receiveDoc(docId, staffName) {
   if (!items.length) throw new HttpError(400, 'В документе нет позиций к приходу (всё возвращено или пусто)');
   const stockId = createStockDoc({
     type: 'PZ', counterparty: 'INTER CARS S.A.', ext_number: d.ext_id, doc_date: d.doc_date,
-    note: `${d.kind === 'invoice' ? 'Фактура' : 'Поставка'} Inter Cars ${d.ext_id}${raw.orderId ? ' · заказ ' + raw.orderId : ''}`, items,
+    note: `${d.kind === 'invoice' ? 'Faktura' : 'Dostawa'} Inter Cars ${d.ext_id}${raw.orderId ? ' · zamówienie ' + raw.orderId : ''}`, items,
   }, staffName);
   run('UPDATE supplier_docs SET stock_doc_id = ? WHERE id = ?', stockId, d.id);
   return { stockDocId: stockId, lines: items.length };

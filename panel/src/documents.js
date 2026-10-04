@@ -12,6 +12,11 @@ import path from 'node:path';
 // Печатные документы — только по-польски: имя сотрудника кириллицей (например «Администратор») пишем латиницей
 const TRL = { а: 'a', б: 'b', в: 'w', г: 'g', д: 'd', е: 'e', ё: 'io', ж: 'ż', з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'ch', ц: 'c', ч: 'cz', ш: 'sz', щ: 'szcz', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'ju', я: 'ja', і: 'i', ї: 'ji', є: 'je', ґ: 'g' };
 const ROLE_PL = { 'администратор': 'Administrator', 'приёмщик': 'Przyjmujący', 'приемщик': 'Przyjmujący', 'механик': 'Mechanik', 'менеджер': 'Kierownik' };
+// служебные пометки, записанные раньше по-русски (оплата, парковка, перенос…) — на документе по-польски
+const NOTE_PL = [[/^Оплата /, 'Płatność '], [/^Парковка /, 'Parking '], [/^Хранение шин /, 'Przechowanie opon '], [/^Заказ /, 'Zlecenie '], [/^Инвентаризация$/, 'Inwentaryzacja'],
+  [/^Перенос:/, 'Przeniesienie:'], [/^Фактура Inter Cars/, 'Faktura Inter Cars'], [/^Поставка Inter Cars/, 'Dostawa Inter Cars'], [/ · заказ /, ' · zamówienie '], [/: кнопка на сайте поставщика$/, ': dodano przyciskiem na stronie dostawcy']];
+export const plNote = (t) => NOTE_PL.reduce((s, [re, to]) => s.replace(re, to), String(t || ''));
+
 export const plName = (n) => {
   const v = String(n || '').trim();
   if (!/[А-Яа-яЁёІіЇїЄєҐґ]/.test(v)) return v;
@@ -456,7 +461,7 @@ export function stockDocHtml(id, { S = settingsMap(), bar = true } = {}) {
     <div class="sec"><table><thead><tr><th style="width:22px">Lp.</th><th>Nazwa</th>${showCode ? '<th>Kod</th>' : ''}${showLoc ? '<th>Lokalizacja</th>' : ''}<th class="r">Ilość</th><th>J.m.</th><th class="r">Cena netto</th>${showCost ? '<th class="r">Koszt zakupu</th>' : ''}<th class="r">Wartość netto</th></tr></thead><tbody>
       ${items.map((i, n) => `<tr><td>${n + 1}</td><td>${esc(i.name)}${i.manufacturer ? ` <span class="sub">${esc(i.manufacturer)}</span>` : ''}</td>${showCode ? `<td class="mono">${esc(i.code || '')}</td>` : ''}${showLoc ? `<td>${esc(i.location || '')}</td>` : ''}<td class="r">${qtyFmt(i.qty)}</td><td>${esc(i.unit || 'szt.')}</td><td class="r">${zl(i.price_net)}</td>${showCost ? `<td class="r">${zl(i.purchase_price)}</td>` : ''}<td class="r">${zl(i.qty * i.price_net)}</td></tr>`).join('')}
       <tr class="sum"><td colspan="${5 + (showCode ? 1 : 0) + (showLoc ? 1 : 0) + (showCost ? 1 : 0)}" class="r">Razem netto</td><td class="r">${zl(total)}</td></tr></tbody></table></div>
-    ${d.note ? `<div class="sec note">${esc(d.note)}</div>` : ''}
+    ${d.note ? `<div class="sec note">${esc(plNote(d.note))}</div>` : ''}
     ${sigBlock('Wystawił', d.type === 'PZ' ? 'Przyjął' : 'Odebrał', plName(S.stock_person || d.created_by || ''))}`;
   return page({ S, title: STOCK_TITLE[d.type] || d.type, number: d.number, meta: [['Data', d10(d.doc_date)]], body, bar });
 }
@@ -467,9 +472,9 @@ export function cashDocHtml(id, { S = settingsMap(), bar = true } = {}) {
   const c = p.customer_id ? one('SELECT * FROM customers WHERE id = ?', p.customer_id) : null;
   const o = p.order_id ? one('SELECT number FROM orders WHERE id = ?', p.order_id) : null;
   const kp = p.direction !== 'out';
-  const body = `<div class="cols"><div class="box"><h3>${kp ? 'Wpłacający' : 'Odbiorca'}</h3><div class="n">${esc(c?.company || c?.name || p.note || '—')}</div>${esc(c?.phone || '')}${c?.nip ? '<br>NIP ' + esc(c.nip) : ''}</div>
+  const body = `<div class="cols"><div class="box"><h3>${kp ? 'Wpłacający' : 'Odbiorca'}</h3><div class="n">${esc(c?.company || c?.name || plNote(p.note) || '—')}</div>${esc(c?.phone || '')}${c?.nip ? '<br>NIP ' + esc(c.nip) : ''}</div>
       <div class="box kv"><span>Forma</span><b>${esc(PAY_PL[p.method] || p.method)}</b><span>Kasa</span><b>Główna</b></div></div>
-    <div class="sec"><table><thead><tr><th>Tytułem</th><th class="r">Kwota</th></tr></thead><tbody><tr><td>${esc(o ? `Zapłata za zlecenie ${o.number}` : p.note || '')}</td><td class="r">${zl(p.amount)} zł</td></tr>
+    <div class="sec"><table><thead><tr><th>Tytułem</th><th class="r">Kwota</th></tr></thead><tbody><tr><td>${esc(o ? `Zapłata za zlecenie ${o.number}` : plNote(p.note))}</td><td class="r">${zl(p.amount)} zł</td></tr>
       <tr class="sum"><td class="r">Razem</td><td class="r">${zl(p.amount)} zł</td></tr></tbody></table><div class="words">Słownie: ${esc(slownie(p.amount))}</div></div>
     ${sigBlock('Wystawił', kp ? 'Wpłacił' : 'Otrzymał', plName(S.cash_person || p.staff || ''))}`;
   return page({ S, title: kp ? 'Dowód wpłaty KP' : 'Dowód wypłaty KW', number: p.number || `#${p.id}`, meta: [['Data', d10(p.created_at)]], body, bar });

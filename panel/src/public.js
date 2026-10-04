@@ -13,6 +13,7 @@ import { lineGross } from './orders.js';
 import { createPayLink } from './integrations/services.js';
 import { config } from './config.js';
 import { cfg } from './integrations/index.js';
+import { CARD_LANG_BAR, CARD_LANG_CSS, CARD_LANG_JS } from './card-i18n.js';
 
 export const pub = express.Router();
 pub.use(express.urlencoded({ extended: false, limit: '20kb' }));
@@ -137,8 +138,8 @@ f.addEventListener('submit',function(e){if(!has){e.preventDefault();alert('Prosz
 
 function cardPage(title, body, s) {
   return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>${esc(title)}</title><link rel="icon" href="/favicon.png"><style>${CARD_CSS}</style></head><body><div class="wrap">${body}</div>
-<footer>${esc(s.company_name || '')} · ${esc(s.company_address || '')}${s.company_nip ? ' · NIP ' + esc(s.company_nip) : ''}</footer><script>${PAD_JS}</script></body></html>`;
+<meta name="robots" content="noindex"><title>${esc(title)}</title><link rel="icon" href="/favicon.png"><style>${CARD_CSS}${CARD_LANG_CSS}</style></head><body><div class="wrap">${CARD_LANG_BAR}${body}</div>
+<footer>${esc(s.company_name || '')} · ${esc(s.company_address || '')}${s.company_nip ? ' · NIP ' + esc(s.company_nip) : ''}</footer><script>${PAD_JS}</script><script>${CARD_LANG_JS}</script></body></html>`;
 }
 
 function signBox(s, o, doc, token, label) {

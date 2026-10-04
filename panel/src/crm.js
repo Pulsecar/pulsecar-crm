@@ -19,6 +19,7 @@ import { createStockDoc, findOrCreateProduct } from './stock.js';
 import { publicList, save as saveIntegration, cfg, setState, def as integrationDef } from './integrations/index.js';
 import * as IC from './integrations/intercars.js';
 import * as SUP from './integrations/suppliers.js';
+import { polishNames } from './pl-names.js';
 import { notify, testTelegram } from './integrations/notify.js';
 import { balances, setManual } from './balances.js';
 import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, ensureFeedToken } from './integrations/services.js';
@@ -545,7 +546,7 @@ crm.post('/orders/:id/payments', (req, res) => {
   tx(() => {
     for (const { method, amount } of parts) insert('payments', {
       number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, order_id: o.id, customer_id: o.customer_id,
-      note: String(req.body?.note || '') || `Оплата ${o.number}${mixed ? ' (płatność mieszana)' : ''}`, staff: s.name,
+      note: String(req.body?.note || '') || `Płatność ${o.number}${mixed ? ' (płatność mieszana)' : ''}`, staff: s.name,
     });
   });
   recalc(o.id);
@@ -859,7 +860,7 @@ crm.post('/products/:id/inventory', (req, res) => {
   if (!diff) return res.json({ ok: true, diff: 0 });
   const type = diff > 0 ? 'PW' : 'RW';
   tx(() => {
-    const docId = insert('stock_docs', { type, number: nextNumber(type), doc_date: today(), note: 'Инвентаризация', created_by: s.name, total_net: round2(Math.abs(diff) * p.purchase_price) });
+    const docId = insert('stock_docs', { type, number: nextNumber(type), doc_date: today(), note: 'Inwentaryzacja', created_by: s.name, total_net: round2(Math.abs(diff) * p.purchase_price) });
     run('INSERT INTO stock_doc_items (doc_id, product_id, qty, price_net) VALUES (?, ?, ?, ?)', docId, p.id, Math.abs(diff), p.purchase_price);
     run('UPDATE products SET stock = ? WHERE id = ?', counted, p.id);
   });
@@ -924,7 +925,7 @@ crm.post('/storage/:id/pay', (req, res) => {
   const amount = round2(req.body?.amount);
   if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
   const method = PAY_METHODS.includes(req.body?.method) ? req.body.method : 'cash';
-  const what = st.kind === 'parking' ? 'Парковка' : 'Хранение шин';
+  const what = st.kind === 'parking' ? 'Parking' : 'Przechowanie opon';
   tx(() => {
     insert('payments', { number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, note: `${what} ${st.number}`, staff: s.name, customer_id: st.customer_id || null });
     run('UPDATE storage SET paid = ROUND(COALESCE(paid,0) + ?, 2) WHERE id = ?', amount, st.id);
@@ -982,7 +983,7 @@ crm.post('/cash/transfer', (req, res) => {
   if (!from || !to || from.id === to.id) throw new HttpError(400, 'Выберите две разные кассы');
   if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
   const m = (r) => (r.kind === 'cash' ? 'cash' : r.kind === 'card' ? 'card' : 'transfer');
-  const note = String(b.note || '').trim() || `Перенос: ${from.name} → ${to.name}`;
+  const note = String(b.note || '').trim() || `Przeniesienie: ${from.name} → ${to.name}`;
   const out = tx(() => {
     const idOut = insert('payments', { number: nextNumber('KW'), direction: 'out', method: m(from), amount, note, staff: s.name, register_id: from.id });
     const idIn = insert('payments', { number: nextNumber('KP'), direction: 'in', method: m(to), amount, note, staff: s.name, register_id: to.id, transfer_id: idOut });
@@ -1000,7 +1001,7 @@ crm.get('/cash/:id', (req, res) => {
     FROM payments p LEFT JOIN cash_registers r ON r.id = p.register_id LEFT JOIN customers c ON c.id = p.customer_id LEFT JOIN orders o ON o.id = p.order_id
     LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN payments t ON t.id = p.transfer_id LEFT JOIN cash_registers tr ON tr.id = t.register_id WHERE p.id = ?`, Number(req.params.id));
   if (!p) throw new HttpError(404, 'Документ не найден');
-  const storage = /^(Парковка|Хранение шин) (\S+)/.exec(p.note || '');
+  const storage = /^(Парковка|Хранение шин|Parking|Przechowanie opon) (\S+)/.exec(p.note || '');
   const st = storage ? one('SELECT id, number, kind FROM storage WHERE number = ?', storage[2]) : null;
   const source = p.transfer_id ? 'transfer' : p.order_id ? 'order' : st ? 'storage' : p.direction === 'in' ? 'income' : 'expense';
   res.json({ ...p, source, storage: st });
@@ -1021,7 +1022,7 @@ crm.delete('/cash/:id', (req, res) => {
   const p = one('SELECT * FROM payments WHERE id = ?', Number(req.params.id));
   if (!p) throw new HttpError(404, 'Документ не найден');
   if (p.method === 'points') throw new HttpError(400, 'Списание баллов отменяется корректировкой баллов у клиента');
-  const storage = /^(Парковка|Хранение шин) (\S+)/.exec(p.note || '');
+  const storage = /^(Парковка|Хранение шин|Parking|Przechowanie opon) (\S+)/.exec(p.note || '');
   tx(() => {
     run('DELETE FROM payments WHERE id = ? OR (id = ? AND ? IS NOT NULL)', p.id, p.transfer_id || -1, p.transfer_id);
     if (p.order_id) recalc(p.order_id);
@@ -1237,7 +1238,7 @@ crm.post('/ext/prepare', async (req, res) => {
   res.json({ items: out });
 });
 /** «Pobierz do Pulsecar»: товар в картотеку, приход на склад, в заказ, в выцену — одной кнопкой */
-crm.post('/ext/pick', (req, res) => {
+crm.post('/ext/pick', async (req, res) => {
   const s = who(req, 'products.view');
   const P = permsOf(s);
   const b = req.body || {};
@@ -1266,6 +1267,7 @@ crm.post('/ext/pick', (req, res) => {
   if (b.quote_id && !P['quotes.manage']) throw new HttpError(403, 'Нет права менять выцены');
   const bad = items.filter((i) => (b.stock || b.product) && i.price_net <= 0);
   if (bad.length && b.stock) throw new HttpError(400, `Цена закупки должна быть больше 0: ${bad.map((i) => i.code || i.name).join(', ')}`);
+  await polishNames(items, sup.key);
   const done = { products: 0, stock: null, order: null, quote: null };
   tx(() => {
     const pids = items.map((i) => {
@@ -1278,7 +1280,7 @@ crm.post('/ext/pick', (req, res) => {
       return pid;
     });
     if (b.stock) {
-      const docId = createStockDoc({ type: 'PZ', counterparty: sup.name, ext_number: b.ext_number || null, note: `${sup.name}: кнопка на сайте поставщика`,
+      const docId = createStockDoc({ type: 'PZ', counterparty: sup.name, ext_number: b.ext_number || null, note: `${sup.name}: dodano przyciskiem na stronie dostawcy`,
         items: items.map((i, n) => ({ product_id: pids[n], qty: i.qty, price_net: i.price_net })) }, s.name);
       done.stock = one('SELECT number FROM stock_docs WHERE id = ?', docId).number;
     }
@@ -1298,7 +1300,7 @@ crm.post('/ext/pick', (req, res) => {
 });
 
 /** Документ со страницы поставщика (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/выцену */
-crm.post('/ext/doc', (req, res) => {
+crm.post('/ext/doc', async (req, res) => {
   const s = who(req, 'products.view');
   const P = permsOf(s);
   const b = req.body || {};
@@ -1321,6 +1323,7 @@ crm.post('/ext/doc', (req, res) => {
   const number = String(b.number || '').trim().slice(0, 80);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || '') ? b.date : undefined;
   const sup = SUP.wholesaler(b.supplier || 'other');
+  await polishNames(lines, sup.key);
   const out = { id: null, duplicate: false, stock: null, order: null, quote: null, kind: KINDS[kind], number: number || null };
   tx(() => {
     const r = SUP.saveDoc({ supplier: sup.key || 'other', kind, ext_id: number || `${KINDS[kind]} ${s.name} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, doc_date: date, lines, meta: { url: b.url || null, by: s.name } });

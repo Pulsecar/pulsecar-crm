@@ -308,7 +308,7 @@ try {
   const prow = pkl.find((x) => x.id === pk.id);
   assert.equal(prow.kind, 'parking'); assert.equal(prow.paid, 90); assert.equal(prow.qty, 1);
   const cash2 = ok(await req('/crm-api/cash?from=2000-01-01&to=2100-01-01'), 'cash');
-  assert.ok(cash2.rows.some((r) => r.note === 'Парковка ' + prow.number && r.amount === 90 && r.method === 'card'));
+  assert.ok(cash2.rows.some((r) => r.note === 'Parking ' + prow.number && r.amount === 90 && r.method === 'card'));
   const aw = ok(await req('/crm-api/audit?entity=orders&id=' + wq.id), 'audit fu');
   assert.ok(aw.rows.some((r) => r.entity === 'order_comments'));
   const bal0 = ok(await req('/crm-api/balances?force=1'), 'balances');

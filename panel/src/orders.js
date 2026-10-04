@@ -120,7 +120,7 @@ function issueStock(order, staffName) {
   const c = order.customer_id ? one('SELECT name FROM customers WHERE id = ?', order.customer_id) : null;
   const docId = insert('stock_docs', {
     type: 'WZ', number: nextNumber('WZ'), counterparty: c?.name || null, order_id: order.id,
-    doc_date: new Date().toISOString().slice(0, 10), note: `Заказ ${order.number}`, created_by: staffName,
+    doc_date: new Date().toISOString().slice(0, 10), note: `Zlecenie ${order.number}`, created_by: staffName,
   });
   let net = 0;
   for (const p of parts) {
