@@ -14,7 +14,8 @@ const seen = [];
 const mock = createServer(async (req, res) => {
   let body = ''; for await (const c of req) body += c;
   const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
-  if (req.headers['x-api-key'] !== 'sk-test') return json(401, { error: { message: 'invalid x-api-key' } });
+  if (req.headers['x-api-key'] === 'sk-usr' && req.headers['anthropic-workspace-id'] !== 'wrkspc_1') return json(400, { error: { message: 'This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header' } });
+  if (!['sk-test', 'sk-usr'].includes(req.headers['x-api-key'])) return json(401, { error: { message: 'invalid x-api-key' } });
   const b = JSON.parse(body);
   seen.push(b);
   if (b.max_tokens === 5) return json(200, { content: [{ type: 'text', text: 'pong' }], stop_reason: 'end_turn' });
@@ -66,6 +67,13 @@ try {
   // проверка связи без ключа и с ключом
   assert.equal((await req('/crm-api/integrations/assistant', { method: 'PUT', body: { enabled: true, values: { apiKey: 'bad' } } })).status, 200);
   assert.equal((await req('/crm-api/integrations/assistant/test', { body: {} })).status, 400);
+  // пользовательский ключ без рабочего пространства → понятная ошибка; с ID пространства → работает
+  await req('/crm-api/integrations/assistant', { method: 'PUT', body: { enabled: true, values: { apiKey: 'sk-usr' } } });
+  const wsErr = await req('/crm-api/integrations/assistant/test', { body: {} });
+  assert.equal(wsErr.status, 400); assert.match(wsErr.j.error, /рабочему пространству/);
+  await req('/crm-api/integrations/assistant', { method: 'PUT', body: { enabled: true, values: { workspaceId: 'wrkspc_1' } } });
+  assert.equal((await req('/crm-api/integrations/assistant/test', { body: {} })).status, 200);
+  await req('/crm-api/integrations/assistant', { method: 'PUT', body: { enabled: true, values: { workspaceId: '' } } });
   assert.equal((await req('/crm-api/integrations/assistant', { method: 'PUT', body: { enabled: true, values: { apiKey: 'sk-test', capacity: 1, minHoursAhead: 0, daysAhead: 14 } } })).status, 200);
   const t = await req('/crm-api/integrations/assistant/test', { body: {} });
   assert.equal(t.status, 200, JSON.stringify(t.j)); assert.match(t.j.info, /Claude отвечает/);

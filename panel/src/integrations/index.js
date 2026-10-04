@@ -235,6 +235,7 @@ export const DEFS = [
     howto: 'Ключ Claude API: console.anthropic.com → API Keys → Create Key (и пополните баланс). На сайт вставляется одна строка перед </body>: <script src="https://panel.pulsecar.tech/chat/widget.js" defer></script>. Цены берутся из Настройки → Прайс работ (позиции с сайта), часы — из Терминарз → Часы работы.',
     fields: [
       { k: 'apiKey', label: 'Ключ Claude API', secret: true, required: true },
+      { k: 'workspaceId', label: 'ID рабочего пространства (только для ключей sk-ant-usr-…)', placeholder: 'wrkspc_…' },
       { k: 'model', label: 'Модель', type: 'select', options: [['claude-haiku-4-5-20251001', 'Claude Haiku 4.5 — быстро и дёшево (рекомендуется)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 — умнее, дороже']], def: 'claude-haiku-4-5-20251001' },
       { k: 'capacity', label: 'Сколько машин можно принять на одно время (0 — по числу постов)', type: 'number', def: 0 },
       { k: 'slotMin', label: 'Длина окна для записи, минут', type: 'number', def: 60 },

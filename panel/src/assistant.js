@@ -15,6 +15,8 @@ import { render, orderContext } from './messaging.js';
 export const assistant = express.Router();
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ANTHROPIC_URL = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+const headers = (c) => ({ 'content-type': 'application/json', 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01',
+  ...(String(c.workspaceId || '').trim() ? { 'anthropic-workspace-id': String(c.workspaceId).trim() } : {}) });
 const LANGS = { pl: 'Polish', en: 'English', uk: 'Ukrainian', ru: 'Russian', be: 'Belarusian' };
 const LANG_TAG = { pl: 'PL', en: 'EN', uk: 'UA', ru: 'RU', be: 'BY' };
 const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -202,7 +204,7 @@ function runTool(c, name, inp, ctx) {
 async function callModel(c, system, messages) {
   const r = await fetch(ANTHROPIC_URL + '/v1/messages', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01' },
+    headers: headers(c),
     body: JSON.stringify({
       model: c.model || 'claude-haiku-4-5-20251001', max_tokens: 1024, tools: TOOLS, messages,
       system: [{ type: 'text', text: system[0], cache_control: { type: 'ephemeral' } }, { type: 'text', text: system[1] }],
@@ -217,11 +219,15 @@ export async function testAssistant() {
   const c = cfg('assistant', { ignoreEnabled: true });
   if (!c?.apiKey) throw new Error('Вставьте ключ Claude API');
   const r = await fetch(ANTHROPIC_URL + '/v1/messages', {
-    method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01' },
+    method: 'POST', headers: headers(c),
     body: JSON.stringify({ model: c.model || 'claude-haiku-4-5-20251001', max_tokens: 5, messages: [{ role: 'user', content: 'ping' }] }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`Claude API ${r.status}: ${j.error?.message || 'ошибка'}`);
+  if (!r.ok) {
+    const m = j.error?.message || 'ошибка';
+    if (/workspace/i.test(m)) throw new Error('Этот ключ не привязан к рабочему пространству. Создайте обычный ключ в console.anthropic.com → Settings → API Keys (начинается с sk-ant-api…) или впишите ID рабочего пространства в поле ниже.');
+    throw new Error(`Claude API ${r.status}: ${m}`);
+  }
   const n = all(`SELECT 1 FROM service_catalog WHERE COALESCE(active,1)=1 AND COALESCE(source,'') <> 'motowarsztat'`).length;
   return `Claude отвечает. Позиций прайса для чата: ${n}. Вставьте на сайт: <script src="${process.env.PUBLIC_URL || 'https://panel.pulsecar.tech'}/chat/widget.js" defer></script>`;
 }
