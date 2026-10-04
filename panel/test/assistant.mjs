@@ -95,7 +95,10 @@ try {
   r = await chat('hello', undefined, 'https://evil.example');
   assert.equal(r.headers.get('access-control-allow-origin'), null);
   const sys = seen.at(-1).system[0].text;
-  assert.match(sys, /Diagnostyka komputerowa: od 100 zł/, 'прайс из CRM в инструкциях');
+  assert.doesNotMatch(sys, /Diagnostyka komputerowa: od/, 'цена диагностики только из настроек чата');
+  assert.match(sys, /Diagnostics \(any kind[^\n]*50–150 zł/);
+  assert.match(sys, /: od \d+ zł/, 'прайс ремонта из CRM в инструкциях');
+  assert.match(sys, /NEVER "ты"/);
   assert.match(sys, /Gwarancja: 6 miesięcy/);
   assert.equal(seen.at(-1).tools.length, 3);
   console.log('✓ чат, CORS, прайс из CRM');

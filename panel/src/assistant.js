@@ -97,7 +97,9 @@ function hoursText() {
   return [1, 2, 3, 4, 5, 6, 0].map((d) => `${names[d]} ${Array.isArray(h[d]) && h[d][0] ? h[d].join('–') : 'closed'}`).join(', ');
 }
 function priceList() {
-  const rows = all(`SELECT category, name, price FROM service_catalog WHERE COALESCE(active, 1) = 1 AND COALESCE(source, '') <> 'motowarsztat' ORDER BY category, id`);
+  // диагностику чат продаёт по своей цене (настройки интеграции), поэтому из прайса её убираем
+  const rows = all(`SELECT category, name, price FROM service_catalog WHERE COALESCE(active, 1) = 1 AND COALESCE(source, '') <> 'motowarsztat' ORDER BY category, id`)
+    .filter((r) => !/diagnost|przegl[aą]d przed zakupem/i.test(`${r.category} ${r.name}`) || /przed zakupem/i.test(r.name));
   let cat = null;
   return rows.map((r) => `${r.category !== cat ? `${(cat = r.category) || 'Inne'}:\n` : ''}- ${r.name}: ${r.price > 0 ? `od ${Math.round(r.price * 100) / 100} zł` : 'price after diagnosis'}`).join('\n');
 }
@@ -107,7 +109,7 @@ function systemPrompt(c, lang) {
   const fixed = `You are the online assistant of ${name}, an independent car repair workshop in Warsaw (Bielany), chatting with visitors on the website pulsecar.pl.
 
 # Language
-The website is currently shown in ${LANGS[lang]} — reply in ${LANGS[lang]}. The visitor may switch the website language during the chat; always follow the current one. Only if the customer's latest message is clearly written in another language (Polish, English, Ukrainian, Russian or Belarusian), reply in that language instead.
+The website is currently shown in ${LANGS[lang]} — reply in ${LANGS[lang]}. ALWAYS use the formal, polite form of address: "Pan/Pani" in Polish; "Вы" (capitalised, plural verb forms) in Russian, Ukrainian and Belarusian — NEVER "ты"/"твой"/"слушай", even if earlier messages did. The visitor may switch the website language during the chat; always follow the current one. Only if the customer's latest message is clearly written in another language (Polish, English, Ukrainian, Russian or Belarusian), reply in that language instead.
 
 # Workshop facts — the ONLY source of truth, never invent anything beyond this
 Name: ${name}
@@ -115,7 +117,8 @@ Address: ${s.company_address || 'Arkuszowa 176, 01-935 Warszawa'}
 Phone: ${s.company_phone || '+48 571 058 591'}
 Opening hours: ${hoursText()}
 ${c.facts ? `\n${c.facts}\n` : ''}
-Price list (gross prices "from"; final price depends on the car):
+Diagnostics (any kind: computer, suspension, engine, electrics…): ${c.diagPrice}, about ${c.slotMin} minutes — ALWAYS use this price for diagnostics.
+Repair price list (gross prices "from"; final price depends on the car):
 ${priceList()}
 
 # Your main job: book every customer for DIAGNOSTICS
