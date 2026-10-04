@@ -43,11 +43,31 @@
   if (!state || Date.now() - (state.updated || 0) > 24 * 3600 * 1000) state = { sessionId: uuid(), messages: [], open: false, updated: Date.now() };
 
   // Czat pokazuje się tylko, gdy jest włączony w CRM (Ustawienia → Integracje)
+  var CFG = null, HOST = null;
   fetch(SERVER + '/chat-api/config').then(function (r) { return r.json(); }).then(function (cfg) {
-    if (cfg && cfg.enabled) mount(cfg);
+    if (cfg && cfg.enabled) { CFG = cfg; HOST = mount(cfg); watchLang(); }
   }).catch(function () {});
 
-  function mount(cfg) {
+  // Strona przełącza język bez przeładowania (/pl → /ru) — czat przełącza się razem z nią
+  function watchLang() {
+    function check() {
+      var l = detectLang();
+      if (l === LANG || !CFG) return;
+      LANG = l; T = TXT[LANG];
+      if (HOST) HOST.remove();
+      HOST = mount(CFG, true);
+    }
+    ['pushState', 'replaceState'].forEach(function (k) {
+      var orig = history[k];
+      if (typeof orig !== 'function') return;
+      history[k] = function () { var r = orig.apply(this, arguments); setTimeout(check, 0); return r; };
+    });
+    window.addEventListener('popstate', check);
+    try { new MutationObserver(check).observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] }); } catch (e) {}
+    setInterval(check, 1500);
+  }
+
+  function mount(cfg, quiet) {
     var host = document.createElement('div');
     host.id = 'pulsecar-chat';
     document.body.appendChild(host);
@@ -186,9 +206,10 @@
     window.PulseCarChat = { open: function (msg) { setOpen(true); if (msg) send(msg); }, close: function () { setOpen(false); } };
     renderAll();
     if (state.open) setOpen(true);
-    else {
+    else if (!quiet) {
       var seen = false; try { seen = sessionStorage.getItem('pulsecar_chat_tip') === '1'; } catch (e) {}
       if (!seen && !state.messages.length) setTimeout(function () { if (!pn.classList.contains('on')) { tip.classList.add('on'); setTimeout(function () { tip.classList.remove('on'); }, 8000); } try { sessionStorage.setItem('pulsecar_chat_tip', '1'); } catch (e) {} }, 6000);
     }
+    return host;
   }
 })();
