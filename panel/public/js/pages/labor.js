@@ -171,16 +171,16 @@ export function LaborBlock({ o, reload, c }) {
           ${!(app.templates || []).some((t) => t.active) ? html`<div class="muted small" style="padding:8px 12px">Шаблонов нет — создайте в Настройки → Шаблоны заказов</div>` : ''}
           <a href="#/settings/templates" onClick=${() => setMenu(false)}><${Icon} n="gear" />Шаблоны заказов…</a></div>`}
       </div>
-      <button class="btn sm soft" onClick=${() => setCatOpen(true)}><${Icon} n="list" />Прайс работ</button>
+      <button class="btn sm soft" data-ui="order.btn.catalog" onClick=${() => setCatOpen(true)}><${Icon} n="list" />Прайс работ</button>
       <button class="btn sm danger-soft" disabled=${!sel.size} onClick=${delSel}><${Icon} n="trash" />Удалить выбранные${sel.size ? ` (${sel.size})` : ''}</button>
       <span class="grow"></span>
       <div class="mw-search"><${Icon} n="search" /><input type="search" placeholder="Поиск" value=${q} onInput=${(e) => setQ(e.target.value)} /></div>
     </div>`}
-    <div class="tbl-wrap"><table class="tbl items mw-items labor-tbl"><thead><tr>
-      <th style="width:28px">${!mech && html`<input type="checkbox" checked=${rows.length > 0 && rows.every((i) => sel.has(i.id))} onChange=${(e) => setSel(e.target.checked ? new Set(rows.map((i) => i.id)) : new Set())} aria-label="Выбрать все" />`}</th>
-      <th style="width:30px">Lp.</th><th style="width:24px"></th><th class="nm">Работа</th>${!quote ? html`<th>Механик</th>` : ''}<th>Ед.</th><th class="r">Кол-во</th>
-      ${seePrice ? html`<th class="r">Цена ${modeL === 'net' ? 'нетто' : 'брутто'}</th>${showDisc ? html`<th class="r">Скидка %</th>` : ''}<th>VAT</th><th class="r">Сумма нетто</th><th class="r">Сумма брутто</th>` : ''}
-      <th class="c">${quote ? '' : 'Статус'}</th></tr></thead>
+    <div class="tbl-wrap"><table class="tbl items mw-items labor-tbl" data-cols="labor"><thead><tr>
+      <th data-c="sel" style="width:28px">${!mech && html`<input type="checkbox" checked=${rows.length > 0 && rows.every((i) => sel.has(i.id))} onChange=${(e) => setSel(e.target.checked ? new Set(rows.map((i) => i.id)) : new Set())} aria-label="Выбрать все" />`}</th>
+      <th data-c="lp" style="width:30px">Lp.</th><th style="width:24px"></th><th data-c="name" class="nm">Работа</th>${!quote ? html`<th data-c="mech">Механик</th>` : ''}<th data-c="unit">Ед.</th><th data-c="qty" class="r">Кол-во</th>
+      ${seePrice ? html`<th data-c="price" class="r">Цена ${modeL === 'net' ? 'нетто' : 'брутто'}</th>${showDisc ? html`<th data-c="disc" class="r">Скидка %</th>` : ''}<th data-c="vat">VAT</th><th data-c="net" class="r">Сумма нетто</th><th data-c="gross" class="r">Сумма брутто</th>` : ''}
+      <th data-c="status" class="c">${quote ? '' : 'Статус'}</th></tr></thead>
       <tbody onDragOver=${(e) => dragId && e.preventDefault()}>
       ${rows.map((it) => html`<tr class=${(sel.has(it.id) ? 'on ' : '') + (overId === it.id ? 'drop-above ' : '') + (dragId === it.id ? 'dragging ' : '') + (it.done ? 'is-done' : '')}
           onDragOver=${(e) => { if (!dragId) return; e.preventDefault(); if (overId !== it.id) setOverId(it.id); }} onDrop=${(e) => { e.preventDefault(); drop(it.id); }}>

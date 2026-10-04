@@ -19,8 +19,8 @@ export function CarsList() {
     <div class="page-head"><h1>Автомобили</h1><span class="muted">${data ? num(data.total) : ''}</span>
       <div class="actions"><a class="btn primary" href="#/cars/new"><${Icon} n="plus" />Новое авто</a></div></div>
     <div class="card" style="margin-bottom:12px"><input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, VIN, марка, модель, владелец…" aria-label="Поиск авто" /></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Марка / модель</th><th>Номер</th><th>VIN</th><th>Владелец</th><th class="r">Год</th><th class="r">Объём</th><th>Топливо</th><th class="r">Мощность</th><th class="r">Пробег</th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="cars">
+      <thead><tr><th data-c="name">Марка / модель</th><th data-c="plate">Номер</th><th data-c="vin">VIN</th><th data-c="owner">Владелец</th><th data-c="year" class="r">Год</th><th data-c="engine" class="r">Объём</th><th data-c="fuel">Топливо</th><th data-c="power" class="r">Мощность</th><th data-c="mileage" class="r">Пробег</th></tr></thead>
       <tbody>${(data?.rows || []).map((k) => html`<tr class="click" onClick=${() => go('/cars/' + k.id)}>
         <td><b>${carName(k)}</b></td><td>${k.plate ? html`<span class="plate">${k.plate}</span>` : ''}</td><td class="sub">${k.vin || ''}</td>
         <td>${k.owner_name || '—'}<div class="sub">${k.owner_phone || ''}</div></td><td class="r">${k.year || ''}</td><td class="r">${k.capacity || ''}</td>

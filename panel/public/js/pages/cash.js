@@ -43,8 +43,8 @@ export default function Cash() {
       <label class="f" style="width:160px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
       <button class="btn sm" onClick=${() => { setFrom(t); setTo(t); }}>Сегодня</button>
       ${reg && app.perms['settings.manage'] && html`<button class="btn sm ghost" style="margin-left:auto" onClick=${() => setEdit({ ...data.registers.find((r) => String(r.id) === String(reg)) })}>Настроить кассу</button>`}</div></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Время</th><th>Документ</th><th>Касса</th><th>Способ</th><th>Клиент / назначение</th><th>Заказ</th><th>Кто</th><th class="r">Приход</th><th class="r">Расход</th><th></th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="cash">
+      <thead><tr><th data-c="time">Время</th><th data-c="doc">Документ</th><th data-c="box">Касса</th><th data-c="method">Способ</th><th data-c="who">Клиент / назначение</th><th data-c="order">Заказ</th><th data-c="staff">Кто</th><th data-c="in" class="r">Приход</th><th data-c="out" class="r">Расход</th><th></th></tr></thead>
       <tbody>${(data?.rows || []).map((p) => html`<tr class="click" onClick=${() => setCdoc(p.id)}>
         <td class="nowrap sub">${fdt(p.created_at)}</td><td><b>${p.number || html`<span class="sub">${p.direction === 'in' ? 'оплата ' + (METHOD[p.method] || '').toLowerCase() : 'расход'}</span>`}</b>${p.transfer_id ? html`<div class="sub">перенос</div>` : ''}</td><td class="sub">${p.register_name || '—'}</td><td>${METHOD[p.method]}</td>
         <td>${p.customer_name || ''}<div class="sub">${p.note || ''}</div></td>

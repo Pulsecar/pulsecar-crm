@@ -3,6 +3,7 @@ import {
   ConfirmButton, useDebounced, zl, num, fdate, fdt, carName, METHOD, PAY_KINDS, toast,
 } from '../lib.js';
 import { SupplierParts } from './suppliers.js';
+import { uiOn } from '../ui.js';
 import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
 import { OrderMain, ItemsMW } from './order-form.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
@@ -35,7 +36,7 @@ export function OrdersList({ kind, query }) {
   const base = kind === 'quote' ? '/quotes' : '/orders';
   return html`
     <div class="page-head"><h1>${kind === 'quote' ? 'Выцены' : 'Заказы'}</h1>
-      <div class="actions"><a class="btn primary" href=${'#' + base + '/new'}><${Icon} n="plus" />${kind === 'quote' ? 'Новая выцена' : 'Новый заказ'}</a></div></div>
+      <div class="actions"><a class="btn primary" data-ui="orders.btn.new" href=${'#' + base + '/new'}><${Icon} n="plus" />${kind === 'quote' ? 'Новая выцена' : 'Новый заказ'}</a></div></div>
     <div class="card" style="margin-bottom:12px"><div class="row end">
       <label class="f grow">Поиск<input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, клиент, телефон, авто, VIN" /></label>
       <label class="f" style="width:220px">Статус<select value=${status} onChange=${(e) => setStatus(e.target.value)}>
@@ -46,8 +47,8 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:150px">С<input type="date" value=${from} onInput=${(e) => setFrom(e.target.value)} /></label>
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Номер</th><th>Создан</th><th>Статус</th>${kind === 'quote' && html`<th>Обзвон</th>`}<th>Клиент</th><th>Авто</th><th>${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th>Источник</th><th class="r">Сумма</th><th class="r">Оплачено</th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="orders">
+      <thead><tr><th data-c="number">Номер</th><th data-c="created">Создан</th><th data-c="status">Статус</th>${kind === 'quote' && html`<th data-c="followup">Обзвон</th>`}<th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="intake">${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th data-c="source">Источник</th><th class="r" data-c="total">Сумма</th><th class="r" data-c="paid">Оплачено</th></tr></thead>
       <tbody>${(data?.rows || []).map((o) => html`<tr class="click" onClick=${() => go(base + '/' + o.id)}>
         <td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
@@ -167,6 +168,8 @@ export function OrderPage({ id }) {
   };
   const tabs = [['main', 'Основное'], ['items', 'Работы и товары'], ['files', 'Файлы и подписи' + (o.files?.length ? ' · ' + o.files.length : '')],
     ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата и документы' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['contact', 'Связь с клиентом'], ['plan', 'Терминарз'], ['check', 'Чек-листы']]), ['log', 'История']];
+  const vis = tabs.filter(([k]) => uiOn('order.tab.' + k));
+  if (vis.length && !vis.some(([k]) => k === tab)) setTimeout(() => setTab(vis[0][0]));
   return html`
     <div class="crumbs"><a href=${isQuote ? '#/quotes' : '#/orders'}>${isQuote ? 'Выцены' : 'Заказы'}</a></div>
     <div class="order-head">
@@ -181,19 +184,19 @@ export function OrderPage({ id }) {
         </div>
       </div>
       <div class="row">
-        <button class="btn" title="Открыть электронную карту (ссылка копируется для клиента)" onClick=${async () => {
+        <button class="btn" data-ui="order.btn.card" title="Открыть электронную карту (ссылка копируется для клиента)" onClick=${async () => {
           const w = window.open('', '_blank');
           try { const r = await api(`orders/${o.id}/card`, { body: {} }); navigator.clipboard?.writeText(r.url).catch(() => {}); if (w) w.location = r.url; else location.href = r.url; toast('Ссылка на карту скопирована'); }
           catch (e) { w?.close(); toast(e.message, 'error'); } }}><${Icon} n="file" />${isQuote ? 'Электронная выцена' : 'Электронная карта заказа'}</button>
-        <${DocsMenu} o=${o} />
-        <button class="btn" title="Копия с теми же клиентом, авто и позициями" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/copy`, { body: {} }), isQuote ? 'Выцена скопирована' : 'Заказ скопирован'); go((isQuote ? '/quotes/' : '/orders/') + r.id); }}><${Icon} n="file" />Копировать</button>
-        ${isQuote && !o.linked_orders?.length && html`<${QuoteToOrder} o=${o} />`}
-        ${app.perms['orders.delete'] && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
+        <span data-ui="order.btn.docs" style="display:contents"><${DocsMenu} o=${o} /></span>
+        <button class="btn" data-ui="order.btn.copy" title="Копия с теми же клиентом, авто и позициями" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/copy`, { body: {} }), isQuote ? 'Выцена скопирована' : 'Заказ скопирован'); go((isQuote ? '/quotes/' : '/orders/') + r.id); }}><${Icon} n="file" />Копировать</button>
+        ${isQuote && !o.linked_orders?.length && html`<span data-ui="order.btn.toorder" style="display:contents"><${QuoteToOrder} o=${o} /></span>`}
+        ${app.perms['orders.delete'] && uiOn('order.btn.delete') && html`<${ConfirmButton} cls="btn danger" onConfirm=${async () => { await act(() => api('orders/' + o.id, { method: 'DELETE' }), 'Удалено'); go(isQuote ? '/quotes' : '/orders'); }}><${Icon} n="trash" /></${ConfirmButton}>`}
       </div>
     </div>
     ${isQuote && o.linked_orders?.length ? html`<div class="card ok-card small" style="margin-bottom:14px">✓ По этой выцене: ${o.linked_orders.map((x, i) => html`${i ? ', ' : ''}${x.how === 'merged' ? 'позиции добавлены в заказ ' : 'создан заказ '}<a href=${'#/orders/' + x.id}><b>${x.number}</b></a>`)} — выцена завершена</div>` : ''}
     ${!isQuote && o.linked_quotes?.length ? html`<div class="muted small" style="margin:-6px 0 12px">Из выцены: ${o.linked_quotes.map((x, i) => html`${i ? ', ' : ''}<a href=${'#/quotes/' + x.id}>${x.number}</a>`)}</div>` : ''}
-    <div class="pill-tabs" style="margin-bottom:14px">${tabs.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
+    <div class="pill-tabs" style="margin-bottom:14px">${vis.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
     ${app.perms['orders.prices'] && (isQuote ? tab === 'items' : tab === 'pay') && html`<div class="totals" style="margin-bottom:14px">
       <div><span>Итого брутто</span><b>${zl(o.total)}</b></div>
       <div><span>Нетто</span><b>${zl(o.total_net)}</b></div>

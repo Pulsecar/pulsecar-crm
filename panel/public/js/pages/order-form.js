@@ -169,19 +169,19 @@ export function ItemsMW({ o, reload }) {
   const sumRow = (rows, mode, span, tail) => html`<tr class="sum-row"><td colspan=${span}></td>
     <td class="r nowrap">${zl(rows.reduce((s, i) => s + net(lineGross(i), i.vat), 0))}<div class="sub">нетто</div></td><td class="r nowrap"><b>${zl(rows.reduce((s, i) => s + lineGross(i), 0))}</b><div class="sub">брутто</div></td>${tail}</tr>`;
 
-  const partsHead = html`<tr><th style="width:28px">Lp.</th><th>Товар</th><th>Код</th>${!quote ? html`<th>Работа</th>` : ''}<th class="r">Кол-во</th><th>Ед.</th>
-    ${seePrice ? html`<th class="r">Цена ${modeP === 'net' ? 'нетто' : 'брутто'}</th>${showCost ? html`<th class="r" title="Себестоимость (закупка) — видно только в CRM, клиенту не показывается">Себестоимость ${modeP === 'net' ? 'нетто' : 'брутто'}</th>` : ''}${showDisc ? html`<th class="r">Скидка %</th>` : ''}<th>VAT</th><th class="r">Сумма нетто</th><th class="r">Сумма брутто</th>` : ''}<th></th></tr>`;
+  const partsHead = html`<tr><th data-c="lp" style="width:28px">Lp.</th><th data-c="name">Товар</th><th data-c="code">Код</th>${!quote ? html`<th data-c="job">Работа</th>` : ''}<th data-c="qty" class="r">Кол-во</th><th data-c="unit">Ед.</th>
+    ${seePrice ? html`<th data-c="price" class="r">Цена ${modeP === 'net' ? 'нетто' : 'брутто'}</th>${showCost ? html`<th data-c="cost" class="r" title="Себестоимость (закупка) — видно только в CRM, клиенту не показывается">Себестоимость ${modeP === 'net' ? 'нетто' : 'брутто'}</th>` : ''}${showDisc ? html`<th data-c="disc" class="r">Скидка %</th>` : ''}<th data-c="vat">VAT</th><th data-c="net" class="r">Сумма нетто</th><th data-c="gross" class="r">Сумма брутто</th>` : ''}<th></th></tr>`;
   const vatSel = (i) => html`<select class="inline-input" style="width:64px" value=${i.vat} disabled=${!editPrice} onChange=${(e) => save(i, { vat: Number(e.target.value) })}>${[...new Set([...vats, i.vat])].map((v) => html`<option value=${v}>${v}%</option>`)}</select>`;
 
   return html`
     ${o.only_my_jobs && html`<div class="card small muted" style="margin-bottom:12px">Показаны только ваши работы и запчасти к ним.</div>`}
-    ${!quote && html`<${MediaCheck} o=${o} reload=${reload} />`}
+    ${!quote && html`<div data-ui="order.media"><${MediaCheck} o=${o} reload=${reload} /></div>`}
     <${LaborBlock} o=${o} reload=${reload} c=${{ quote, mech, seePrice, editPrice, showDisc, units, discL, modeL, S, shown, setPrice, numIn, vatSel, lineGross, net,
       NetGrossEl: html`<${NetGross} value=${modeL} set=${(v) => { setModeL(v); keep('pc-ng-labor', v); }} />` }} />
 
     <div class="card tight">
       <div class="mw-bar"><h2>Товары</h2>${seePrice && html`<${NetGross} value=${modeP} set=${(v) => { setModeP(v); keep('pc-ng-parts', v); }} />`}</div>
-      ${parts.length ? html`<div class="tbl-wrap"><table class="tbl items mw-items"><thead>${partsHead}</thead><tbody>
+      ${parts.length ? html`<div class="tbl-wrap"><table class="tbl items mw-items" data-cols="parts"><thead>${partsHead}</thead><tbody>
         ${parts.map((it, n) => html`<tr><td class="sub">${n + 1}</td>
           <td><input class="inline-input iname" value=${it.name} disabled=${mech} onChange=${(e) => save(it, { name: e.target.value })} />
             ${it.product_id && it.product_stock !== null && it.product_stock < it.qty ? html`<div class="stock-warn">на складе ${num(it.product_stock, 2)} — нужно заказать</div>` : ''}${!it.product_id ? html`<div class="sub">без склада</div>` : ''}</td>
@@ -194,7 +194,7 @@ export function ItemsMW({ o, reload }) {
             <td class="r nowrap">${zl(net(lineGross(it), it.vat))}</td><td class="r nowrap"><b>${zl(lineGross(it))}</b></td>`}
           <td class="act">${!mech && html`<button class="icon-btn" title="Удалить" onClick=${() => del(it)}><${Icon} n="trash" /></button>`}</td></tr>`)}
         ${seePrice && sumRow(parts, modeP, (quote ? 5 : 6) + 1 + (showCost ? 1 : 0) + (showDisc ? 1 : 0) + 1, html`<td></td>`)}</tbody></table></div>` : html`<div class="empty" style="padding:16px">Товаров пока нет</div>`}
-      ${!mech && html`<div class="mw-actions">
+      ${!mech && html`<div class="mw-actions" data-ui="order.btn.addpart">
         <div class="grow" style="max-width:480px"><${Picker} placeholder="+ Со склада: название, код, EAN…" path=${(q) => 'products?q=' + encodeURIComponent(q)}
           render=${(p) => html`<b>${p.name}</b> <span class="sub">${p.code || ''} · в наличии ${num(p.stock - p.reserved, 2)} ${p.unit} · ${zl(p.sell_price)}</span>`}
           onPick=${(p) => add({ kind: 'part', product_id: p.id, name: p.name, code: p.code, qty: 1, unit: p.unit, price: p.sell_price, vat: p.vat, discount: discP })}

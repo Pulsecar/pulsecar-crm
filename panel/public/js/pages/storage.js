@@ -25,8 +25,8 @@ export default function Storage() {
       <div class="seg sel">${[['', 'Всё'], ['tires', 'Шины / колёса'], ['parking', 'Парковка']].map(([k, l]) => html`<button class=${kind === k ? 'on' : ''} onClick=${() => setKind(k)}>${l}</button>`)}</div>
       <input class="grow" type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, клиент, телефон, номер авто, размер, место…" />
       <label class="check"><input type="checkbox" checked=${all} onChange=${(e) => setAll(e.target.checked)} />Показать выданные</label></div></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Номер</th><th>Клиент</th><th>Авто</th><th>Что</th><th class="r">Шт.</th><th>Место</th><th>Принято</th><th>До / выдано</th><th class="r">Сумма</th><th class="r">Оплачено</th><th></th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="stor">
+      <thead><tr><th data-c="number">Номер</th><th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="what">Что</th><th data-c="qty" class="r">Шт.</th><th data-c="place">Место</th><th data-c="from">Принято</th><th data-c="until">До / выдано</th><th data-c="total" class="r">Сумма</th><th data-c="paid" class="r">Оплачено</th><th></th></tr></thead>
       <tbody>${rows.map((s) => {
         const due = storageDue(s), left = Math.round((due - (s.paid || 0)) * 100) / 100;
         return html`<tr class="click" onClick=${() => setEdit(s)} style=${s.date_out ? 'opacity:.5' : ''}>

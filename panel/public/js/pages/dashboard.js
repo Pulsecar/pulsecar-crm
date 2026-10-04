@@ -8,21 +8,26 @@ export default function Dashboard() {
   const inWork = d.byStatus.reduce((s, x) => s + x.n, 0);
   return html`
     <div class="page-head"><h1>Добрый день, ${app.user.name.split(' ')[0]}</h1>
-      <div class="actions"><a class="btn" href="#/calendar"><${Icon} n="cal" />Терминарз</a><a class="btn primary" href="#/orders/new"><${Icon} n="plus" />Новый заказ</a></div></div>
+      <div class="actions"><a class="btn" data-ui="dash.btn.calendar" href="#/calendar"><${Icon} n="cal" />Терминарз</a><a class="btn primary" data-ui="dash.btn.neworder" href="#/orders/new"><${Icon} n="plus" />Новый заказ</a></div></div>
 
     <div class="grid g4" style="margin-bottom:14px">
-      <div class="stat accent"><b>${zl(d.revenue.today)}</b><span>Поступило сегодня</span></div>
-      <div class="stat"><b>${zl(d.revenue.month)}</b><span>Поступило за месяц</span></div>
-      <div class="stat"><b>${num(d.revenue.closedMonth.n)}</b><span>Закрыто заказов за месяц · ${zl(d.revenue.closedMonth.s)}</span></div>
-      <div class="stat"><b>${num(inWork)}</b><span>Заказов в работе</span></div>
+      <div class="stat accent" data-ui="dash.stat.today"><b>${zl(d.revenue.today)}</b><span>Поступило сегодня</span></div>
+      <div class="stat" data-ui="dash.stat.month"><b>${zl(d.revenue.month)}</b><span>Поступило за месяц</span></div>
+      <div class="stat" data-ui="dash.stat.closed"><b>${num(d.revenue.closedMonth.n)}</b><span>Закрыто заказов за месяц · ${zl(d.revenue.closedMonth.s)}</span></div>
+      <div class="stat" data-ui="dash.stat.inwork"><b>${num(inWork)}</b><span>Заказов в работе</span></div>
     </div>
 
-    <div class="status-strip" style="margin-bottom:18px">
+    <div class="status-strip" data-ui="dash.statuses" style="margin-bottom:18px">
       ${d.byStatus.map((s) => html`<a href=${'#/orders?status=' + s.id}><${Badge} color=${s.color}>${s.name}</${Badge}><b>${s.n}</b></a>`)}
     </div>
 
     <div class="grid g2">
-      <div class="card">
+      ${d.mine?.length ? html`<div class="card" data-ui="dash.myorders">
+        <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Мои заказы в работе</h2><span class="badge">${d.mine.length}</span></div>
+        <table class="tbl"><tbody>${d.mine.map((o) => html`<tr class="click" onClick=${() => (location.hash = '#/orders/' + o.id)}>
+          <td><b>${o.number}</b><div class="sub">${o.customer_name || ''}</div></td><td>${carName(o)} ${o.plate ? html`<span class="plate">${o.plate}</span>` : ''}</td>
+          <td><${Badge} color=${o.status_color}>${o.status_name}</${Badge}>${o.pickup_at ? html`<div class="sub">выдача <span>${o.pickup_at.slice(0, 16)}</span></div>` : ''}</td></tr>`)}</tbody></table></div>` : ''}
+      <div class="card" data-ui="dash.calendar">
         <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Сегодня в терминарзе</h2><a class="btn sm" style="margin-left:auto" href="#/calendar">Открыть</a></div>
         ${d.todayAppointments.length ? html`<table class="tbl"><tbody>${d.todayAppointments.map((a) => html`
           <tr class="click" onClick=${() => (location.hash = a.order_id ? '#/orders/' + a.order_id : '#/calendar')}>
@@ -32,7 +37,7 @@ export default function Dashboard() {
           : html`<div class="empty">На сегодня записей нет</div>`}
       </div>
 
-      <div class="card">
+      <div class="card" data-ui="dash.requests">
         <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Новые заявки</h2>${d.requests.length ? html`<span class="badge" style="background:var(--warn);color:#000">${d.requests.length}</span>` : ''}
           <a class="btn sm" style="margin-left:auto" href="#/calendar">Распределить</a></div>
         ${d.requests.length ? html`<table class="tbl"><tbody>${d.requests.map((a) => html`
@@ -43,7 +48,7 @@ export default function Dashboard() {
           : html`<div class="empty">Заявок нет — сюда попадают записи из приложения</div>`}
       </div>
 
-      <div class="card">
+      <div class="card" data-ui="dash.unpaid">
         <h2>Завершены, но не оплачены</h2>
         ${d.unpaid.length ? html`<table class="tbl"><tbody>${d.unpaid.map((o) => html`
           <tr class="click" onClick=${() => (location.hash = '#/orders/' + o.id)}><td><b>${o.number}</b><div class="sub">${o.customer_name || ''}</div></td>
@@ -51,7 +56,7 @@ export default function Dashboard() {
           : html`<div class="empty">Всё оплачено</div>`}
       </div>
 
-      <div class="card">
+      <div class="card" data-ui="dash.attention">
         <h2>Требует внимания</h2>
         ${!d.lowStock.length && !d.storageDue.length ? html`<div class="empty">Всё в порядке</div>` : ''}
         ${d.lowStock.length ? html`<h3>Заканчивается на складе</h3><table class="tbl"><tbody>${d.lowStock.map((p) => html`

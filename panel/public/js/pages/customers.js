@@ -22,8 +22,8 @@ export function CustomersList() {
     <div class="page-head"><h1>Клиенты</h1><span class="muted">${data ? num(data.total) : ''}</span>
       <div class="actions"><a class="btn primary" href="#/customers/new"><${Icon} n="plus" />Новый клиент</a></div></div>
     <div class="card" style="margin-bottom:12px"><input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Имя, телефон, номер авто, VIN, NIP, e-mail, карта PC…" aria-label="Поиск клиентов" /></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Данные клиента</th><th>NIP</th><th>Телефон</th><th>E-mail</th><th>Адрес</th><th>Авто</th><th class="r">Заказов</th><th>Приложение</th><th>Согласие</th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="customers">
+      <thead><tr><th data-c="name">Данные клиента</th><th data-c="nip">NIP</th><th data-c="phone">Телефон</th><th data-c="email">E-mail</th><th data-c="address">Адрес</th><th data-c="cars">Авто</th><th data-c="orders" class="r">Заказов</th><th data-c="app">Приложение</th><th data-c="consent">Согласие</th></tr></thead>
       <tbody>${(data?.rows || []).map((c) => html`<tr class="click" onClick=${() => go('/customers/' + c.id)}>
         <td><b>${c.kind === 'company' && c.company ? c.company : c.name || '—'}</b>${c.kind === 'company' && c.company && c.name && c.name !== c.company ? html`<div class="sub">${c.name}</div>` : ''}</td>
         <td class="nowrap sub">${c.nip || ''}</td><td class="nowrap">${c.phone || ''}</td><td class="sub">${c.email || ''}</td>

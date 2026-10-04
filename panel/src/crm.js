@@ -110,6 +110,7 @@ crm.get('/me', (req, res) => {
   res.json({
     user: { id: s.id, name: s.name, role: s.role, login: s.login, phone: s.phone, email: s.email, last_login: s.last_login },
     perms: permsOf(s),
+    ui: uiOf(s),
     ...lists(),
     settings: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])),
     loyalty: loyaltySummary(0).rules,
@@ -120,12 +121,21 @@ crm.get('/me', (req, res) => {
   });
 });
 
+/** Скрытые элементы интерфейса сотрудника (Сотрудники → Интерфейс) */
+function uiOf(s) {
+  const r = one('SELECT ui FROM staff WHERE id = ?', s.id);
+  try { const v = JSON.parse(r?.ui || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; }
+}
+
 // ── Главная ────────────────────────────────────────────────────────────────
 crm.get('/dashboard', (req, res) => {
-  who(req);
+  const me = who(req);
   const d = today();
   const month = d.slice(0, 7);
   res.json({
+    mine: all(`SELECT o.id, o.number, o.pickup_at, st.name status_name, st.color status_color, c.name customer_name, k.make, k.model, k.plate FROM orders o
+      JOIN order_statuses st ON st.id = o.status_id LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id
+      WHERE o.kind = 'order' AND st.is_final = 0 AND (o.mechanic_id = ? OR o.id IN (SELECT order_id FROM order_items WHERE mechanic_id = ?)) ORDER BY o.id DESC LIMIT 20`, me.id, me.id),
     byStatus: all(`SELECT st.id, st.name, st.color, COUNT(o.id) n FROM order_statuses st LEFT JOIN orders o ON o.status_id = st.id AND o.kind = 'order'
       WHERE st.is_final = 0 GROUP BY st.id ORDER BY st.pos`),
     todayAppointments: all(`SELECT a.*, st.name station_name, c.name customer_name, k.make, k.model, k.plate, o.number order_number
@@ -1481,8 +1491,8 @@ crm.delete('/dict/:name/:id', (req, res) => {
 crm.get('/staff', (req, res) => {
   who(req, 'settings.manage');
   res.json({
-    rows: all('SELECT id, login, name, role, color, hourly_rate, commission_pct, parts_pct, pay_mode, pay_base, is_mechanic, active, phone, email, last_login, permissions, stations, (pass_hash IS NOT NULL) has_password FROM staff ORDER BY active DESC, name')
-      .map((r) => ({ ...r, permissions: r.permissions ? JSON.parse(r.permissions) : {}, stations: r.stations ? JSON.parse(r.stations) : [], effective: permsOf(r) })),
+    rows: all('SELECT id, login, name, role, color, hourly_rate, commission_pct, parts_pct, pay_mode, pay_base, is_mechanic, active, phone, email, last_login, permissions, stations, ui, (pass_hash IS NOT NULL) has_password FROM staff ORDER BY active DESC, name')
+      .map((r) => ({ ...r, permissions: r.permissions ? JSON.parse(r.permissions) : {}, stations: r.stations ? JSON.parse(r.stations) : [], ui: r.ui ? JSON.parse(r.ui) : [], effective: permsOf(r) })),
     groups: PERM_GROUPS, presets: PRESETS,
   });
 });
@@ -1498,6 +1508,7 @@ crm.post('/staff', (req, res) => {
     phone: b.phone ?? undefined, email: b.email ?? undefined,
     permissions: b.permissions !== undefined ? JSON.stringify(b.permissions || {}) : undefined,
     stations: b.stations !== undefined ? JSON.stringify(b.stations || []) : undefined,
+    ui: Array.isArray(b.ui) ? JSON.stringify([...new Set(b.ui.filter((x) => typeof x === 'string' && x.length < 60))].slice(0, 500)) : undefined,
   };
   if (b.revoke) { d.login = null; d.pass_hash = null; }
   if (d.login && one('SELECT 1 FROM staff WHERE login = ? AND id <> ?', d.login, Number(b.id) || 0)) throw new HttpError(409, 'Такой логин уже есть');

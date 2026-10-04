@@ -19,6 +19,7 @@ import Search from './pages/search.js';
 import Sms from './pages/sms.js';
 import { ClipPage } from './pages/suppliers.js';
 import { initI18n, LangSwitch } from './i18n.js';
+import { applyUi } from './ui.js';
 import { MyAccount, Reminders, Changelog, ScreenSettings, applyScreen, isDark, setTheme } from './pages/account.js';
 
 const NAV = [
@@ -114,7 +115,7 @@ function UserMenu({ app }) {
       ${groups.map((g) => html`${g.map(item)}<div class="um-sep"></div>`)}
       <label class="um-item um-row"><${Icon} n="moon" /><span class="grow">Тёмный режим</span>
         <span class="toggle"><input type="checkbox" checked=${dark} onChange=${(e) => { setDark(e.target.checked); setTheme(e.target.checked); }} /><i></i></span></label>
-      <div class="um-item um-row"><${Icon} n="globe" /><span class="grow">Язык</span><${LangSwitch} html=${html} compact /></div>
+      <div class="um-item um-row" data-ui="top.lang"><${Icon} n="globe" /><span class="grow">Язык</span><${LangSwitch} html=${html} compact /></div>
       <div class="um-sep"></div>
       <button class="um-item" onClick=${async () => { await api('logout', { body: {} }).catch(() => {}); location.reload(); }}><${Icon} n="logout" />Выйти</button>
     </div>`}
@@ -193,18 +194,18 @@ function Shell({ app }) {
       <button class="side-toggle" onClick=${toggleMini} title=${mini ? 'Развернуть меню' : 'Свернуть меню'} aria-label=${mini ? 'Развернуть меню' : 'Свернуть меню'}><${Icon} n=${mini ? 'right' : 'left'} /></button>
       <a class="brand" href="#/" title="На главную" onClick=${() => setMenu(false)}><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar — на главную" /></a>
       ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
-        <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label}>
+        <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label} data-ui=${'menu.' + (n.to.slice(1) || 'home')}>
           <${Icon} n=${n.icon} /><span class="nl">${n.label}</span>${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}
       <div class="nav-foot">${app.settings.company_brand || 'Pulsecar'}</div>
     </aside>
     <div class="main">
       <div class="top">
         <button class="icon-btn burger" onClick=${() => setMenu(!menu)} aria-label="Меню"><${Icon} n="menu" /></button>
-        <form class="search" onSubmit=${(e) => { e.preventDefault(); if (q.trim()) go('/search?q=' + encodeURIComponent(q.trim())); }}>
+        <form class="search" data-ui="top.search" onSubmit=${(e) => { e.preventDefault(); if (q.trim()) go('/search?q=' + encodeURIComponent(q.trim())); }}>
           <input type="search" placeholder="Поиск: клиент, телефон, номер авто, VIN, заказ…" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Поиск" />
         </form>
-        <a class="btn primary" href="#/orders/new"><${Icon} n="plus" />Заказ</a>
-        <${Balances} app=${app} />
+        <a class="btn primary" data-ui="top.neworder" href="#/orders/new"><${Icon} n="plus" />Заказ</a>
+        <span data-ui="top.balances" style="display:contents"><${Balances} app=${app} /></span>
         <${UserMenu} app=${app} />
       </div>
       <main class="content">${page}</main>
@@ -215,7 +216,7 @@ function Shell({ app }) {
 
 function Root() {
   const [app, setApp] = useState(undefined);
-  const load = () => api('me').then((me) => setApp({ ...me, reload: load }), () => setApp(null));
+  const load = () => api('me').then((me) => { applyUi(me.ui); setApp({ ...me, reload: load }); }, () => setApp(null));
   useEffect(() => {
     load();
     const out = () => setApp(null);

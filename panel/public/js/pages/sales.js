@@ -40,8 +40,8 @@ export default function Sales() {
       <label class="f" style="width:150px">С<input type="date" value=${from} onInput=${(e) => setFrom(e.target.value)} /></label>
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
       <button class="btn sm" onClick=${() => { setFrom(t); setTo(t); }}>Сегодня</button></div></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Документ</th><th>Дата</th><th>Покупатель</th><th>Заказ</th><th>Оплата</th><th class="r">Нетто</th><th class="r">Брутто</th><th>Статус</th><th></th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="sales">
+      <thead><tr><th data-c="doc">Документ</th><th data-c="date">Дата</th><th data-c="buyer">Покупатель</th><th data-c="order">Заказ</th><th data-c="pay">Оплата</th><th data-c="net" class="r">Нетто</th><th data-c="gross" class="r">Брутто</th><th data-c="status">Статус</th><th></th></tr></thead>
       <tbody>${(data?.rows || []).map((r) => {
         const st = r.type === 'receipt' ? RS[r.receipt_status] : r.type !== 'proforma' ? KS[r.ksef_status] : null;
         const link = r.type === 'receipt' ? (r.order_id ? '#/orders/' + r.order_id : null) : '#/sales/' + r.id;

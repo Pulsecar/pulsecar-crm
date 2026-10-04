@@ -336,6 +336,11 @@ try {
     ok(await req(`/crm-api/staff/${mech.id}/active`, { body: { active: true } }), 'staff on');
   }
   const me0 = stl.rows.find((x) => x.login === 'admin');
+  // интерфейс сотрудника: скрытые элементы сохраняются и приходят в /me
+  ok(await req('/crm-api/staff', { body: { ...me0, effective: undefined, password: '', ui: ['dash.unpaid', 'orders.paid', 'orders.paid', 42] } }), 'save ui');
+  assert.deepEqual(ok(await req('/crm-api/me'), 'me ui').ui, ['dash.unpaid', 'orders.paid']);
+  assert.ok(Array.isArray(ok(await req('/crm-api/dashboard'), 'dash').mine));
+  ok(await req('/crm-api/staff', { body: { ...me0, effective: undefined, password: '', ui: [] } }), 'reset ui');
   assert.equal((await req(`/crm-api/staff/${me0.id}/active`, { body: { active: false } })).status, 400);
   // фактура без заказа (без KSeF): можно открыть, изменить, авто сохраняется в CRM
   const fi = ok(await req('/crm-api/sales-docs', { body: { kind: 'vat', buyer: { name: 'Jan Kowalski' }, payment_method: 'card', paid: true, save_car: true,

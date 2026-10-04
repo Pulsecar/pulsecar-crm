@@ -17,8 +17,8 @@ export default function Purchases() {
       <div class="card small muted">Фактуры поставщиков можно будет подтягивать из KSeF автоматически, когда подключим интеграцию. Пока — вручную.</div>
     </div>
     <div class="card" style="margin-bottom:12px"><input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Поставщик, номер, категория…" /></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Дата</th><th>Номер</th><th>Поставщик</th><th>Категория</th><th>Срок оплаты</th><th class="r">Нетто</th><th class="r">Брутто</th><th class="r">Оплачено</th><th></th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="purch">
+      <thead><tr><th data-c="date">Дата</th><th data-c="number">Номер</th><th data-c="supplier">Поставщик</th><th data-c="cat">Категория</th><th data-c="due">Срок оплаты</th><th data-c="net" class="r">Нетто</th><th data-c="gross" class="r">Брутто</th><th data-c="paid" class="r">Оплачено</th><th></th></tr></thead>
       <tbody>${(data?.rows || []).map((p) => html`<tr class="click" onClick=${() => setEdit(p)}>
         <td class="nowrap">${fdate(p.doc_date)}</td><td>${p.number || ''}</td><td><b>${p.supplier}</b><div class="sub">${p.description || ''}</div></td><td class="sub">${p.category || ''}</td>
         <td class=${'nowrap ' + (p.paid < p.gross && p.due_date && p.due_date < todayStr() ? 'neg' : '')}>${fdate(p.due_date)}</td>

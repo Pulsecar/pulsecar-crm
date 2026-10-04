@@ -1,5 +1,6 @@
 // Настройки как в Motowarsztat: параметры, нумерация, сотрудники и доступы, прайс работ, шаблоны заказов, чек-листы, справочники
 import { html, useState, useData, api, act, useApp, Loading, ErrorBox, Icon, Modal, ConfirmButton, Badge, zl, num, fdt, toast } from '../lib.js';
+import { UI_GROUPS, UI_PRESETS, applyUi } from '../ui.js';
 
 // ── Параметры (строятся по описанию с сервера) ─────────────────────────────
 const DAYS = [[1, 'Пн'], [2, 'Вт'], [3, 'Ср'], [4, 'Чт'], [5, 'Пт'], [6, 'Сб'], [0, 'Вс']];
@@ -60,6 +61,37 @@ export function Numbering() {
   </div>`;
 }
 
+
+// ── Интерфейс сотрудника: что он видит (виджеты главной, меню, кнопки, вкладки, колонки) ──
+function UiEditor({ edit, setEdit, others }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const hid = new Set(edit.ui || []);
+  const set = (keys, show) => { const h = new Set(hid); keys.forEach((k) => (show ? h.delete(k) : h.add(k))); setEdit({ ...edit, ui: [...h] }); };
+  const total = UI_GROUPS.reduce((n, [, l]) => n + l.length, 0);
+  const ql = q.trim().toLowerCase();
+  return html`<div class="card" style="background:var(--surface2);margin-top:12px">
+    <div class="row"><b>Интерфейс — что видит на экране</b><span class="muted small">${hid.size ? html`скрыто <b>${hid.size}</b> / ${total}` : 'видно всё'}</span>
+      <button class="btn sm" style="margin-left:auto" onClick=${() => setOpen(!open)}><${Icon} n=${open ? 'up' : 'down'} />${open ? 'Свернуть' : 'Настроить'}</button></div>
+    <div class="muted small" style="margin-top:4px">Права выше решают, что сотрудник может делать. Здесь — какие плитки главной, пункты меню, кнопки, вкладки и колонки таблиц он видит. Снимите галочку — элемент пропадёт у него с экрана.</div>
+    ${open && html`<div style="margin-top:10px">
+      <div class="row wrap" style="gap:6px">
+        <span class="muted small">Готовые наборы:</span>
+        ${Object.entries(UI_PRESETS).map(([l, list]) => html`<button class="btn sm soft" onClick=${() => setEdit({ ...edit, ui: [...list] })}>${l}</button>`)}
+        ${others.length ? html`<select class="sm" style="width:auto" value="" onChange=${(e) => { const o = others.find((x) => String(x.id) === e.target.value); if (o) setEdit({ ...edit, ui: [...(o.ui || [])] }); }}>
+          <option value="">Скопировать у сотрудника…</option>${others.map((o) => html`<option value=${o.id}>${o.name}</option>`)}</select>` : ''}
+        <input type="search" style="width:200px;margin-left:auto" placeholder="Найти элемент…" value=${q} onInput=${(e) => setQ(e.target.value)} />
+      </div>
+      <div class="perm-grid" style="margin-top:10px">${UI_GROUPS.map(([g, list]) => {
+        const rows = list.filter(([k, l]) => !ql || l.toLowerCase().includes(ql) || g.toLowerCase().includes(ql));
+        if (!rows.length) return '';
+        const allOn = rows.every(([k]) => !hid.has(k));
+        return html`<div class="perm-group"><div class="row"><b>${g}</b><button class="btn ghost sm" style="margin-left:auto" onClick=${() => set(rows.map(([k]) => k), !allOn)}>${allOn ? 'Скрыть все' : 'Показать все'}</button></div>
+          ${rows.map(([k, l]) => html`<label class="check small"><input type="checkbox" checked=${!hid.has(k)} onChange=${(e) => set([k], e.target.checked)} />${l}</label>`)}</div>`;
+      })}</div></div>`}
+  </div>`;
+}
+
 // ── Сотрудники и доступы ────────────────────────────────────────────────────
 const ROLE = { admin: 'Администратор', staff: 'Приёмщик / менеджер', mechanic: 'Механик' };
 export function StaffAccess() {
@@ -74,8 +106,9 @@ export function StaffAccess() {
     delete body.effective;
     await act(() => api('staff', { body }), 'Сохранено');
     setEdit(null); reload(); app.reload();
+    if (edit.id === app.user.id) applyUi(body.ui);
   };
-  const newStaff = () => setEdit({ role: 'mechanic', is_mechanic: 1, commission_pct: 40, hourly_rate: 250, pay_mode: 'pct', pay_base: 'net', parts_pct: 0, active: 1, permissions: {}, stations: [], password: '' });
+  const newStaff = () => setEdit({ role: 'mechanic', is_mechanic: 1, commission_pct: 40, hourly_rate: 250, pay_mode: 'pct', pay_base: 'net', parts_pct: 0, active: 1, permissions: {}, stations: [], ui: [], password: '' });
   return html`<div class="card tight">
     <div class="row" style="padding:12px 14px"><span class="muted small">Выдайте каждому сотруднику свой логин и пароль. Права задаются ролью и уточняются галочками — как в Motowarsztat.</span>
       <button class="btn primary sm" style="margin-left:auto" onClick=${newStaff}><${Icon} n="plus" />Сотрудник</button></div>
@@ -118,6 +151,7 @@ export function StaffAccess() {
         })}</div>`)}</div>
         ${app.stations.length ? html`<label class="f" style="margin-top:10px">Посты, которые видит в терминарзе (пусто — все)</label>
           <div class="row">${app.stations.map((st) => html`<label class="check small"><input type="checkbox" checked=${(edit.stations || []).includes(st.id)} onChange=${(e) => setEdit({ ...edit, stations: e.target.checked ? [...(edit.stations || []), st.id] : (edit.stations || []).filter((x) => x !== st.id) })} />${st.name}</label>`)}</div>` : ''}`}
+      <${UiEditor} edit=${edit} setEdit=${setEdit} others=${data.rows.filter((r) => r.id !== edit.id && r.ui?.length)} />
     </${Modal}>`}
   </div>`;
 }

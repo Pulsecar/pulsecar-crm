@@ -39,8 +39,8 @@ function Products({ openId }) {
       <button class="btn" onClick=${() => setEdit({})}><${Icon} n="plus" />Товар</button>
       ${data && html`<span class="muted small">Склад по закупке: <b>${zl(data.stockValue)}</b> нетто</span>`}
     </div></div>
-    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Товар</th><th>Индекс</th><th>Производитель</th><th class="r">Остаток</th><th class="r">В резерве</th><th class="r">Доступно</th><th class="r">Закупка нетто</th><th class="r">Продажа брутто</th><th>Место</th></tr></thead>
+    ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="stock">
+      <thead><tr><th data-c="name">Товар</th><th data-c="code">Индекс</th><th data-c="brand">Производитель</th><th data-c="qty" class="r">Остаток</th><th data-c="reserved" class="r">В резерве</th><th data-c="free" class="r">Доступно</th><th data-c="buy" class="r">Закупка нетто</th><th data-c="sell" class="r">Продажа брутто</th><th data-c="place">Место</th></tr></thead>
       <tbody>${(data?.rows || []).map((p) => {
         const avail = p.stock - p.reserved;
         return html`<tr class="click" onClick=${() => setOpen(p.id)}>

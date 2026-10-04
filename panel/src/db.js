@@ -353,6 +353,7 @@ CREATE TABLE IF NOT EXISTS integration_log (
 function addColumn(table, col, def) {
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }
+addColumn('staff', 'ui', 'TEXT');                // что сотрудник видит на экране: JSON-список скрытых элементов
 addColumn('products', 'supplier_sku', 'TEXT');       // SKU Inter Cars (например ADDFFF)
 addColumn('products', 'ean', 'TEXT');
 addColumn('products', 'supplier', 'TEXT');
