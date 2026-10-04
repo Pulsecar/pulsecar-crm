@@ -341,7 +341,7 @@ function custData(b) {
   }
   return o;
 }
-function createCustomer(b) {
+export function createCustomer(b) {
   const d = custData(b);
   if (!d.name && !d.phone) throw new HttpError(400, 'Нужно имя или телефон');
   if (d.phone && one('SELECT 1 FROM customers WHERE phone = ?', d.phone)) throw new HttpError(409, 'Клиент с таким телефоном уже есть');
@@ -412,7 +412,7 @@ function carData(b) {
   }
   return o;
 }
-function createCar(b) {
+export function createCar(b) {
   const d = carData(b);
   if (!d.plate && !d.vin && !d.make) throw new HttpError(400, 'Укажите номер, VIN или марку');
   return insert('cars', { ...d, car_key: normVin(d.vin) || d.plate || `ID${Date.now()}` });
@@ -484,7 +484,7 @@ function assertAssigned(me, o) {
 }
 
 /** Авто без владельца (или только что созданные) привязываем к клиенту заказа / выцены; первое авто клиента — «по умолчанию» */
-function linkCar(carId, customerId) {
+export function linkCar(carId, customerId) {
   if (!carId || !customerId) return;
   run('UPDATE cars SET customer_id = ? WHERE id = ? AND customer_id IS NULL', customerId, carId);
   run('UPDATE customers SET default_car_id = ? WHERE id = ? AND default_car_id IS NULL AND EXISTS (SELECT 1 FROM cars WHERE id = ? AND customer_id = ?)', carId, customerId, carId, customerId);

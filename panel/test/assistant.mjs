@@ -26,6 +26,7 @@ const mock = createServer(async (req, res) => {
     const r = JSON.parse(last.content[0].content);
     if (r.days) {
       const user = [...b.messages].reverse().find((m) => typeof m.content === 'string').content;
+      if (/bookvin/.test(user)) return tool('create_booking', { name: 'Jan Test', phone: '+48 600-100-200', car: 'VW', vin: 'WVWZZZ1KZAW000001', problem: 'olej', quoted_price: '50–150 zł', slot: `${r.days[0].date} ${r.days[0].times[1]}`, consent: true });
       if (/book/.test(user)) return tool('create_booking', { name: 'Jan Test', phone: '600 100 200', car: 'Skoda Octavia 2016', plate: 'WX 12345', problem: 'stuk z przodu', quoted_price: 'od 10 zł', slot: `${r.days[0].date} ${r.days[0].times[0]}`, consent: true });
       return text('SLOTS ' + JSON.stringify(r.days));
     }
@@ -34,7 +35,8 @@ const mock = createServer(async (req, res) => {
   if (/price\+slots/.test(last.content)) return json(200, { content: [{ type: 'text', text: 'Diagnostyka od 100 zł.' }, { type: 'tool_use', id: 'tu_ps', name: 'get_available_slots', input: { days: 2 } }], stop_reason: 'tool_use' });
   if (/book|slots/.test(last.content)) return tool('get_available_slots', { days: 7 });
   if (/human/.test(last.content)) return tool('request_human', { name: 'Ola', phone: '+48 500 200 300', topic: 'laweta' });
-  if (/noconsent/.test(last.content)) return tool('create_booking', { name: 'A', phone: '600100200', car: 'x', problem: 'y', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: false });
+  if (/noplate/.test(last.content)) return tool('create_booking', { name: 'B', phone: '600100201', car: 'Opel', problem: 'check', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: true });
+  if (/noconsent/.test(last.content)) return tool('create_booking', { name: 'A', phone: '600100200', car: 'x', plate: 'WA1', problem: 'y', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: false });
   return text('Dzień dobry!');
 });
 await new Promise((r) => mock.listen(MOCK, r));
@@ -124,6 +126,26 @@ try {
   assert.match(smsLog, /podtverzhdaem vizit - diagnostika/, 'SMS-подтверждение на языке клиента в журнале SMS');
   const sysB = seen.find((x) => x.system)?.system[0].text;
   assert.match(sysB, /DIAGNOSTICS/); assert.match(sysB, /50–150 zł/); assert.match(sysB, /od 30 zł/);
+  assert.ok(a.order_id, 'запись связана со злецением'); assert.ok(a.customer_id && a.car_id, 'запись связана с клиентом и авто');
+  assert.match(j.booking.order_number, /^ZL /);
+  const ord = (await req('/crm-api/orders/' + a.order_id)).j;
+  const o = ord.order || ord;
+  assert.equal(o.source, 'chat'); assert.match(o.complaint, /stuk z przodu/); assert.equal(o.customer_id, a.customer_id); assert.equal(o.car_id, a.car_id);
+  const items = ord.items || o.items || [];
+  assert.ok(items.some((i) => /^Diagnostyka/.test(i.name)), 'в злецении позиция «Diagnostyka»');
+  const cust = (await req('/crm-api/customers/' + a.customer_id)).j;
+  const cu = cust.customer || cust;
+  assert.equal(cu.name, 'Jan Test'); assert.equal(cu.phone, '+48600100200');
+  assert.ok(JSON.stringify(cust).includes('WX12345'), 'авто WX12345 в карточке клиента');
+  console.log('✓ запись → клиент + авто + злецение', j.booking.order_number);
+  const j2 = await (await chat('please bookvin', sid)).json();
+  assert.ok(j2.booking?.ok, JSON.stringify(j2));
+  const a2 = (await req(`/crm-api/appointments?from=${days[0].date}&to=${days[0].date}`)).j.unassigned.find((x) => x.id === j2.booking.booking_id);
+  assert.equal(a2.customer_id, a.customer_id, 'тот же клиент по телефону — без дубля');
+  assert.notEqual(a2.car_id, a.car_id, 'второе авто клиента по VIN');
+  const cust2 = JSON.stringify((await req('/crm-api/customers/' + a.customer_id)).j);
+  assert.ok(cust2.includes('WVWZZZ1KZAW000001') && cust2.includes('Volkswagen'), 'VIN расшифрован в марку');
+  console.log('✓ повторный клиент без дубля, авто по VIN с маркой');
   console.log('✓ запись → Терминарз «Не распределено»', first);
 
   // ёмкость 1: окно занято → больше не предлагается; повторная запись на то же время — отказ
@@ -145,6 +167,9 @@ try {
   j = await (await chat('price+slots', sid)).json();
   assert.match(j.reply, /^Diagnostyka od 100 zł\.\n\nSLOTS /);
   console.log('✓ ответ из нескольких частей (цена + окна)');
+  // без номера и VIN записи нет
+  j = await (await chat('noplate', sid)).json();
+  assert.match(j.reply, /plate_or_vin_required/);
   // согласие обязательно
   j = await (await chat('noconsent', sid)).json();
   assert.match(j.reply, /consent_required/);
