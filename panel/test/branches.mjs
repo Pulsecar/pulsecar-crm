@@ -64,6 +64,15 @@ try {
   assert.equal((await M('/crm-api/login', { body: { login: 'mechmk', password: 'mechmk-pass' } })).status, 401);
   ok(await A('/crm-api/branches/MK', { method: 'PUT', body: { active: true, name: 'Mokotów 2' } }), 'on + rename');
   assert.equal(ok(await A('/crm-api/branches'), 'list').rows.find((b) => b.code === 'MK').name, 'Mokotów 2');
+  // данные сервиса: владелец меняет без переключения; реквизиты фирмы — во все сервисы
+  let st = ok(await A('/crm-api/branches/MK/settings'), 'settings MK');
+  assert.equal(st.code, 'MK'); assert.ok('company_phone' in st.service && 'company_nip' in st.firm);
+  ok(await A('/crm-api/branches/MK/settings', { method: 'PUT', body: { name: 'Mokotów 3', service: { company_address: 'ul. Puławska 1, Warszawa', company_phone: '+48 500 000 001' }, firm: { company_nip: '5214141930', company_street: 'Arkuszowa 176', company_postcode: '01-934', company_city: 'Warszawa' }, firmToAll: true } }), 'save settings');
+  st = ok(await A('/crm-api/branches/MK/settings'), 'settings MK 2');
+  assert.equal(st.name, 'Mokotów 3'); assert.equal(st.service.company_phone, '+48 500 000 001'); assert.equal(st.address, 'ul. Puławska 1, Warszawa');
+  assert.equal(ok(await A('/crm-api/branches/main/settings'), 'main st').firm.company_street, 'Arkuszowa 176', 'реквизиты фирмы — во всех сервисах');
+  assert.notEqual(ok(await A('/crm-api/branches/main/settings'), 'main st2').service.company_phone, '+48 500 000 001', 'телефон сервиса — только у него');
+  assert.ok([401, 403].includes((await M('/crm-api/branches/MK/settings')).status), 'не владелец — нельзя');
   console.log('✓ сервисы: отдельные базы, нумерация с кодом, карта /k/КОД~, переключение владельца, общий дашборд, сотрудник филиала, отключение');
   console.log('\nВСЕ ПРОВЕРКИ СЕРВИСОВ ПРОЙДЕНЫ');
 } catch (e) {

@@ -15,7 +15,13 @@ mainDb.exec(`CREATE TABLE IF NOT EXISTS branches (
 )`);
 
 export const MAIN = 'main';
+// данные сервиса (у каждого свои) и реквизиты фирмы (одна фирма — обычно одинаковые во всех сервисах)
+export const SERVICE_KEYS = ['company_brand', 'company_address', 'company_phone', 'company_email', 'company_www', 'company_bank', 'company_bank_name',
+  'hours_start', 'hours_end', 'slot_min', 'review_url', 'order_terms'];
+export const FIRM_KEYS = ['company_nip', 'company_vat_eu', 'company_legal_name', 'company_name', 'company_street', 'company_postcode', 'company_city',
+  'company_regon', 'company_krs', 'company_bdo', 'company_capital', 'company_court', 'company_pkd', 'company_swift'];
 const opened = new Map();          // code → DatabaseSync
+const idle = new Map();         // отключённые сервисы, открытые только для правки данных
 const codeOf = new WeakMap();      // DatabaseSync → code
 codeOf.set(mainDb, MAIN);
 
@@ -25,7 +31,8 @@ const mainName = () => mainDb.prepare(`SELECT value FROM settings WHERE key = 'b
 
 /** Все сервисы: главный + филиалы */
 export function listBranches({ withInactive = false } = {}) {
-  return [{ code: MAIN, name: mainName(), address: null, active: 1, main: true },
+  const mainAddr = mainDb.prepare(`SELECT value FROM settings WHERE key = 'company_address'`).get()?.value || null;
+  return [{ code: MAIN, name: mainName(), address: mainAddr, active: 1, main: true },
     ...rows().filter((b) => withInactive || b.active).map((b) => ({ code: b.code, name: b.name, address: b.address, active: b.active, main: false, created_at: b.created_at }))];
 }
 
@@ -122,4 +129,32 @@ export function ownerIn(code, owner) {
     d.prepare(`UPDATE staff SET name = ?, role = 'admin', active = 1 WHERE id = ?`).run(owner.name, id);
   }
   return id;
+}
+
+const setIn = (d, k, v) => d.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, String(v ?? ''));
+const getIn = (d, k) => d.prepare('SELECT value FROM settings WHERE key = ?').get(k)?.value ?? '';
+
+/** Данные сервиса для окна «Изменить сервис» (сервис может быть и отключён) */
+export function branchSettings(code) {
+  const b = listBranches({ withInactive: true }).find((x) => x.code === code);
+  if (!b) throw new HttpError(404, 'Сервис не найден');
+  let d = code === MAIN ? mainDb : opened.get(code);
+  if (!d) d = branchDb(code) || idle.get(code);
+  if (!d) { const r = mainDb.prepare('SELECT * FROM branches WHERE code = ?').get(code); d = openDb(join(dirname(config.dbPath), r.file), [initAudit]); idle.set(code, d); codeOf.set(d, code); }
+  return { ...b, service: Object.fromEntries(SERVICE_KEYS.map((k) => [k, getIn(d, k)])), firm: Object.fromEntries(FIRM_KEYS.map((k) => [k, getIn(d, k)])), db: d };
+}
+
+/** Сохранить данные сервиса; firmToAll — реквизиты фирмы записать во все сервисы */
+export function saveBranchSettings(code, { name, service = {}, firm = {}, firmToAll = false }) {
+  const cur = branchSettings(code);
+  if (name !== undefined && String(name).trim()) updateBranch(code, { name: String(name).trim() });
+  for (const k of SERVICE_KEYS) if (service[k] !== undefined) setIn(cur.db, k, String(service[k]).slice(0, 4000));
+  if (service.company_address !== undefined && code !== MAIN) mainDb.prepare('UPDATE branches SET address = ? WHERE code = ?').run(String(service.company_address).slice(0, 200) || null, code);
+  const targets = firmToAll ? [mainDb, ...rows().map((r) => r.code === code ? cur.db : branchSettings(r.code).db)] : [cur.db];
+  for (const d of targets) {
+    for (const k of FIRM_KEYS) if (firm[k] !== undefined) setIn(d, k, String(firm[k]).slice(0, 400));
+    const st = getIn(d, 'company_street'), pc = getIn(d, 'company_postcode'), city = getIn(d, 'company_city');
+    if (st || city) setIn(d, 'company_legal_address', [st, [pc, city].filter(Boolean).join(' ')].filter(Boolean).join(', '));
+  }
+  return { ok: true, updated: targets.length };
 }

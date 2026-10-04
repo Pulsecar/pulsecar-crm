@@ -17,6 +17,7 @@ export default function Owner({ manage: manage0 }) {
   const [preset, setPreset] = useState('month');
   const [[from, to], setRange] = useState(range('month'));
   const [manage, setManage] = useState(!!manage0);
+  const [editB, setEditB] = useState(null);
   const { data, error, loading, reload } = useData(`owner/dashboard?from=${from}&to=${to}`, [from, to]);
   if (!app.owner) return html`<div class="card err">Общий дашборд доступен только владельцу.</div>`;
   if (error) return html`<${ErrorBox} error=${error} />`;
@@ -67,7 +68,7 @@ export default function Owner({ manage: manage0 }) {
         <td class="r num">${num(r.open.n)}<div class="sub">${zl(r.open.s)}</div></td><td class=${'r num' + (r.debt.s > 0.01 ? ' neg' : '')}>${zl(r.debt.s)}<div class="sub">${num(r.debt.n)} заказов</div></td>
         <td class="r num">${zl(r.out + r.purchases)}</td><td class="r num">${num(r.quotes.n)}<div class="sub">${zl(r.quotes.s)}</div></td><td class="r num">${num(r.newCust)}</td>
         <td class="r num">${num(r.visits)}${r.requests ? html`<div class="sub warn">${r.requests} заявок</div>` : ''}</td>
-        <td class="r nowrap"><button class="btn sm" onClick=${() => switchBranch(r.code)}>Открыть</button></td></tr>`)}
+        <td class="r nowrap"><button class="btn sm ghost" title="Изменить данные сервиса" onClick=${() => setEditB(r.code)}><${Icon} n="edit" /></button> <button class="btn sm" onClick=${() => switchBranch(r.code)}>Открыть</button></td></tr>`)}
       </tbody>
       ${rows.length > 1 ? html`<tfoot><tr class="sum-row"><td><b>Итого</b></td><td class="r num"><b>${zl(T.income)}</b></td><td class="r num">${zl(T.todayIncome)}</td><td class="r num">${num(T.closedN)}<div class="sub">${zl(T.closedS)}</div></td>
         <td class="r num">${zl(T.closedN ? T.closedS / T.closedN : 0)}</td><td class="r num">${zl(sum(rows, (r) => r.labor))}</td><td class="r num">${num(T.openN)}</td><td class="r num">${zl(T.debtS)}</td><td class="r num">${zl(T.out + T.purchases)}</td>
@@ -78,6 +79,7 @@ export default function Owner({ manage: manage0 }) {
       <div class="card"><h2>Доля поступлений</h2><${HBars} rows=${rows} value=${(r) => r.income} label=${(r) => r.name} fmt=${(v) => `${zl(v)} · ${num(T.income ? (v / T.income) * 100 : 0, 1)}%`} /></div>
       <div class="card"><h2>Средний чек</h2><${HBars} rows=${rows} value=${(r) => r.avg} label=${(r) => r.name} fmt=${zl} color=${SERIES[2]} /></div>
     </div>` : html`<div class="card muted small">Добавьте второй сервис кнопкой «Сервисы» — здесь появится сравнение сервисов между собой.</div>`}`}
+    ${editB && html`<${BranchEdit} code=${editB} onClose=${(saved) => { setEditB(null); if (saved) reload(); }} />`}
     ${manage && html`<${ManageBranches} onClose=${() => { setManage(false); reload(); app.reload(); }} />`}`;
 }
 
@@ -86,6 +88,7 @@ function ManageBranches({ onClose }) {
   const { data, reload } = useData('branches');
   const [f, setF] = useState({ name: '', code: '', address: '' });
   const [ren, setRen] = useState({});
+  const [edit, setEdit] = useState(null);
   const add = async () => {
     const r = await act(() => api('branches', { body: f }), 'Сервис создан');
     setF({ name: '', code: '', address: '' }); reload();
@@ -100,7 +103,7 @@ function ManageBranches({ onClose }) {
         <td class="small">${b.address || '—'}</td>
         <td class="c">${b.main ? '—' : html`<label class="toggle"><input type="checkbox" checked=${!!b.active} onChange=${async (e) => { await act(() => api('branches/' + b.code, { method: 'PUT', body: { active: e.target.checked } }), e.target.checked ? 'Сервис включён' : 'Сервис отключён — его сотрудники не смогут войти'); reload(); }} /><i></i></label>`}</td>
         <td class="r">${ren[b.code] !== undefined && ren[b.code] !== b.name ? html`<button class="btn sm primary" onClick=${async () => { await act(() => api('branches/' + b.code, { method: 'PUT', body: { name: ren[b.code] } }), 'Сохранено'); setRen({ ...ren, [b.code]: undefined }); reload(); }}>Сохранить</button>`
-          : b.active ? html`<button class="btn sm" onClick=${() => switchBranch(b.code)}>Открыть</button>` : ''}</td></tr>`)}
+          : html`<div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" onClick=${() => setEdit(b.code)}><${Icon} n="edit" />Изменить</button>${b.active ? html`<button class="btn sm" onClick=${() => switchBranch(b.code)}>Открыть</button>` : ''}</div>`}</td></tr>`)}
     </tbody></table>`}
     <div class="card" style="background:var(--surface2);margin-top:14px"><b>Новый сервис</b>
       <div class="grid g3" style="margin-top:6px">
@@ -111,5 +114,43 @@ function ManageBranches({ onClose }) {
       <div class="row" style="margin-top:8px"><span class="muted small">После создания откройте сервис и добавьте в нём сотрудников с их логинами (Сотрудники и доступы).</span>
         <button class="btn primary" style="margin-left:auto" disabled=${!f.name || f.code.length < 2} onClick=${add}><${Icon} n="plus" />Создать сервис</button></div>
     </div>
+    ${edit && html`<${BranchEdit} code=${edit} onClose=${(saved) => { setEdit(null); if (saved) reload(); }} />`}
+  </${Modal}>`;
+}
+
+/** Изменить данные сервиса: название, адрес, контакты, часы терминарза, счёт, реквизиты фирмы */
+export function BranchEdit({ code, onClose }) {
+  const app = useApp();
+  const { data } = useData('branches/' + code + '/settings');
+  const [f, setF] = useState(null);
+  const [toAll, setToAll] = useState(false);
+  if (data && !f) { setF({ name: data.name, service: { ...data.service }, firm: { ...data.firm } }); return null; }
+  const S = (k, l, t = 'text', ph = '') => html`<label class="f">${l}<input type=${t} value=${f.service[k] || ''} placeholder=${ph} onInput=${(e) => setF({ ...f, service: { ...f.service, [k]: e.target.value } })} /></label>`;
+  const F = (k, l, ph = '') => html`<label class="f">${l}<input value=${f.firm[k] || ''} placeholder=${ph} onInput=${(e) => setF({ ...f, firm: { ...f.firm, [k]: e.target.value } })} /></label>`;
+  const save = async () => {
+    await act(() => api(`branches/${code}/settings`, { method: 'PUT', body: { ...f, firmToAll: toAll } }), toAll ? 'Сохранено · реквизиты фирмы обновлены во всех сервисах' : 'Сохранено');
+    app.reload(); onClose(true);
+  };
+  return html`<${Modal} wide title=${data ? `Сервис: ${data.name}` : 'Сервис'} onClose=${() => onClose(false)} foot=${f && html`<button class="btn" onClick=${() => onClose(false)}>Отмена</button><button class="btn primary" style="margin-left:auto" onClick=${save}>Сохранить</button>`}>
+    ${!f ? html`<${Loading} />` : html`<div class="stack">
+      <div class="card stack" style="background:var(--surface2)"><h3 style="margin:0">Сервис</h3>
+        <div class="grid g3"><label class="f">Название (в CRM и переключателе)<input value=${f.name} onInput=${(e) => setF({ ...f, name: e.target.value })} /></label>
+          <label class="f">Код<input value=${data.main ? 'главный' : data.code} disabled /></label>${S('company_brand', 'Бренд (на карте заказа)', 'text', 'Pulsecar')}</div>
+        <div class="grid g3">${S('company_address', 'Адрес сервиса', 'text', 'ul. Arkuszowa 176, Warszawa')}${S('company_phone', 'Телефон', 'tel', '+48 …')}${S('company_email', 'E-mail')}</div>
+        <div class="grid g4">${S('company_www', 'Сайт')}${S('hours_start', 'Терминарз с', 'time')}${S('hours_end', 'Терминарз до', 'time')}
+          <label class="f">Шаг сетки<select value=${f.service.slot_min || '30'} onChange=${(e) => setF({ ...f, service: { ...f.service, slot_min: e.target.value } })}><option value="15">15 мин</option><option value="30">30 мин</option><option value="60">60 мин</option></select></label></div>
+        <div class="grid g3">${S('company_bank', 'Счёт сервиса (IBAN)')}${S('company_bank_name', 'Банк')}${S('review_url', 'Ссылка на отзывы Google', 'url', 'https://g.page/r/…/review')}</div>
+        <label class="f">Условия на карте заказа (печатаются внизу)<textarea rows="3" value=${f.service.order_terms || ''} onInput=${(e) => setF({ ...f, service: { ...f.service, order_terms: e.target.value } })}></textarea></label>
+      </div>
+      <div class="card stack" style="background:var(--surface2)"><h3 style="margin:0">Реквизиты фирмы (фактуры, KSeF)</h3>
+        <div class="grid g3">${F('company_nip', 'NIP')}${F('company_vat_eu', 'NIP UE')}${F('company_name', 'Короткое название')}</div>
+        ${F('company_legal_name', 'Полное название (на фактуре и в KSeF)')}
+        <div class="grid g3">${F('company_street', 'Юр. адрес: улица и номер')}${F('company_postcode', 'Индекс')}${F('company_city', 'Город')}</div>
+        <div class="grid g4">${F('company_regon', 'REGON')}${F('company_krs', 'KRS')}${F('company_bdo', 'BDO')}${F('company_capital', 'Уставный капитал')}</div>
+        <div class="grid g3">${F('company_court', 'Суд регистрации')}${F('company_pkd', 'PKD')}${F('company_swift', 'SWIFT')}</div>
+        <label class="check"><input type="checkbox" checked=${toAll} onChange=${(e) => setToAll(e.target.checked)} />Записать эти реквизиты фирмы во все сервисы (одна фирма — один NIP)</label>
+      </div>
+      <div class="muted small">Остальное (кассы, посты, нумерация, SMS-шаблоны, интеграции) меняется внутри сервиса: «Открыть» → Настройки.</div>
+    </div>`}
   </${Modal}>`;
 }

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import multer from 'multer';
 import { all, one, run, tx, insert, update, log, getSetting, setSetting, mainDb, withDb, curDb as curDbRef } from './db.js';
-import { MAIN, listBranches, branchDb, allDbs, curBranch, createBranch, updateBranch, ownerIn, branchName } from './branches.js';
+import { MAIN, listBranches, branchDb, allDbs, curBranch, createBranch, updateBranch, ownerIn, branchName, branchSettings, saveBranchSettings } from './branches.js';
 import { config } from './config.js';
 import {
   HttpError, currentNumber, checkPassword, hashPassword, normPhone, normPlate, normVin, newCardNo, nextNumber, parseCookies, readSession,
@@ -186,6 +186,16 @@ crm.put('/branches/:code', (req, res) => {
   if (req.params.code === MAIN && req.body?.active === false) throw new HttpError(400, 'Главный сервис отключить нельзя');
   updateBranch(req.params.code, req.body || {});
   res.json({ ok: true });
+});
+/** Данные сервиса (адрес, телефон, часы, счёт, реквизиты) — владелец меняет любой сервис без переключения */
+crm.get('/branches/:code/settings', (req, res) => {
+  owner(req);
+  const { db: _d, ...r } = branchSettings(req.params.code);
+  res.json(r);
+});
+crm.put('/branches/:code/settings', (req, res) => {
+  owner(req);
+  res.json(saveBranchSettings(req.params.code, req.body || {}));
 });
 /** Переключиться в другой сервис (только владелец) */
 crm.post('/branches/switch', (req, res) => {
