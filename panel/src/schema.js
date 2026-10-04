@@ -686,4 +686,9 @@ function seedMessaging() {
 }
 
 db.exec(`CREATE TABLE IF NOT EXISTS usage_log (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, ref TEXT, at TEXT NOT NULL DEFAULT (datetime('now')))`);
+// TecRMI: тип авто в каталоге TecAlliance и соответствие наших работ работам TecRMI
+addColumn('cars', 'tecrmi_type_id', 'INTEGER');
+addColumn('cars', 'tecrmi_type_name', 'TEXT');
+addColumn('order_items', 'norm_src', 'TEXT');        // откуда время: «TecRMI 2,4 h · Alternator — wymiana»
+db.exec(`CREATE TABLE IF NOT EXISTS tecrmi_map (name_key TEXT PRIMARY KEY, item_mp_id INTEGER NOT NULL, kor_id INTEGER NOT NULL, text TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 }

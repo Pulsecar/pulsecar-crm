@@ -140,7 +140,17 @@ export function LaborBlock({ o, reload, c }) {
   useEffect(() => { if (!menu) return; const f = (e) => { if (!e.target.closest('.split')) setMenu(false); }; setTimeout(() => addEventListener('click', f)); return () => removeEventListener('click', f); }, [menu]);
   const base = { kind: 'labor', discount: discL, mechanic_id: o.mechanic_id };
   const fromCat = (x) => ({ ...base, name: x.name, qty: x.qty || 1, unit: x.unit || S.labor_unit_default || 'oper', price: x.price || 0, vat: x.vat ?? 23 });
-  const add = async (it) => { await act(() => api(`orders/${o.id}/items`, { body: it })); };
+  const add = async (it) => { const r = await act(() => api(`orders/${o.id}/items`, { body: it })); if (r?.id && app.features?.tecrmi && it.kind === 'labor') normAuto(r.id, it.name); return r; };
+  // TecRMI: норма времени по авто — знакомая работа ставится сама, иначе окно выбора
+  const [normFor, setNormFor] = useState(null);
+  const normAuto = async (itemId, name) => {
+    if (!o.car_id || app.features.tecrmi.auto === false) return;
+    try {
+      const r = await api('tecrmi/auto', { body: { order_id: o.id, item_id: itemId } });
+      if (r.applied) { toast(`Норма TecRMI: ${num(r.hours, 2)} ч × ${zl(r.rate)} = ${zl(r.total)}`); reload(); }
+      else setNormFor({ id: itemId, name });
+    } catch (e) { toast('TecRMI: ' + e.message, 'error'); }
+  };
   const save = async (it, patch) => { await act(() => api(`orders/${o.id}/items/${it.id}`, { method: 'PUT', body: patch })); reload(); };
   const ql = norm(q.trim());
   const rows = ql ? labor.filter((i) => norm(i.name).includes(ql)) : labor;
@@ -188,8 +198,10 @@ export function LaborBlock({ o, reload, c }) {
         <td class="sub">${labor.indexOf(it) + 1}</td>
         <td class="grip">${!mech && !ql && html`<span draggable="true" title="Перетащите, чтобы поменять порядок" onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(it.id); }} onDragEnd=${() => { setDragId(null); setOverId(null); }}><${Icon} n="grip" /></span>`}</td>
         <td class="nm">${mech ? html`<span class="iname-ro">${it.name}</span>` : html`<${TaskCombo} value=${it.name}
-            onPick=${(x) => save(it, { name: x.name, unit: x.unit || it.unit, ...(it.price ? {} : { price: x.price || 0, vat: x.vat ?? it.vat }), ...(x.qty && Number(it.qty) === 1 ? { qty: x.qty } : {}) })}
-            onText=${(t) => save(it, { name: t })} />`}</td>
+            onPick=${async (x) => { await save(it, { name: x.name, unit: x.unit || it.unit, ...(it.price ? {} : { price: x.price || 0, vat: x.vat ?? it.vat }), ...(x.qty && Number(it.qty) === 1 ? { qty: x.qty } : {}) }); if (app.features?.tecrmi && x.name !== it.name) normAuto(it.id, x.name); }}
+            onText=${(t) => save(it, { name: t })} />`}
+          ${it.norm_src ? html`<div class="sub norm-src" title=${it.norm_src}>⏱ ${it.norm_src}</div>` : ''}
+          ${!mech && app.features?.tecrmi && o.car_id ? html`<button class="icon-btn norm-btn" title="Норма времени TecRMI для этого авто" onClick=${() => setNormFor({ id: it.id, name: it.name })}><${Icon} n="history" /></button>` : ''}</td>
         ${!quote && html`<td class="mech"><select class="inline-input" value=${it.mechanic_id || ''} disabled=${mech} onChange=${(e) => save(it, { mechanic_id: e.target.value ? Number(e.target.value) : null })}><option value="">— выбрать</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></td>`}
         <td><select class="inline-input" style="width:74px" value=${it.unit || ''} disabled=${mech} onChange=${(e) => save(it, { unit: e.target.value })}>${[...new Set([...units, it.unit].filter(Boolean))].map((u) => html`<option value=${u}>${u}</option>`)}</select></td>
         <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '0.1')}</td>
@@ -208,6 +220,46 @@ export function LaborBlock({ o, reload, c }) {
       ${seePrice && labor.length ? html`<tr class="sum-row"><td colspan=${cols - 3}></td>
         <td class="r nowrap">${zl(labor.reduce((s, i) => s + net(lineGross(i), i.vat), 0))}<div class="sub">нетто</div></td><td class="r nowrap"><b>${zl(labor.reduce((s, i) => s + lineGross(i), 0))}</b><div class="sub">брутто</div></td><td></td></tr>` : ''}
       </tbody></table></div>
+    ${normFor && html`<${NormModal} o=${o} item=${normFor} onClose=${(done) => { setNormFor(null); if (done) reload(); }} />`}
     ${catOpen && html`<${CatalogModal} onClose=${() => { setCatOpen(false); reload(); }} onPick=${async (list) => { for (const x of list) await add(fromCat(x)); reload(); }} />`}
   </div>`;
+}
+
+/** Окно TecRMI: (1) тип авто — один раз на машину, (2) какая это работа в каталоге TecRMI → время и цена */
+export function NormModal({ o, item, onClose }) {
+  const [veh, setVeh] = useState(null);
+  const [err, setErr] = useState(null);
+  const [q, setQ] = useState(item.name || '');
+  const [works, setWorks] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [drill, setDrill] = useState({ ranges: null, types: null, make: null, range: null });
+  const loadVeh = async (reset) => { setErr(null); setVeh(null); try { const r = await api(`tecrmi/vehicle?order_id=${o.id}${reset ? '&reset=1' : ''}`); setVeh(r); if (r.type) find(item.name); } catch (e) { setErr(e.message); } };
+  const find = async (text) => { setBusy(true); try { const r = await api(`tecrmi/works?order_id=${o.id}&q=${encodeURIComponent(text)}`); setWorks(r.works); if (r.query && r.query !== text) setQ(r.query); } catch (e) { setErr(e.message); } finally { setBusy(false); } };
+  useEffect(() => { loadVeh(false); }, []);
+  const pickType = async (t) => { await act(() => api('tecrmi/vehicle', { body: { order_id: o.id, TypeId: t.TypeId, name: t.name } }), 'Тип авто сохранён в карточке'); setVeh({ type: t }); find(q); };
+  const apply = async (w) => {
+    const r = await act(() => api('tecrmi/apply', { body: { order_id: o.id, item_id: item.id, ItemMpId: w.ItemMpId, KorId: w.KorId, text: w.text } }));
+    toast(`Норма TecRMI: ${num(r.hours, 2)} ч × ${zl(r.rate)} = ${zl(r.total)} · в следующий раз «${item.name}» посчитается сама`);
+    onClose(true);
+  };
+  return html`<${Modal} wide title=${'Норма времени: ' + item.name} onClose=${() => onClose(false)}>
+    ${err ? html`<div class="card err">${err}</div>` : ''}
+    ${!veh && !err ? html`<div class="empty">Ищу авто в TecRMI…</div>` : ''}
+    ${veh && !veh.type ? html`<div class="stack">
+      <div class="muted small">Выберите точный тип авто (один раз — дальше CRM запомнит его в карточке${veh.car ? ` ${veh.car.make || ''} ${veh.car.model || ''} ${veh.car.year || ''}${veh.car.power_kw ? ' · ' + veh.car.power_kw + ' kW' : ''}` : ''}).</div>
+      ${veh.candidates?.length ? html`<table class="tbl"><tbody>${veh.candidates.map((t) => html`<tr class="click" onClick=${() => pickType(t)}><td><b>${t.name}</b><div class="sub">${t.info}</div></td><td class="r"><button class="btn sm">Это он</button></td></tr>`)}</tbody></table>`
+        : html`<div class="row wrap">
+          <label class="f" style="width:220px">Марка<select onChange=${async (e) => { const m = veh.makes.find((x) => String(x.MakeId) === e.target.value); setDrill({ make: m, ranges: await api('tecrmi/ranges/' + m.MakeId), types: null }); }}><option value="">—</option>${(veh.makes || []).map((m) => html`<option value=${m.MakeId}>${m.MakeName}</option>`)}</select></label>
+          ${drill.ranges && html`<label class="f" style="width:260px">Модель<select onChange=${async (e) => { const r = drill.ranges.find((x) => String(x.RangeId) === e.target.value); setDrill({ ...drill, range: r, types: await api(`tecrmi/types/${r.RangeId}?make=${encodeURIComponent(drill.make.MakeName)}&range=${encodeURIComponent(r.RangeName)}`) }); }}><option value="">—</option>${drill.ranges.map((r) => html`<option value=${r.RangeId}>${r.RangeName}</option>`)}</select></label>`}
+        </div>
+        ${drill.types && html`<table class="tbl"><tbody>${drill.types.map((t) => html`<tr class="click" onClick=${() => pickType(t)}><td><b>${t.name}</b><div class="sub">${t.info}</div></td><td class="r"><button class="btn sm">Это он</button></td></tr>`)}</tbody></table>`}`}
+    </div>` : ''}
+    ${veh?.type ? html`<div class="stack">
+      <div class="row"><span class="muted small">Авто в TecRMI: <b>${veh.type.name}</b></span><button class="btn ghost sm" style="margin-left:auto" onClick=${() => loadVeh(true)}>Другой тип</button></div>
+      <form class="row" onSubmit=${(e) => { e.preventDefault(); find(q); }}><input class="grow" value=${q} placeholder="Например: alternator, wymiana alternatora" onInput=${(e) => setQ(e.target.value)} /><button class="btn">Найти</button></form>
+      <div class="muted small">Каталог TecRMI на польском: пишите узел по-польски (alternator, rozrusznik, klocki, pasek rozrządu). Выбранное соответствие CRM запомнит для «${item.name}».</div>
+      ${busy ? html`<div class="empty">Ищу…</div>` : works && !works.length ? html`<div class="empty">Ничего не найдено — попробуйте другое слово</div>`
+        : works && html`<table class="tbl"><tbody>${works.map((w) => html`<tr class="click" onClick=${() => apply(w)}><td><b>${w.text}</b><div class="sub">${w.group}</div></td><td class="r"><button class="btn sm primary">Взять время</button></td></tr>`)}</tbody></table>`}
+    </div>` : ''}
+  </${Modal}>`;
 }

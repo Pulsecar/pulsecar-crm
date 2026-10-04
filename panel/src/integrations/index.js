@@ -194,6 +194,21 @@ export const DEFS = [
     fields: [{ k: 'feedToken', label: 'Секрет ссылки', secret: true, auto: true }],
   },
   {
+    key: 'tecrmi', group: 'Данные авто', title: 'TecRMI — нормы времени на работы (TecAlliance)',
+    about: 'В заказе выбираете работу (например «Замена генератора») — CRM берёт норму времени для этого авто из TecRMI и сама считает цену: часы × ставка нормо-часа (Настройки → Параметры → RBH).',
+    howto: 'Доступ к TecRMI Web Service (модуль LabourTimes) выдаёт TecAlliance по договору: Company, Account и пароль. Это не логин Motowarsztat.',
+    fields: [
+      { k: 'company', label: 'Company', required: true },
+      { k: 'account', label: 'Account (пользователь)', required: true },
+      { k: 'password', label: 'Пароль', secret: true, required: true },
+      { k: 'auto', label: 'Ставить норму сразу при выборе работы (если работа уже знакома)', type: 'bool', def: true },
+      { k: 'country', label: 'Страна', advanced: true, def: 'PL' },
+      { k: 'language', label: 'Язык названий работ', advanced: true, def: 'pl' },
+      { k: 'baseUrl', label: 'Адрес API', advanced: true, def: 'https://rmi-services.tecalliance.net' },
+      { k: 'origin', label: 'Origin (адрес вашей CRM)', advanced: true },
+    ],
+  },
+  {
     key: 'vin', group: 'Данные авто', title: 'Расшифровка VIN',
     about: 'Кнопка «Расшифровать VIN» в карточке авто. Бесплатно и без ключа: марка по коду производителя, модель для VW, Audi, Škoda, Seat и Mercedes, год для VAG и др., плюс база NHTSA (авто для рынка США). Полные данные (двигатель, мощность) бесплатно даёт скан Aztec техпаспорта; по VIN — платный vindecoder.eu.',
     howto: 'Без ключа работает сразу. Для платного сервиса (например vindecoder.eu) укажите ключ и секрет.',

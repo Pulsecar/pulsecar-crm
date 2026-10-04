@@ -42,14 +42,15 @@ const GLOSSARY = [
   ['передний', 'przedni'], ['передняя', 'przednia'], ['передние', 'przednie'], ['передній', 'przedni'], ['задний', 'tylny'], ['задняя', 'tylna'], ['задние', 'tylne'], ['задній', 'tylny'],
   ['левый', 'lewy'], ['левая', 'lewa'], ['лівий', 'lewy'], ['правый', 'prawy'], ['правая', 'prawa'], ['правий', 'prawy'],
   ['верхний', 'górny'], ['нижний', 'dolny'], ['верхній', 'górny'], ['нижній', 'dolny'], ['ось', 'oś'], ['вісь', 'oś'], ['оригинал', 'oryginał'], ['комплект из', 'zestaw'],
-  ['шт', 'szt.'], [' и ', ' i '], [' для ', ' do '], [' с ', ' z '], [' з ', ' z '],
+  ['ремня грм', 'Pasek rozrządu'], ['ремня', 'Pasek'], ['замена', 'wymiana'], ['заміна', 'wymiana'], ['ремонт', 'naprawa'], ['шт', 'szt.'], [' и ', ' i '], [' для ', ' do '], [' с ', ' z '], [' з ', ' z '],
 ].sort((a, b) => b[0].length - a[0].length);
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const RE = new RegExp(GLOSSARY.map(([k]) => /^\s|\s$/.test(k) ? esc(k) : `(?<![\\u0400-\\u04FF])${esc(k)}(?![\\u0400-\\u04FF])`).join('|'), 'giu');
+// падежные окончания (генератор-а, колодк-и): до 3 кириллических букв после основы
+const RE = new RegExp(GLOSSARY.map(([k]) => /^\s|\s$/.test(k) ? esc(k) : `(?<![\\u0400-\\u04FF])${esc(k)}[\\u0400-\\u04FF]{0,3}(?![\\u0400-\\u04FF])`).join('|'), 'giu');
 const MAP = new Map(GLOSSARY.map(([k, v]) => [k, v]));
 
 export function glossaryPl(name) {
-  let out = String(name || '').replace(RE, (m) => MAP.get(m.toLowerCase()) ?? m).replace(/\s{2,}/g, ' ').trim();
+  let out = String(name || '').replace(RE, (m) => { const l = m.toLowerCase(); for (let n = 0; n <= 3; n++) { const k = l.slice(0, l.length - n); if (MAP.has(k)) return MAP.get(k); } return m; }).replace(/\s{2,}/g, ' ').trim();
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
 

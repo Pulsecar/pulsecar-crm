@@ -19,8 +19,9 @@ import { invoicesEnabled, invoicePdf, issueInvoice, testFakturownia } from './in
 import { createStockDoc, findOrCreateProduct } from './stock.js';
 import { publicList, save as saveIntegration, cfg, setState, def as integrationDef } from './integrations/index.js';
 import * as IC from './integrations/intercars.js';
+import * as RMI from './integrations/tecrmi.js';
 import * as SUP from './integrations/suppliers.js';
-import { polishNames } from './pl-names.js';
+import { polishNames, glossaryPl, hasCyr } from './pl-names.js';
 import { notify, testTelegram } from './integrations/notify.js';
 import { balances, setManual } from './balances.js';
 import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, ensureFeedToken } from './integrations/services.js';
@@ -160,7 +161,7 @@ crm.get('/me', (req, res) => {
     loyalty: loyaltySummary(0).rules,
     features: {
       invoices: invoicesEnabled(), ksef: KSEF.ksefEnabled(), fiscal: (() => { const c = FISCAL.fiscalCfg(); return c ? { driver: c.driver, url: c.url, autoOnPay: c.autoOnPay } : null; })(), marketingUrl: cfg('marketing')?.url || config.marketingUrl, autoEarnFromCrm: config.loyalty.autoEarnFromCrm,
-      intercars: !!cfg('intercars'), tpay: !!cfg('tpay'), email: !!cfg('email'), sms: !!activeProvider(), smsProvider: activeProvider(), plate: !!cfg('plate'),
+      intercars: !!cfg('intercars'), tecrmi: RMI.tecrmiOn() ? { auto: cfg('tecrmi').auto !== false } : null, tpay: !!cfg('tpay'), email: !!cfg('email'), sms: !!activeProvider(), smsProvider: activeProvider(), plate: !!cfg('plate'),
     },
   });
 });
@@ -1424,6 +1425,87 @@ crm.post('/ext/pick', async (req, res) => {
   res.json({ ok: true, ...done });
 });
 
+// ── TecRMI: нормы времени на работы для авто заказа ─────────────────────────
+const rmiCar = (orderId) => {
+  const o = getOrder(Number(orderId));
+  const car = o.car_id && one('SELECT * FROM cars WHERE id = ?', o.car_id);
+  if (!car) throw new HttpError(400, 'В заказе не выбран автомобиль');
+  return { o, car };
+};
+/** Тип авто в TecRMI: сохранённый или варианты для выбора (один вариант — сохраняем сразу) */
+crm.get('/tecrmi/vehicle', async (req, res) => {
+  who(req, 'orders.view');
+  const { car } = rmiCar(req.query.order_id);
+  if (car.tecrmi_type_id && req.query.reset !== '1') return res.json({ type: { TypeId: car.tecrmi_type_id, name: car.tecrmi_type_name }, car: { id: car.id, make: car.make, model: car.model, year: car.year, power_kw: car.power_kw, vin: car.vin } });
+  const r = await RMI.vehicleCandidates(car);
+  if (r.candidates.length === 1 && req.query.reset !== '1') {
+    run('UPDATE cars SET tecrmi_type_id = ?, tecrmi_type_name = ? WHERE id = ?', r.candidates[0].TypeId, r.candidates[0].name, car.id);
+    return res.json({ type: r.candidates[0], auto: true });
+  }
+  res.json({ ...r, car: { id: car.id, make: car.make, model: car.model, year: car.year, power_kw: car.power_kw, capacity: car.capacity, engine: car.engine, vin: car.vin } });
+});
+crm.get('/tecrmi/ranges/:makeId', async (req, res) => { who(req, 'orders.view'); res.json(await RMI.ranges(req.params.makeId)); });
+crm.get('/tecrmi/types/:rangeId', async (req, res) => { who(req, 'orders.view'); res.json(await RMI.types(req.params.rangeId, req.query.make || '', req.query.range || '')); });
+crm.post('/tecrmi/vehicle', (req, res) => {
+  who(req, 'orders.jobs');
+  const { car } = rmiCar(req.body?.order_id);
+  const id = Number(req.body?.TypeId);
+  if (!id) throw new HttpError(400, 'Выберите тип авто');
+  run('UPDATE cars SET tecrmi_type_id = ?, tecrmi_type_name = ? WHERE id = ?', id, String(req.body?.name || '').slice(0, 200) || null, car.id);
+  res.json({ ok: true });
+});
+/** Поиск работы TecRMI для авто заказа */
+crm.get('/tecrmi/works', async (req, res) => {
+  who(req, 'orders.view');
+  const { car } = rmiCar(req.query.order_id);
+  if (!car.tecrmi_type_id) throw new HttpError(400, 'Сначала выберите тип авто в TecRMI');
+  // каталог TecRMI польский: «Замена генератора» → ищем «Alternator» (узел без глагола)
+  const q0 = String(req.query.q || '').trim();
+  let q = hasCyr(q0) ? glossaryPl(q0).split(/\s+/).filter((w) => !hasCyr(w)).join(' ') : q0;
+  q = q.replace(/\b(wymiana|naprawa|demontaż|montaż|regulacja|sprawdzenie|replace|replacement)\b/gi, '').replace(/\s+/g, ' ').trim() || q0;
+  const r = await RMI.searchWorks(car.tecrmi_type_id, q);
+  if (!r.works.length && q !== q0) Object.assign(r, await RMI.searchWorks(car.tecrmi_type_id, q0));
+  res.json({ ...r, query: q });
+});
+/** Применить норму к работе заказа: кол-во = часы, ед. rbh, цена = ставка нормо-часа. Соответствие запоминается */
+async function applyNorm(o, car, item, w, staff) {
+  const t = await RMI.workTime(car.tecrmi_type_id, w.ItemMpId, w.KorId);
+  if (!(t.hours > 0)) throw new HttpError(404, 'TecRMI не дал времени на эту работу для этого авто');
+  const vat = Number(item.vat ?? getSetting('default_vat', '23'));
+  const rate = round2((Number(getSetting('rbh_rate', '0')) || 0) * (1 + vat / 100));
+  updateItem(item.id, { qty: t.hours, unit: 'rbh', ...(rate > 0 ? { price: rate } : {}), norm_src: `TecRMI ${String(t.hours).replace('.', ',')} h · ${(w.text || t.text).slice(0, 120)}` }, staff);
+  recalc(o.id);
+  log('order', o.id, 'update', `Норма TecRMI: ${item.name} — ${t.hours} ч`, staff.name);
+  return { ...t, rate, total: round2(t.hours * rate) };
+}
+crm.post('/tecrmi/apply', async (req, res) => {
+  const s = who(req, 'orders.jobs');
+  const b = req.body || {};
+  const { o, car } = rmiCar(b.order_id);
+  assertEditable(o, s);
+  if (!car.tecrmi_type_id) throw new HttpError(400, 'Сначала выберите тип авто в TecRMI');
+  const item = one(`SELECT * FROM order_items WHERE id = ? AND order_id = ? AND kind = 'labor'`, Number(b.item_id), o.id);
+  if (!item) throw new HttpError(404, 'Работа не найдена');
+  const w = { ItemMpId: Number(b.ItemMpId), KorId: Number(b.KorId), text: b.text || '' };
+  const r = await applyNorm(o, car, item, w, s);
+  if (b.remember !== false) RMI.remember(item.name, w);
+  res.json({ ok: true, ...r });
+});
+/** Сразу после выбора работы: если работа знакома и тип авто известен — ставим норму без вопросов */
+crm.post('/tecrmi/auto', async (req, res) => {
+  const s = who(req, 'orders.jobs');
+  const b = req.body || {};
+  const { o, car } = rmiCar(b.order_id);
+  const item = one(`SELECT * FROM order_items WHERE id = ? AND order_id = ? AND kind = 'labor'`, Number(b.item_id), o.id);
+  if (!item) throw new HttpError(404, 'Работа не найдена');
+  if (!car.tecrmi_type_id) return res.json({ need: 'vehicle' });
+  const m = RMI.mapping(item.name);
+  if (!m) return res.json({ need: 'work' });
+  assertEditable(o, s);
+  const r = await applyNorm(o, car, item, { ItemMpId: m.item_mp_id, KorId: m.kor_id, text: m.text }, s);
+  res.json({ ok: true, applied: true, ...r });
+});
+
 /** Документ со страницы поставщика (фактура, WZ, корзина, заказ) → документ поставщика; сразу приход и/или в заказ/выцену */
 crm.post('/ext/doc', async (req, res) => {
   const s = who(req, 'products.view');
@@ -1687,7 +1769,7 @@ crm.put('/integrations/:key', (req, res) => {
   res.json({ ok: true });
 });
 const TESTS = {
-  intercars: () => IC.testIntercars(), fakturownia: () => testFakturownia(), ksef: () => KSEF.testKsef(), smsapi: () => testSms(), email: () => testEmail(), tpay: () => testTpay(),
+  intercars: () => IC.testIntercars(), tecrmi: () => RMI.testTecrmi(), fakturownia: () => testFakturownia(), ksef: () => KSEF.testKsef(), smsapi: () => testSms(), email: () => testEmail(), tpay: () => testTpay(),
   hart: () => SUP.testHart(), mailbox: () => SUP.testMailbox(),
   smsgate: () => testSmsgate(), serwersms: () => testSerwersms(), smsplanet: () => testSmsplanet(), twilio: () => testTwilio(), smshttp: () => testSmshttp(), plate: () => testPlate(),
   telegram: async () => { const r = await testTelegram(); const row = one(`SELECT config FROM integrations WHERE key='telegram'`); const c = row ? JSON.parse(row.config) : {};
