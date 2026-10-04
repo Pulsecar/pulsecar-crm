@@ -1,5 +1,6 @@
 // Логика заказов: пересчёт сумм, статусы, выдача со склада, баллы, уведомления
 import { all, one, run, tx, insert, update, log, getSetting, quoteConvertedStatus } from './db.js';
+import { autoClose as autoCloseRecs } from './recommendations.js';
 import { HttpError, nextNumber, round2 } from './util.js';
 import { earnForOrder } from './loyalty.js';
 import { sendSms } from './sms.js';
@@ -161,6 +162,7 @@ export function setStatus(orderId, statusId, staffName) {
         issueStock(o, staffName);
         const fresh = getOrder(o.id);
         earned = earnForOrder(fresh);
+        try { autoCloseRecs(o.id); } catch (e) { console.error('autoClose recommendations:', e.message); }
       }
       if (!st.is_final && wasFinal) reverseStock(o);
     }

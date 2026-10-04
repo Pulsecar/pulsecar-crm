@@ -12,7 +12,7 @@ export const UI_GROUPS = [
   ['Заказ — кнопки и вкладки', [
     ['order.btn.card', 'Кнопка «Электронная карта заказа»'], ['order.btn.docs', 'Кнопка «Документы» (печать)'], ['order.btn.copy', 'Кнопка «Копировать»'], ['order.btn.toorder', 'Выцена → «Создать заказ»'], ['order.btn.delete', 'Кнопка «Удалить»'],
     ['order.tab.main', 'Вкладка «Основное»'], ['order.tab.items', 'Вкладка «Работы и товары»'], ['order.tab.files', 'Вкладка «Файлы и подписи»'], ['order.tab.pay', 'Вкладка «Оплата и документы»'],
-    ['order.tab.contact', 'Вкладка «Связь с клиентом»'], ['order.tab.plan', 'Вкладка «Терминарз»'], ['order.tab.check', 'Вкладка «Чек-листы»'], ['order.tab.log', 'Вкладка «История»'],
+    ['order.tab.contact', 'Вкладка «Связь с клиентом»'], ['order.tab.plan', 'Вкладка «Терминарз»'], ['order.tab.check', 'Вкладка «Чек-листы»'], ['order.tab.recs', 'Вкладка «Рекомендации»'], ['order.tab.log', 'Вкладка «История»'],
     ['order.media', 'Блок «Фото и видео для клиента»'], ['order.btn.catalog', 'Кнопка «Из прайса работ»'], ['order.btn.addpart', 'Кнопки добавления товаров']]],
   ['Заказ — колонки работ', [['labor.sel', 'Галочка выбора'], ['labor.lp', 'Lp.'], ['labor.name', 'Работа'], ['labor.mech', 'Механик'], ['labor.unit', 'Ед.'], ['labor.qty', 'Кол-во'], ['labor.price', 'Цена'],
     ['labor.disc', 'Скидка %'], ['labor.vat', 'VAT'], ['labor.net', 'Сумма нетто'], ['labor.gross', 'Сумма брутто'], ['labor.status', 'Статус']]],

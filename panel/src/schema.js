@@ -702,4 +702,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS chat_sessions (
 )`);
 db.exec('CREATE INDEX IF NOT EXISTS chat_sessions_updated ON chat_sessions(updated_at)');
 addColumn('staff', 'dash', 'TEXT');               // своя главная: JSON {v, widgets:[{id,type,size,…}]}
+// Сервисная книжка: рекомендации по авто («что пора сделать») — видит клиент на pulsecar.pl/moje-auto и в приложении
+db.exec(`CREATE TABLE IF NOT EXISTS car_recommendations (
+  id INTEGER PRIMARY KEY,
+  car_id INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,   -- в каком заказе выявлено
+  title TEXT NOT NULL,
+  note TEXT,
+  priority TEXT NOT NULL DEFAULT 'soon',   -- urgent | soon | later
+  due_date TEXT,                           -- YYYY-MM-DD
+  due_km INTEGER,                          -- при каком пробеге
+  est_price REAL,                          -- ориентировочная цена брутто (для клиента)
+  status TEXT NOT NULL DEFAULT 'open',     -- open | done | dismissed
+  closed_order_id INTEGER, closed_at TEXT,
+  reminded_at TEXT,
+  staff TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS car_rec_car ON car_recommendations(car_id, status)');
+addColumn('cars', 'inspection_reminded', 'TEXT');   // за какую дату техосмотра уже ушло SMS
+for (const [k, v] of Object.entries({
+  sms_rec_on: '1', sms_rec_days: '14',
+  sms_tpl_recommendation: 'Dzien dobry! Przypominamy: [[rekomendacja.tytul]] dla [[pojazd.marka]] [[pojazd.nrRejestracyjny]] - zalecany termin [[rekomendacja.termin]]. Historia serwisowa i zapis: [[link.mojeAuto]] PulseCar',
+  sms_inspection_on: '1',
+  sms_tpl_inspection: 'Dzien dobry! Przeglad techniczny [[pojazd.marka]] [[pojazd.nrRejestracyjny]] wazny do [[pojazd.przegladDo]]. Zapraszamy na sprawdzenie auta przed przegladem: [[link.mojeAuto]] PulseCar',
+  my_car_url: 'https://pulsecar.pl/pl/moje-auto',
+})) if (getSetting(k) === null) setSetting(k, v);
 }

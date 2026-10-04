@@ -71,6 +71,43 @@ export async function runJobs() {
     const low = all('SELECT name, stock, min_stock FROM products WHERE active = 1 AND min_stock > 0 AND stock <= min_stock LIMIT 30');
     if (low.length) notify('stock', `Заканчивается на складе (${low.length}):\n` + low.map((p) => `• ${p.name}: ${p.stock}`).join('\n'));
   }
+
+  // 5. Сервисная книжка: SMS о рекомендациях и техосмотре за N дней до срока, 10:00–18:00, по одной на рекомендацию
+  if (now.hour >= 10 && now.hour < 18 || process.env.NODE_ENV === 'test') remindServiceBook(now.date, S);
+}
+
+const fmtDate = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');
+function addDays(date, n) { const d = new Date(date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+
+export function remindServiceBook(date, S = (k, d) => getSetting(k, d)) {
+  const days = Math.min(60, Math.max(1, Number(S('sms_rec_days', '14')) || 14));
+  const until = addDays(date, days);
+  const myCar = S('my_car_url', 'https://pulsecar.pl/pl/moje-auto');
+  let sent = 0;
+  if (S('sms_rec_on', '1') === '1' && S('sms_tpl_recommendation')) {
+    // срок наступает в ближайшие N дней или прошёл не больше 30 дней назад
+    for (const r of all(`SELECT r.*, c.phone, c.marketing_consent, c.id customer_id FROM car_recommendations r JOIN cars k ON k.id = r.car_id JOIN customers c ON c.id = k.customer_id
+        WHERE r.status = 'open' AND r.reminded_at IS NULL AND r.due_date IS NOT NULL AND r.due_date <= ? AND r.due_date >= ?`, until, addDays(date, -30))) {
+      run(`UPDATE car_recommendations SET reminded_at = datetime('now') WHERE id = ?`, r.id);
+      if (!r.phone || !r.marketing_consent) continue;
+      const ctx = { ...orderContext(null, { appointment: { customer_id: r.customer_id, car_id: r.car_id } }), 'rekomendacja.tytul': r.title, 'rekomendacja.termin': fmtDate(r.due_date), 'link.mojeAuto': myCar };
+      sendSms(r.phone, render(S('sms_tpl_recommendation'), ctx), { kind: 'recommendation', customer_id: r.customer_id })
+        .catch((e) => ilog('sms', 'error', 'Рекомендация: ' + e.message));
+      sent++;
+    }
+  }
+  if (S('sms_inspection_on', '1') === '1' && S('sms_tpl_inspection')) {
+    for (const k of all(`SELECT k.*, c.phone, c.marketing_consent FROM cars k JOIN customers c ON c.id = k.customer_id
+        WHERE k.inspection_until IS NOT NULL AND k.inspection_until >= ? AND k.inspection_until <= ? AND COALESCE(k.inspection_reminded, '') <> k.inspection_until`, date, until)) {
+      run('UPDATE cars SET inspection_reminded = ? WHERE id = ?', k.inspection_until, k.id);
+      if (!k.phone || !k.marketing_consent) continue;
+      const ctx = { ...orderContext(null, { appointment: { customer_id: k.customer_id, car_id: k.id } }), 'pojazd.przegladDo': fmtDate(k.inspection_until), 'link.mojeAuto': myCar };
+      sendSms(k.phone, render(S('sms_tpl_inspection'), ctx), { kind: 'inspection', customer_id: k.customer_id })
+        .catch((e) => ilog('sms', 'error', 'Техосмотр: ' + e.message));
+      sent++;
+    }
+  }
+  return sent;
 }
 
 export function startJobs() {

@@ -40,6 +40,7 @@ import path from 'node:path';
 import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate, testSmshttp, activeProvider, smsParts, translit } from './sms.js';
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
+import * as REC from './recommendations.js';
 /** Способы оплаты (платёж): наличные, карта, BLIK, перевод. «mixed» — только как способ в документах/настройках */
 const PAY_METHODS = ['cash', 'card', 'blik', 'transfer'];
 
@@ -409,6 +410,7 @@ crm.get('/cars/:id', (req, res) => {
     orders: orders.map((o) => ({ ...o, items: items.filter((i) => i.order_id === o.id) })),
     storage: all('SELECT * FROM storage WHERE car_id = ? ORDER BY id DESC', k.id),
     files: all(`SELECT f.id, f.name, f.mime, f.size, f.created_at, o.id order_id, o.number order_no FROM order_files f JOIN orders o ON o.id = f.order_id WHERE o.car_id = ? ORDER BY f.id DESC`, k.id),
+    recommendations: REC.listForCar(k.id),
   });
 });
 const CAR_FIELDS = ['customer_id', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'notes', 'mileage_unit',
@@ -551,6 +553,7 @@ crm.get('/orders/:id', (req, res) => {
   o.signatures = all('SELECT id, doc, method, signer_name, phone, signed_at, ip FROM order_signatures WHERE order_id = ? ORDER BY id', o.id);
   o.files = all('SELECT id, name, mime, size, client_visible, staff, created_at FROM order_files WHERE order_id = ? ORDER BY id', o.id);
   o.comments = all('SELECT * FROM order_comments WHERE order_id = ? ORDER BY id DESC', o.id);
+  o.recommendations = o.car_id ? REC.listForCar(o.car_id) : [];
   if (o.customer_id) o.redeem = redeemLimits(o.customer_id, o.total, o.payments.filter((p) => p.method === 'points').reduce((a, p) => a + p.amount, 0));
   res.json(o);
 });
@@ -1741,6 +1744,28 @@ crm.get('/orders/:id/checklists', (req, res) => {
     templates: all('SELECT * FROM checklists WHERE active = 1 ORDER BY pos, name').map((c) => ({ ...c, items: JSON.parse(c.items) })),
   });
 });
+// ── Сервисная книжка: рекомендации по авто («что пора сделать») ─────────────
+crm.get('/recommendations/presets', (req, res) => { who(req, 'orders.view'); res.json({ presets: REC.PRESETS }); });
+crm.post('/recommendations', (req, res) => {
+  const s = who(req, 'orders.view');
+  const id = REC.createRec(req.body || {}, s.name);
+  log('car', Number(req.body?.car_id), 'recommendation', String(req.body?.title || '').slice(0, 160), s.name);
+  res.json({ id });
+});
+crm.put('/recommendations/:id', (req, res) => {
+  who(req, 'orders.view');
+  res.json(REC.updateRec(Number(req.params.id), req.body || {}));
+});
+crm.delete('/recommendations/:id', (req, res) => {
+  who(req, 'orders.edit');
+  REC.deleteRec(Number(req.params.id));
+  res.json({ ok: true });
+});
+crm.post('/orders/:id/recommendations/from-checklists', (req, res) => {
+  const s = who(req, 'orders.view');
+  res.json({ added: REC.fromChecklists(Number(req.params.id), s.name) });
+});
+
 crm.post('/orders/:id/checklists', (req, res) => {
   const s = who(req, 'orders.view');
   const o = getOrder(Number(req.params.id));
@@ -2145,7 +2170,7 @@ crm.post('/sms/preview', (req, res) => {
   if (getSetting('sms_translit', '1') === '1') t = translit(t);
   res.json({ text: t, length: t.length, parts: t ? smsParts(t) : 0 });
 });
-const MSG_KEYS = ['sms_tpl_reminder', 'sms_tpl_card', 'sms_tpl_quote', 'sms_tpl_paylink', 'sms_tpl_code', 'sms_tpl_booking', 'sms_tpl_review',
+const MSG_KEYS = ['sms_rec_on', 'sms_rec_days', 'sms_tpl_recommendation', 'sms_inspection_on', 'sms_tpl_inspection', 'my_car_url', 'sms_tpl_reminder', 'sms_tpl_card', 'sms_tpl_quote', 'sms_tpl_paylink', 'sms_tpl_code', 'sms_tpl_booking', 'sms_tpl_review',
   'sms_remind_on', 'sms_remind_hours', 'sms_translit', 'sms_review_delayed', 'sms_provider', 'review_url', 'doc_description_tpl',
   ...['invoice', 'receipt', 'storage', 'quote', 'order'].flatMap((k) => [`mail_${k}_subject`, `mail_${k}_body`]),
   'card_accept', 'card_show_status', 'card_show_net', 'card_show_bank', 'card_show_invoice', 'card_quote_after_protocol', 'card_accept_status_id', 'card_rodo', 'card_extra',

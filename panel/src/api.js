@@ -7,6 +7,10 @@ import { sendSms } from './sms.js';
 import { loyaltySummary, welcomeBonus } from './loyalty.js';
 import { notify } from './integrations/notify.js';
 import { cardUrl } from './messaging.js';
+import { getSetting } from './db.js';
+import { listForCar, clientRec } from './recommendations.js';
+import { sendOrderFile } from './documents.js';
+import { invoicePdf } from './invoices.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '50kb' }));
@@ -38,7 +42,7 @@ api.post('/auth/request', async (req, res) => {
     'INSERT OR REPLACE INTO otp (phone, code_hash, expires_at, attempts, sent_at) VALUES (?, ?, ?, 0, ?)',
     phone, sha256(phone + code), Date.now() + 10 * 60_000, Date.now(),
   );
-  const lang = String(req.body?.lang || 'pl');
+  const lang = { ua: 'uk', by: 'ru' }[String(req.body?.lang || 'pl')] || String(req.body?.lang || 'pl');
   const text = {
     pl: `Pulsecar: Twój kod logowania to ${code}`,
     en: `Pulsecar: your login code is ${code}`,
@@ -117,8 +121,19 @@ api.get('/me', (req, res) => {
   );
   const storage = all(`SELECT s.*, k.make, k.model, k.plate FROM storage s LEFT JOIN cars k ON k.id = s.car_id WHERE s.customer_id = ? AND s.date_out IS NULL ORDER BY s.id DESC`, c.id);
   const days = (a) => Math.max(1, Math.round((Date.now() - new Date(a + 'T12:00:00').getTime()) / 86400000) + 1);
+  // сервисная книжка: файлы (фото, видео, документы), отмеченные «видно клиенту», и гарантия на работы
+  const showFiles = getSetting('card_files', '1') !== '0';
+  const showInvoice = getSetting('card_show_invoice', '1') === '1';
+  const files = showFiles ? all(`SELECT f.id, f.order_id, f.name, f.mime, f.size, f.created_at FROM order_files f JOIN orders o ON o.id = f.order_id
+    WHERE o.customer_id = ? AND f.client_visible = 1 ORDER BY f.id`, c.id) : [];
+  const warrantyMonths = Number(getSetting('warranty_labor_months', '6')) || 6;
+  const addMonths = (d, n) => { const x = new Date(d.slice(0, 10) + 'T12:00:00Z'); x.setUTCMonth(x.getUTCMonth() + n); return x.toISOString().slice(0, 10); };
   const visitOut = (v) => ({
-    orderNo: v.number, date: (v.closed_at || v.created_at || '').slice(0, 10), mileage: v.mileage, total: v.total,
+    id: v.id, orderNo: v.number, date: (v.closed_at || v.created_at || '').slice(0, 10), mileage: v.mileage, total: v.total,
+    complaint: v.complaint || null, afterNotes: v.after_notes || null,
+    warrantyUntil: v.is_final && v.closed_at && items.some((i) => i.order_id === v.id && i.kind === 'labor') ? addMonths(v.closed_at, warrantyMonths) : null,
+    invoice: showInvoice && v.invoice_ext_id ? { no: v.invoice_no || null } : null,
+    files: files.filter((f) => f.order_id === v.id).map((f) => ({ id: f.id, name: f.name, mime: f.mime, size: f.size })),
     active: !v.is_final, status: v.client_label || v.status_name || null, statusColor: v.status_color || null,
     due: Math.max(0, Math.round(((v.total || 0) - (v.paid || 0)) * 100) / 100), payLink: v.pay_link || null,
     cardUrl: !v.is_final || v.id === lastId ? safeCard(v.id) : null,
@@ -135,6 +150,9 @@ api.get('/me', (req, res) => {
     loyalty: loyaltySummary(c.id),
     cars: cars.map((car) => ({
       id: car.id, plate: car.plate, vin: car.vin, make: car.make, model: car.model, year: car.year == null ? null : String(car.year).replace(/\.0+$/, ''), lastMileage: car.last_mileage,
+      engine: car.engine || null, fuel: car.fuel || null, inspectionUntil: car.inspection_until || null, insuranceUntil: car.insurance_until || null,
+      recommendations: listForCar(car.id, { openOnly: true }).map((r) => clientRec(r, car.last_mileage)),
+      done: listForCar(car.id).filter((r) => r.status === 'done').slice(0, 20).map((r) => ({ title: r.title, closedAt: (r.closed_at || '').slice(0, 10), orderNo: r.closed_order_no || null })),
       visits: orders.filter((v) => v.car_id === car.id).map(visitOut),
     })),
     otherVisits: orders.filter((v) => !v.car_id || !cars.some((k) => k.id === v.car_id)).map(visitOut),
@@ -175,6 +193,24 @@ api.post('/bookings', (req, res) => {
   });
   notify('booking', `Новая заявка из приложения: ${name}, ${phone}\n${text}${b.preferred ? '\nКогда удобно: ' + b.preferred : ''}`, { name, phone, text });
   res.json({ ok: true, id });
+});
+
+// ── Сервисная книжка: файлы заказа и фактура — только свои и только «видно клиенту» ──
+api.get('/files/:id', (req, res) => {
+  const s = auth(req);
+  if (getSetting('card_files', '1') === '0') throw new HttpError(404, 'Файл не найден');
+  const f = one(`SELECT f.* FROM order_files f JOIN orders o ON o.id = f.order_id WHERE f.id = ? AND f.client_visible = 1 AND o.customer_id = ?`, Number(req.params.id), s.customer_id);
+  if (!f) throw new HttpError(404, 'Файл не найден');
+  sendOrderFile(res, f, req.query.download === '1');
+});
+api.get('/orders/:id/invoice.pdf', async (req, res) => {
+  const s = auth(req);
+  const o = one(`SELECT * FROM orders WHERE id = ? AND customer_id = ? AND kind = 'order'`, Number(req.params.id), s.customer_id);
+  if (!o?.invoice_ext_id || getSetting('card_show_invoice', '1') !== '1') throw new HttpError(404, 'Фактура не найдена');
+  const pdf = await invoicePdf(o.id);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="Faktura-${String(o.invoice_no || o.id).replace(/[^\w-]/g, '-')}.pdf"`);
+  res.send(pdf);
 });
 
 api.post('/auth/logout', (req, res) => {

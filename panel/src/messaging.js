@@ -14,6 +14,8 @@ export const FIELDS = [
   ['zlecenie.kwota', 'Сумма брутто'], ['zlecenie.doZaplaty', 'К оплате'], ['zlecenie.kartaZlecenia', 'Ссылка на электронную карту заказа'],
   ['wycena.link', 'Ссылка на выцену'], ['link.platnosc', 'Ссылка на онлайн-оплату'], ['link.opinia', 'Ссылка на отзыв Google'],
   ['firma.nazwa', 'Название сервиса'], ['firma.telefon', 'Телефон сервиса'], ['firma.adres', 'Адрес сервиса'],
+  ['rekomendacja.tytul', 'Рекомендация: что сделать'], ['rekomendacja.termin', 'Рекомендация: срок'], ['pojazd.przegladDo', 'Техосмотр до'],
+  ['link.mojeAuto', 'Ссылка на сервисную книжку (pulsecar.pl/moje-auto)'],
 ];
 
 const zl = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',');

@@ -3,6 +3,7 @@
 import { html, useState, useEffect, useData, go, qs, Loading, ErrorBox, Badge, Icon, Pager, useDebounced, zl, num, fdate, carName, Picker, api, act, toast } from '../lib.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ObjectHistory } from './audit.js';
+import { Recommendations } from './recs.js';
 import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
 import { useApp } from '../lib.js';
 
@@ -129,7 +130,7 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
   </form>`;
 }
 
-const TABS = [['data', 'Данные авто'], ['files', 'Файлы'], ['orders', 'История заказов'], ['jobs', 'История работ'], ['mileage', 'Пробеги'], ['storage', 'Хранение'], ['history', 'История изменений']];
+const TABS = [['data', 'Данные авто'], ['recs', 'Рекомендации'], ['files', 'Файлы'], ['orders', 'История заказов'], ['jobs', 'История работ'], ['mileage', 'Пробеги'], ['storage', 'Хранение'], ['history', 'История изменений']];
 
 export function CarNew({ query = {} }) {
   const cid = Number(query.customer_id) || null;
@@ -149,7 +150,7 @@ export function CarPage({ id, query = {} }) {
   const jobs = k.orders.flatMap((o) => o.items.map((i) => ({ ...i, o })));
   const miles = k.orders.filter((o) => o.mileage).map((o) => ({ d: o.closed_at || o.created_at, m: o.mileage, o })).sort((a, b) => (a.d < b.d ? 1 : -1));
   const expired = (d) => d && d < new Date().toISOString().slice(0, 10);
-  const count = { files: k.files?.length, orders: k.orders.length, jobs: jobs.length, mileage: miles.length, storage: k.storage.length };
+  const count = { recs: (k.recommendations || []).filter((r) => r.status === 'open').length, files: k.files?.length, orders: k.orders.length, jobs: jobs.length, mileage: miles.length, storage: k.storage.length };
   return html`
     <div class="crumbs"><a href="#/cars">Автомобили</a></div>
     <div class="page-head"><h1>${carName(k)} ${k.year || ''}</h1>${k.plate ? html`<span class="plate" style="font-size:15px">${k.plate}</span>` : ''}
@@ -164,6 +165,7 @@ export function CarPage({ id, query = {} }) {
     <div class="card">
       <div class="pill-tabs mwf-tabs">${TABS.map(([t, l]) => html`<button class=${tab === t ? 'on' : ''} onClick=${() => setTab(t)}>${l}${count[t] ? html` <span class="faint">${count[t]}</span>` : ''}</button>`)}</div>
       ${tab === 'data' && html`<${CarEditor} key=${k.id} k=${k} owner0=${k.owner} onSaved=${reload} />`}
+      ${tab === 'recs' && html`<${Recommendations} car=${k} recs=${k.recommendations || []} reload=${reload} />`}
       ${tab === 'files' && (k.files?.length ? html`<div class="file-grid">${k.files.map((f) => html`<div class="file-tile">
           <a href=${'/crm-api/files/' + f.id} target="_blank" rel="noopener">${/^image\//.test(f.mime) ? html`<img src=${'/crm-api/files/' + f.id} alt="" loading="lazy" />` : html`<div class="file-ph">${/^video\//.test(f.mime) ? 'Видео' : 'PDF'}</div>`}</a>
           <div class="sub">${fdate(f.created_at)} · <a href=${'#/orders/' + f.order_id}>${f.order_no}</a></div></div>`)}</div>` : html`<div class="empty">Файлов нет — фото и документы добавляются в заказе (вкладка «Файлы и подписи»)</div>`)}

@@ -54,6 +54,18 @@ export default function Messaging() {
     </div>
 
     <div class="card stack">
+      <h2>Сервисная книжка (pulsecar.pl/moje-auto)</h2>
+      <div class="muted small">Клиент входит на сайте по номеру телефона и коду из SMS и видит свои авто, историю, документы и рекомендации из заказов (вкладка «Рекомендации»).</div>
+      <div class="row">${chk('sms_rec_on', 'SMS о рекомендации, когда подходит срок')}
+        <label class="f" style="width:200px">За сколько дней до срока<input type="number" min="1" max="60" value=${v.sms_rec_days} onInput=${(e) => set('sms_rec_days', e.target.value)} /></label></div>
+      ${tpl('sms_tpl_recommendation', 'Текст напоминания о рекомендации', 'Поля [[rekomendacja.tytul]], [[rekomendacja.termin]], [[link.mojeAuto]].')}
+      ${chk('sms_inspection_on', 'SMS перед окончанием техосмотра (поле «Техосмотр до» в карточке авто)')}
+      ${tpl('sms_tpl_inspection', 'Текст напоминания о техосмотре', 'Поля [[pojazd.przegladDo]], [[link.mojeAuto]].')}
+      <label class="f" style="max-width:420px">Ссылка на сервисную книжку — поле [[link.mojeAuto]]<input value=${v.my_car_url} onInput=${(e) => set('my_car_url', e.target.value)} /></label>
+      <div class="muted small">SMS уходят с 10:00 до 18:00, одна на рекомендацию, только клиентам с согласием на сообщения.</div>
+    </div>
+
+    <div class="card stack">
       <h2>Шаблоны SMS</h2>
       <div class="muted small">SMS при смене статуса настраиваются в каждом статусе: Настройки → Статусы заказов.</div>
       <div class="grid g2">

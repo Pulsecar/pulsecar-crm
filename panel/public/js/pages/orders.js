@@ -14,6 +14,7 @@ import { ScanBox } from '../scan.js';
 import { ReceiptBox } from '../fiscal.js';
 import { ObjectHistory } from './audit.js';
 import { OrderSlots } from './calendar.js';
+import { Recommendations } from './recs.js';
 
 
 // ── Выцены: обзвон клиента (статус, причина отказа, когда перезвонить) ─────────
@@ -178,7 +179,8 @@ export function OrderPage({ id }) {
     reload();
   };
   const tabs = [['main', 'Основное'], ['items', 'Работы и товары'], ['files', 'Файлы и подписи' + (o.files?.length ? ' · ' + o.files.length : '')],
-    ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата и документы' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['contact', 'Связь с клиентом'], ['plan', 'Терминарз'], ['check', 'Чек-листы']]), ['log', 'История']];
+    ...(isQuote ? [] : [...(app.perms['orders.prices'] ? [['pay', 'Оплата и документы' + (due > 0.01 && o.total > 0 ? ' · ' + zl(due) : '')]] : []), ['contact', 'Связь с клиентом'], ['plan', 'Терминарз'], ['check', 'Чек-листы']]),
+    ['recs', 'Рекомендации' + ((o.recommendations || []).filter((r) => r.status === 'open').length ? ' · ' + o.recommendations.filter((r) => r.status === 'open').length : '')], ['log', 'История']];
   const vis = tabs.filter(([k]) => uiOn('order.tab.' + k));
   if (vis.length && !vis.some(([k]) => k === tab)) setTimeout(() => setTab(vis[0][0]));
   return html`
@@ -226,6 +228,8 @@ export function OrderPage({ id }) {
     ${tab === 'plan' && html`<${Plan} o=${o} />`}
     ${tab === 'contact' && html`<${Contact} o=${o} reload=${reload} /><${ContactLog} o=${o} />`}
     ${tab === 'check' && html`<${Checklists} o=${o} />`}
+    ${tab === 'recs' && html`<${Recommendations} car=${o.car} orderId=${o.id} recs=${o.recommendations || []} reload=${reload}
+      fromChecklist=${isQuote ? null : async () => { const r = await act(() => api(`orders/${o.id}/recommendations/from-checklists`, { body: {} })); toast(r.added ? `Добавлено из чек-листа: ${r.added}` : 'В чек-листах нет пунктов «Внимание» / «Заменить»'); reload(); }} />`}
     ${tab === 'log' && html`<div class="card"><${ObjectHistory} entity="orders" id=${o.id} /></div>`}`;
 }
 const ACTION = { sms: 'SMS клиенту', email: 'E-mail клиенту', paylink: 'Ссылка на оплату', ic_order: 'Заказ в Inter Cars', invoice_error: 'Ошибка автофактуры', create: 'Создан', update: 'Изменены данные', status: 'Статус →', payment: 'Оплата', payment_delete: 'Удалена оплата', redeem: 'Списаны баллы', invoice: 'Выставлена фактура', proforma: 'Выставлена Pro forma', to_order: 'Создан заказ из выцены', accepted: 'Клиент подтвердил по ссылке', accept_reset: 'Сброшено подтверждение клиента' };
