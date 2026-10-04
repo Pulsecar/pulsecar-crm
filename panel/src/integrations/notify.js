@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import { ilog } from '../db.js';
 import { cfg, setState } from './index.js';
+import { curBranch, branchName, MAIN } from '../branches.js';
 
 export async function telegramSend(text, c = cfg('telegram')) {
   if (!c?.botToken || !c.chatId) return false;
@@ -42,6 +43,8 @@ export async function webhookSend(event, data, c = cfg('webhook')) {
 
 /** Событие в CRM → Telegram (если событие выбрано) и вебхук. Ошибки не мешают работе. */
 export function notify(event, text, data = {}) {
+  // в филиале — с названием сервиса, чтобы в общем чате было видно, откуда событие
+  if (curBranch() !== MAIN) { text = `[${branchName(curBranch())}] ${text}`; data = { ...data, branch: curBranch() }; }
   const t = cfg('telegram');
   if (t && (t.events || []).includes(event)) telegramSend(text, t).catch((e) => { ilog('telegram', 'error', e.message); setState('telegram', { lastError: e.message }); });
   if (cfg('webhook')) webhookSend(event, { text, ...data }).catch((e) => { ilog('webhook', 'error', e.message); setState('webhook', { lastError: e.message }); });

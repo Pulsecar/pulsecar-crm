@@ -29,6 +29,14 @@ app.use((req, res, next) => {
 initAudit();
 app.use(auditContext);
 
+// Сервис (филиал) для публичных страниц: карта заказа /k/W2~токен, запись /rezerwacja?b=W2
+import { withDb, mainDb } from './db.js';
+import { branchDb, allDbs, forEachDb } from './branches.js';
+app.use((req, _res, next) => {
+  const code = /^\/k\/([A-Z0-9]{2,8})~/.exec(req.path)?.[1] || (req.path.startsWith('/rezerwacja') ? String(req.query.b || '').toUpperCase() : '');
+  withDb((code && branchDb(code)) || mainDb, next);
+});
+
 // API мобильного приложения
 app.use('/api', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -47,7 +55,8 @@ app.use(pub);
 
 // Календарь-подписка (Google / iPhone): /ical/<секрет>.ics, отдельный пост — ?station=ID
 app.get('/ical/:token.ics', (req, res) => {
-  const body = icalFeed(req.params.token, Number(req.query.station) || null);
+  let body = null;
+  for (const d of allDbs()) { body = withDb(d, () => icalFeed(req.params.token, Number(req.query.station) || null)); if (body) break; }
   if (!body) return res.status(404).send('not found');
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
   res.send(body);
@@ -56,9 +65,11 @@ app.get('/ical/:token.ics', (req, res) => {
 // Уведомление Tpay: содержимому не доверяем — перепроверяем все ожидающие оплаты через API Tpay
 app.post('/hooks/tpay', express.urlencoded({ extended: false }), async (req, res) => {
   res.type('text/plain').send('TRUE');
-  for (const o of dbAll(`SELECT * FROM orders WHERE pay_ext_id IS NOT NULL AND paid < total - 0.01`)) {
-    try { const r = await checkPayment(o); if (r.justPaid) { recalc(o.id); notify('payment', `Онлайн-оплата ${o.number}: ${r.amount} zł`); } } catch {}
-  }
+  await forEachDb(async () => {
+    for (const o of dbAll(`SELECT * FROM orders WHERE pay_ext_id IS NOT NULL AND paid < total - 0.01`)) {
+      try { const r = await checkPayment(o); if (r.justPaid) { recalc(o.id); notify('payment', `Онлайн-оплата ${o.number}: ${r.amount} zł`); } } catch {}
+    }
+  });
 });
 
 // статика панели и библиотеки без сборки
@@ -86,16 +97,21 @@ if (process.env.NODE_ENV !== 'test') startJobs();
 
 // ── Ежедневная резервная копия базы: data/backups/pulsecar-ГГГГ-ММ-ДД.db (хранится 30 дней) ──
 import { mkdirSync, readdirSync, rmSync, existsSync } from 'node:fs';
-import { db } from './db.js';
+import { curBranch as curBranchCode } from './branches.js';
 function backup() {
-  try {
-    const dir = join(dirname(config.dbPath), 'backups');
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, `pulsecar-${new Date().toISOString().slice(0, 10)}.db`);
-    if (!existsSync(file)) db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
-    const files = readdirSync(dir).filter((f) => f.startsWith('pulsecar-')).sort();
-    for (const f of files.slice(0, Math.max(0, files.length - 30))) rmSync(join(dir, f));
-  } catch (e) { console.error('Бэкап не удался:', e.message); }
+  // главный: pulsecar-ГГГГ-ММ-ДД.db, филиалы: pulsecar-КОД-ГГГГ-ММ-ДД.db — по 30 копий каждого
+  const dir = join(dirname(config.dbPath), 'backups');
+  mkdirSync(dir, { recursive: true });
+  for (const d of allDbs()) {
+    try {
+      const code = withDb(d, () => curBranchCode());
+      const pre = code === 'main' ? 'pulsecar-' : `pulsecar-${code}-`;
+      const file = join(dir, `${pre}${new Date().toISOString().slice(0, 10)}.db`);
+      if (!existsSync(file)) d.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+      const files = readdirSync(dir).filter((f) => f.startsWith(pre) && /^\d{4}-/.test(f.slice(pre.length))).sort();
+      for (const f of files.slice(0, Math.max(0, files.length - 30))) rmSync(join(dir, f));
+    } catch (e) { console.error('Бэкап не удался:', e.message); }
+  }
 }
 setTimeout(backup, 10_000);
 setInterval(backup, 6 * 3600_000);

@@ -1,15 +1,17 @@
 // Остатки в шапке CRM (как в Motowarsztat): сколько SMS осталось и сколько авто можно найти по номеру.
 // Где у сервиса есть API баланса — берём оттуда (SMSAPI, SerwerSMS); где нет (RegCheck и др.) —
 // считаем сами: остаток, который вписали вручную, минус использовано с того момента.
-import { all, one, run, getSetting, setSetting } from './db.js';
+import { all, one, run, getSetting, setSetting, curDb } from './db.js';
 import { cfg } from './integrations/index.js';
 import { activeProvider, smsParts } from './sms.js';
 
-let cache = null, cacheAt = 0;
-export const resetBalances = () => { cache = null; };
+// кэш — свой для каждого сервиса (филиала)
+const caches = new WeakMap();
+const C = () => { let c = caches.get(curDb()); if (!c) caches.set(curDb(), (c = { cache: null, cacheAt: 0 })); return c; };
+export const resetBalances = () => { C().cache = null; };
 
 db_init();
-function db_init() {
+export function db_init() {
   run(`CREATE TABLE IF NOT EXISTS usage_log (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, ref TEXT, at TEXT NOT NULL DEFAULT (datetime('now')))`);
 }
 /** Отметить расход (например, поиск авто по номеру в RegCheck) */
@@ -28,7 +30,7 @@ export function setManual(kind, count) {
   if (!['sms', 'plate'].includes(kind)) return;
   setSetting(`bal_${kind}`, count === '' || count === null || count === undefined ? '' : String(Math.max(0, Math.round(Number(count) || 0))));
   setSetting(`bal_${kind}_at`, new Date().toISOString().slice(0, 19).replace('T', ' '));
-  cache = null;
+  C().cache = null;
 }
 
 async function smsBalance() {
@@ -69,8 +71,9 @@ function plateBalance() {
 }
 
 export async function balances(force) {
-  if (!force && cache && Date.now() - cacheAt < 5 * 60 * 1000) return { ...cache, plate: plateBalance() };
-  cache = { sms: await smsBalance(), plate: plateBalance(), at: new Date().toISOString() };
-  cacheAt = Date.now();
-  return cache;
+  const c = C();
+  if (!force && c.cache && Date.now() - c.cacheAt < 5 * 60 * 1000) return { ...c.cache, plate: plateBalance() };
+  c.cache = { sms: await smsBalance(), plate: plateBalance(), at: new Date().toISOString() };
+  c.cacheAt = Date.now();
+  return c.cache;
 }

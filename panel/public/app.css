@@ -651,3 +651,13 @@ a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; }
 .split-btn .menu-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; background: var(--surface2); border: 1px solid var(--border2); border-radius: 10px; padding: 4px; min-width: 250px; box-shadow: 0 12px 30px rgba(0,0,0,.35); }
 .split-btn .menu-pop button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; background: none; color: var(--text); font: inherit; border-radius: 8px; cursor: pointer; text-align: left; }
 .split-btn .menu-pop button:hover { background: var(--surface3); }
+
+/* переключатель сервисов (филиалов) */
+.bswitch { margin-left: auto; }
+.bswitch + .bal, .bswitch + span .bal, .bsw-chip + span .bal { margin-left: 0; }
+.bswitch .um-drop { left: 0; right: auto; }
+.bsw-btn { gap: 6px; max-width: 240px; }
+.bsw-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bsw-chip { margin-left: auto; }
+@media (max-width: 720px) { .bsw-name { display: none; } }
+.owner-tbl td.num, .owner-tbl th { white-space: nowrap; }

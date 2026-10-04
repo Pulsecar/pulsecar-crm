@@ -87,3 +87,28 @@ export function InOut({ rows, fmt }) {
     ${hover !== null && html`<div class="chart-tip" style=${`left:${Math.min(88, ((padL + band * hover) / W) * 100)}%`}><b>${rows[hover].d}</b><div>Поступило: ${fmt(rows[hover].inflow)}</div><div>Выдано: ${fmt(rows[hover].outflow)}</div></div>`}
   </div>`;
 }
+
+/** Несколько линий по дням (например, выручка каждого сервиса): легенда, перекрестие и подсказка со всеми сериями */
+export function MultiLine({ days, series, fmt, height = 220 }) {
+  const [hover, setHover] = useState(null);
+  if (!days.length) return html`<div class="empty">Нет данных за период</div>`;
+  const W = Math.max(1000, days.length * 26), H = height, padL = 58, padB = 26, padT = 12;
+  const max = niceMax(Math.max(1, ...series.flatMap((s) => s.values)));
+  const y = (v) => padT + (H - padT - padB) * (1 - v / max);
+  const step = days.length > 1 ? (W - padL - 12) / (days.length - 1) : 0;
+  const x = (i) => padL + (days.length > 1 ? step * i : (W - padL) / 2);
+  const every = Math.ceil(days.length / Math.floor((W - padL) / 70));
+  const near = (e) => { const r = e.currentTarget.getBoundingClientRect(); const px = ((e.clientX - r.left) / r.width) * W; setHover(Math.max(0, Math.min(days.length - 1, Math.round((px - padL) / (step || 1))))); };
+  return html`<div class="chart-wrap" onMouseLeave=${() => setHover(null)}>
+    ${series.length > 1 ? html`<div class="legend">${series.map((s) => html`<span><i class="line" style=${'background:' + s.color}></i>${s.name}</span>`)}</div>` : ''}
+    <svg viewBox=${`0 0 ${W} ${H}`} style=${`width:100%;min-width:${Math.min(W, 640)}px;height:auto;max-height:${H * 1.4}px`} role="img" aria-label="График по дням" onMouseMove=${near}>
+      ${[0, 0.25, 0.5, 0.75, 1].map((t) => html`<g><line x1=${padL} x2=${W - 4} y1=${y(max * t)} y2=${y(max * t)} class="grid" /><text x=${padL - 6} y=${y(max * t) + 4} class="tick" text-anchor="end">${compact(max * t)}</text></g>`)}
+      ${days.map((d, i) => (i % every === 0 ? html`<text x=${x(i)} y=${H - 8} class="tick" text-anchor="middle">${d.slice(8, 10)}.${d.slice(5, 7)}</text>` : ''))}
+      ${hover !== null && html`<line x1=${x(hover)} x2=${x(hover)} y1=${padT} y2=${H - padB} stroke="var(--muted, #9a9ca3)" stroke-width="1" stroke-dasharray="3 3" />`}
+      ${series.map((s) => html`<g><polyline fill="none" stroke=${s.color} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points=${s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')} />
+        ${hover !== null && html`<circle cx=${x(hover)} cy=${y(s.values[hover])} r="4" fill=${s.color} stroke="var(--surface, #17181b)" stroke-width="2" />`}</g>`)}
+    </svg>
+    ${hover !== null && html`<div class="chart-tip" style=${`left:${Math.min(80, (x(hover) / W) * 100)}%`}><b>${days[hover].slice(8, 10)}.${days[hover].slice(5, 7)}.${days[hover].slice(0, 4)}</b>
+      ${series.map((s) => html`<div><i class="dot" style=${'background:' + s.color}></i> ${s.name}: <b>${fmt(s.values[hover])}</b></div>`)}</div>`}
+  </div>`;
+}

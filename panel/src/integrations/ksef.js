@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { one, all, run, getSetting } from '../db.js';
 import { cfg, getState, setState } from './index.js';
 import { HttpError, round2 } from '../util.js';
+import { forEachDb } from '../branches.js';
 
 export const KSEF_ENVS = {
   prod: { api: 'https://api.ksef.mf.gov.pl/v2', qr: 'https://qr.ksef.mf.gov.pl', app: 'https://ap.ksef.mf.gov.pl' },
@@ -295,5 +296,5 @@ export function startKsefPoller() {
       try { await refreshStatus(d.id); } catch { /* повторим позже */ }
     }
   };
-  setInterval(() => tick().catch(() => {}), 120_000).unref();
+  setInterval(() => forEachDb(tick).catch(() => {}), 120_000).unref();
 }

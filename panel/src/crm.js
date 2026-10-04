@@ -3,7 +3,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import multer from 'multer';
-import { all, one, run, tx, insert, update, log, getSetting, setSetting } from './db.js';
+import { all, one, run, tx, insert, update, log, getSetting, setSetting, mainDb, withDb, curDb as curDbRef } from './db.js';
+import { MAIN, listBranches, branchDb, allDbs, curBranch, createBranch, updateBranch, ownerIn, branchName } from './branches.js';
 import { config } from './config.js';
 import {
   HttpError, currentNumber, checkPassword, hashPassword, normPhone, normPlate, normVin, newCardNo, nextNumber, parseCookies, readSession,
@@ -41,6 +42,39 @@ const PAY_METHODS = ['cash', 'card', 'blik', 'transfer'];
 
 export const crm = express.Router();
 crm.use(express.json({ limit: '1mb' }));
+
+// ── Сервис (филиал): запрос работает с базой того сервиса, куда вошёл сотрудник ──
+const sessOf = (req) => (req._sess !== undefined ? req._sess : (req._sess = readSession(parseCookies(req.headers.cookie).pcs)));
+crm.use((req, _res, next) => {
+  const bearer = /^Bearer (pcx_[A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '')?.[1];
+  if (bearer) {
+    const h = sha(bearer);
+    const d = allDbs().find((x) => x.prepare('SELECT 1 FROM staff WHERE ext_token = ? AND active = 1').get(h));
+    return withDb(d || mainDb, next);
+  }
+  const sess = sessOf(req);
+  if (sess?.b && sess.b !== MAIN) {
+    const d = branchDb(sess.b);
+    if (!d) { req._sess = null; return withDb(mainDb, next); } // сервис отключён — нужно войти заново
+    return withDb(d, next);
+  }
+  withDb(mainDb, next);
+});
+const cookieOpts = () => `HttpOnly; Path=/; SameSite=Lax; Max-Age=${14 * 86400}${config.publicUrl.startsWith('https') ? '; Secure' : ''}${process.env.COOKIE_DOMAIN ? '; Domain=' + process.env.COOKIE_DOMAIN : ''}`;
+const setSess = (res, obj) => res.setHeader('Set-Cookie', `pcs=${signSession({ ...obj, exp: Date.now() + 14 * 86400_000 })}; ${cookieOpts()}`);
+/** Владелец: администратор главного сервиса (в филиале — вошедший через переключатель) */
+function ownerOf(req) {
+  const sess = sessOf(req);
+  if (!sess) return null;
+  const mid = sess.o || ((!sess.b || sess.b === MAIN) ? sess.id : null);
+  return mid ? mainDb.prepare(`SELECT * FROM staff WHERE id = ? AND role = 'admin' AND active = 1`).get(mid) || null : null;
+}
+function owner(req) {
+  who(req);
+  const o = ownerOf(req);
+  if (!o) throw new HttpError(403, 'Только для владельца (администратор главного сервиса).');
+  return o;
+}
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
 
 // первый администратор
@@ -54,14 +88,20 @@ const loginHits = new Map();
 crm.post('/login', (req, res) => {
   const n = (loginHits.get(req.ip) || []).filter((t) => t > Date.now() - 15 * 60_000);
   if (n.length >= 10) throw new HttpError(429, 'Слишком много попыток входа. Подождите 15 минут.');
-  const s = one('SELECT * FROM staff WHERE login = ? AND active = 1 AND pass_hash IS NOT NULL', String(req.body?.login || '').trim());
-  if (!s || !checkPassword(String(req.body?.password || ''), s.pass_hash)) {
+  // логин ищем в главном сервисе, потом в филиалах (у каждого сервиса свои сотрудники)
+  const login = String(req.body?.login || '').trim(), pass = String(req.body?.password || '');
+  let s = null, code = MAIN;
+  for (const b of listBranches()) {
+    const d = branchDb(b.code);
+    const r = d && d.prepare('SELECT * FROM staff WHERE login = ? AND active = 1 AND pass_hash IS NOT NULL').get(login);
+    if (r && checkPassword(pass, r.pass_hash)) { s = r; code = b.code; break; }
+  }
+  if (!s) {
     n.push(Date.now()); loginHits.set(req.ip, n);
     throw new HttpError(401, 'Неверный логин или пароль.');
   }
-  const token = signSession({ id: s.id, exp: Date.now() + 14 * 86400_000 });
-  res.setHeader('Set-Cookie', `pcs=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${14 * 86400}${config.publicUrl.startsWith('https') ? '; Secure' : ''}${process.env.COOKIE_DOMAIN ? '; Domain=' + process.env.COOKIE_DOMAIN : ''}`);
-  run("UPDATE staff SET last_login = datetime('now') WHERE id = ?", s.id);
+  setSess(res, { id: s.id, b: code });
+  withDb(branchDb(code), () => run("UPDATE staff SET last_login = datetime('now') WHERE id = ?", s.id));
   res.json({ ok: true });
 });
 crm.post('/logout', (_req, res) => { res.setHeader('Set-Cookie', `pcs=; Path=/; Max-Age=0${process.env.COOKIE_DOMAIN ? '; Domain=' + process.env.COOKIE_DOMAIN : ''}`); res.json({ ok: true }); });
@@ -85,7 +125,8 @@ const permLabel = (k) => `«${PERM_LABELS[k] || k}»`;
 const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 function who(req, min = 'mechanic') {
   const bearer = /^Bearer (pcx_[A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '')?.[1];
-  const sess = bearer ? null : readSession(parseCookies(req.headers.cookie).pcs);
+  const sess = bearer ? null : sessOf(req);
+  if (sess?.o && !mainDb.prepare(`SELECT 1 FROM staff WHERE id = ? AND role = 'admin' AND active = 1`).get(sess.o)) throw new HttpError(401, 'Войдите в панель.');
   const s = bearer ? one('SELECT * FROM staff WHERE ext_token = ? AND active = 1', sha(bearer)) : sess && one('SELECT * FROM staff WHERE id = ? AND active = 1', sess.id);
   if (!s) throw new HttpError(401, 'Войдите в панель.');
   if (min.includes('.')) { if (!can(s, min)) throw new HttpError(403, 'Недостаточно прав: ' + permLabel(min)); }
@@ -111,6 +152,9 @@ crm.get('/me', (req, res) => {
     user: { id: s.id, name: s.name, role: s.role, login: s.login, phone: s.phone, email: s.email, last_login: s.last_login },
     perms: permsOf(s),
     ui: uiOf(s),
+    branch: { code: curBranch(), name: branchName(curBranch()) },
+    owner: !!ownerOf(req),
+    branches: ownerOf(req) ? listBranches().map(({ code, name }) => ({ code, name })) : [],
     ...lists(),
     settings: Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value])),
     loyalty: loyaltySummary(0).rules,
@@ -126,6 +170,67 @@ function uiOf(s) {
   const r = one('SELECT ui FROM staff WHERE id = ?', s.id);
   try { const v = JSON.parse(r?.ui || '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; }
 }
+
+// ── Сервисы (филиалы) и общий дашборд владельца ───────────────────────────
+crm.get('/branches', (req, res) => {
+  owner(req);
+  res.json({ current: curBranch(), rows: listBranches({ withInactive: true }) });
+});
+crm.post('/branches', (req, res) => {
+  const o = owner(req);
+  const r = createBranch(req.body || {}, o);
+  res.json({ ok: true, ...r });
+});
+crm.put('/branches/:code', (req, res) => {
+  owner(req);
+  if (req.params.code === MAIN && req.body?.active === false) throw new HttpError(400, 'Главный сервис отключить нельзя');
+  updateBranch(req.params.code, req.body || {});
+  res.json({ ok: true });
+});
+/** Переключиться в другой сервис (только владелец) */
+crm.post('/branches/switch', (req, res) => {
+  const o = owner(req);
+  const code = String(req.body?.code || MAIN);
+  if (code === MAIN) setSess(res, { id: o.id, b: MAIN });
+  else setSess(res, { id: ownerIn(code, o), b: code, o: o.id });
+  res.json({ ok: true, code });
+});
+
+/** Сводка одного сервиса за период */
+function branchSummary(from, to) {
+  const P = `method <> 'points' AND transfer_id IS NULL AND substr(created_at,1,10) BETWEEN ? AND ?`;
+  const inc = one(`SELECT COALESCE(SUM(amount),0) s, COUNT(*) n FROM payments WHERE direction='in' AND ${P}`, from, to);
+  const out = one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='out' AND ${P}`, from, to).s;
+  const purch = one(`SELECT COALESCE(SUM(gross),0) s FROM purchases WHERE substr(COALESCE(doc_date, created_at),1,10) BETWEEN ? AND ?`, from, to)?.s || 0;
+  const closed = one(`SELECT COUNT(*) n, COALESCE(SUM(total),0) s FROM orders WHERE kind='order' AND substr(closed_at,1,10) BETWEEN ? AND ?`, from, to);
+  const created = one(`SELECT COUNT(*) n FROM orders WHERE kind='order' AND substr(created_at,1,10) BETWEEN ? AND ?`, from, to).n;
+  const open = one(`SELECT COUNT(*) n, COALESCE(SUM(o.total),0) s FROM orders o JOIN order_statuses st ON st.id = o.status_id WHERE o.kind='order' AND st.is_final = 0`);
+  const debt = one(`SELECT COUNT(*) n, COALESCE(SUM(o.total - o.paid),0) s FROM orders o JOIN order_statuses st ON st.id = o.status_id
+    WHERE o.kind='order' AND st.is_final = 1 AND o.paid < o.total - 0.01 AND o.source <> 'import'`);
+  const quotes = one(`SELECT COUNT(*) n, COALESCE(SUM(total),0) s FROM orders WHERE kind='quote' AND substr(created_at,1,10) BETWEEN ? AND ?`, from, to);
+  const newCust = one(`SELECT COUNT(*) n FROM customers WHERE substr(created_at,1,10) BETWEEN ? AND ?`, from, to).n;
+  const d = today();
+  const visits = one(`SELECT COUNT(*) n FROM appointments WHERE substr(start_at,1,10) = ? AND status <> 'cancelled'`, d).n;
+  const requests = one(`SELECT COUNT(*) n FROM appointments WHERE status = 'request'`).n;
+  const labor = one(`SELECT COALESCE(SUM(i.price * i.qty * (1 - COALESCE(i.discount,0)/100.0)),0) s FROM order_items i JOIN orders o ON o.id = i.order_id
+    WHERE o.kind='order' AND i.kind = 'labor' AND substr(o.closed_at,1,10) BETWEEN ? AND ?`, from, to).s;
+  const byDay = all(`SELECT substr(created_at,1,10) d, ROUND(SUM(amount),2) s FROM payments WHERE direction='in' AND ${P} GROUP BY d ORDER BY d`, from, to);
+  const staff = one(`SELECT COUNT(*) n FROM staff WHERE active = 1 AND login IS NOT NULL`).n;
+  return { income: inc.s, payments: inc.n, out, purchases: purch, closed, created, open, debt, quotes, newCust, visits, requests, labor,
+    avg: closed.n ? closed.s / closed.n : 0, byDay, staff };
+}
+crm.get('/owner/dashboard', (req, res) => {
+  owner(req);
+  const d = today();
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : d.slice(0, 8) + '01';
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : d;
+  const rows = listBranches().map((b) => {
+    const db_ = branchDb(b.code);
+    if (!db_) return null;
+    return withDb(db_, () => { try { return { code: b.code, name: b.name, ...branchSummary(from, to), today: branchSummary(d, d) }; } catch (e) { return { code: b.code, name: b.name, error: e.message }; } });
+  }).filter(Boolean);
+  res.json({ from, to, current: curBranch(), rows });
+});
 
 // ── Главная ────────────────────────────────────────────────────────────────
 crm.get('/dashboard', (req, res) => {
@@ -1512,6 +1617,7 @@ crm.post('/staff', (req, res) => {
   };
   if (b.revoke) { d.login = null; d.pass_hash = null; }
   if (d.login && one('SELECT 1 FROM staff WHERE login = ? AND id <> ?', d.login, Number(b.id) || 0)) throw new HttpError(409, 'Такой логин уже есть');
+  if (d.login && allDbs().some((x) => x !== curDbRef() && x.prepare('SELECT 1 FROM staff WHERE login = ?').get(d.login))) throw new HttpError(409, 'Такой логин уже занят в другом сервисе — логины должны быть разными во всех сервисах');
   if (b.password) {
     if (String(b.password).length < 8) throw new HttpError(400, 'Пароль — минимум 8 символов');
     d.pass_hash = hashPassword(b.password);
@@ -2203,7 +2309,8 @@ const sendOrderFile = DOC.sendOrderFile;
 crm.post('/orders/:id/files', upload.array('files', 20), (req, res) => {
   const s = who(req, 'orders.edit');
   const o = getOrder(Number(req.params.id));
-  const dir = path.join(FILES_DIR, String(o.id));
+  const sub = (curBranch() === MAIN ? '' : curBranch().toLowerCase() + '/') + o.id; // файлы филиала — в своей папке
+  const dir = path.join(FILES_DIR, sub);
   fs.mkdirSync(dir, { recursive: true });
   const out = [];
   const OK = /^(image\/(jpeg|png|webp|heic|heif|gif)|video\/(mp4|quicktime|webm|3gpp)|application\/pdf)$/;
@@ -2213,7 +2320,7 @@ crm.post('/orders/:id/files', upload.array('files', 20), (req, res) => {
     const safe = f.originalname.normalize('NFKD').replace(/[^\w.\-]+/g, '_').slice(-80) || 'plik';
     const name = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}-${safe}`;
     fs.writeFileSync(path.join(dir, name), f.buffer);
-    out.push(insert('order_files', { order_id: o.id, name: f.originalname.slice(0, 200), path: `${o.id}/${name}`, mime: f.mimetype, size: f.size, client_visible: req.body?.client_visible === '0' ? 0 : 1, staff: s.name }));
+    out.push(insert('order_files', { order_id: o.id, name: f.originalname.slice(0, 200), path: `${sub}/${name}`, mime: f.mimetype, size: f.size, client_visible: req.body?.client_visible === '0' ? 0 : 1, staff: s.name }));
   }
   log('order', o.id, 'update', `Файлы: ${out.length}`, s.name);
   res.json({ ok: true, ids: out });

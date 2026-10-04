@@ -6,6 +6,7 @@ import { HttpError, round2, today } from '../util.js';
 import { cfg, getState, setState } from './index.js';
 import { createStockDoc } from '../stock.js';
 import { notify } from './notify.js';
+import { forEachDb } from '../branches.js';
 
 const KEY = 'intercars';
 const conf = () => {
@@ -179,9 +180,9 @@ export async function placeOrder({ lines, customNumber, comments }) {
 let timer = null;
 export function startIntercarsSync() {
   if (timer) return;
-  timer = setInterval(async () => {
+  timer = setInterval(() => forEachDb(async () => {
     const c = cfg(KEY);
     if (!c?.autoSync || !c.clientId) return;
     try { await fetchDocs(3); } catch (e) { setState(KEY, { lastError: e.message }); ilog(KEY, 'error', e.message); }
-  }, 30 * 60_000);
+  }), 30 * 60_000);
 }

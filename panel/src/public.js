@@ -14,6 +14,7 @@ import { createPayLink } from './integrations/services.js';
 import { config } from './config.js';
 import { cfg } from './integrations/index.js';
 import { CARD_LANG_BAR, CARD_LANG_CSS, CARD_LANG_JS } from './card-i18n.js';
+import { curBranch, MAIN } from './branches.js';
 
 export const pub = express.Router();
 pub.use(express.urlencoded({ extended: false, limit: '20kb' }));
@@ -57,7 +58,7 @@ label{display:block;margin-top:10px;font-size:14px;color:var(--m)}.ok{background
 <main>${body}</main><footer>${esc(s.company_name || '')} · ${esc(s.company_address || '')}${s.company_nip ? ' · NIP ' + esc(s.company_nip) : ''}</footer></body></html>`;
 
 function findCard(token) {
-  if (!/^[A-Za-z0-9_-]{8,40}$/.test(String(token))) return null;
+  if (!/^([A-Z0-9]{2,8}~)?[A-Za-z0-9_-]{8,40}$/.test(String(token))) return null;
   return one('SELECT * FROM orders WHERE card_token = ?', token);
 }
 
@@ -368,7 +369,7 @@ function bookingForm(s, embed, msg, v = {}) {
   const today = new Date().toISOString().slice(0, 10);
   return `${msg ? `<div class="card ${msg[0]}">${esc(msg[1])}</div>` : ''}
   <div class="card"><h1>Umów wizytę</h1><p class="m" style="margin:0">Wybierz dogodny termin — potwierdzimy go SMS-em lub telefonicznie.</p>
-  <form method="post" action="/rezerwacja${embed ? '?embed=1' : ''}">
+  <form method="post" action="/rezerwacja?${embed ? 'embed=1&' : ''}${curBranch() !== MAIN ? 'b=' + curBranch() : ''}">
     <label>Imię<input name="name" required maxlength="80" value="${esc(v.name)}" autocomplete="given-name"></label>
     <label>Telefon<input name="phone" required type="tel" maxlength="20" value="${esc(v.phone)}" autocomplete="tel" placeholder="+48 …"></label>
     <label>Numer rejestracyjny<input name="plate" maxlength="12" value="${esc(v.plate)}" style="text-transform:uppercase"></label>
@@ -431,5 +432,5 @@ pub.get('/rezerwacja.js', (req, res) => {
   const base = `${req.protocol}://${req.get('host')}`;
   res.type('application/javascript').setHeader('Cache-Control', 'public, max-age=3600');
   res.send(`(function(){var el=document.getElementById('pulsecar-booking');if(!el){el=document.createElement('div');(document.currentScript&&document.currentScript.parentNode||document.body).appendChild(el);}
-var f=document.createElement('iframe');f.src=${JSON.stringify(base + '/rezerwacja?embed=1')};f.title='Rezerwacja';f.style.cssText='width:100%;border:0;min-height:980px;';f.loading='lazy';el.appendChild(f);})();`);
+var f=document.createElement('iframe');f.src=${JSON.stringify(base + '/rezerwacja?embed=1' + (curBranch() !== MAIN ? '&b=' + curBranch() : ''))};f.title='Rezerwacja';f.style.cssText='width:100%;border:0;min-height:980px;';f.loading='lazy';el.appendChild(f);})();`);
 });

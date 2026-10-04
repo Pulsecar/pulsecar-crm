@@ -6,6 +6,7 @@ import { cfg, getState, setState } from './index.js';
 import { createStockDoc, findOrCreateProduct } from '../stock.js';
 import { addItem, recalc, getOrder } from '../orders.js';
 import { notify } from './notify.js';
+import { forEachDb } from '../branches.js';
 
 /** Польские поставщики (список как в Motowarsztat + популярные сети). api — есть прямое подключение */
 export const WHOLESALERS = [
@@ -309,9 +310,9 @@ export async function testMailbox() {
 let timer = null;
 export function startSupplierSync() {
   if (timer) return;
-  timer = setInterval(async () => {
+  timer = setInterval(() => forEachDb(async () => {
     const h = cfg(HART);
     if (h?.autoSync && h.username) { try { await fetchHartDocs(3); } catch (e) { setState(HART, { lastError: e.message }); ilog(HART, 'error', e.message); } }
     if (cfg('mailbox')) { try { await checkMailbox(); } catch (e) { setState('mailbox', { lastError: e.message }); ilog('mailbox', 'error', e.message); } }
-  }, 30 * 60_000);
+  }), 30 * 60_000);
 }

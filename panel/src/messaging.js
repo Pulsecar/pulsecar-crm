@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { all, one, run, getSetting } from './db.js';
 import { config } from './config.js';
 import { HttpError } from './util.js';
+import { curBranch, MAIN } from './branches.js';
 
 /** Список полей для подсказки в настройках */
 export const FIELDS = [
@@ -23,7 +24,8 @@ export function cardToken(orderId) {
   const o = one('SELECT card_token FROM orders WHERE id = ?', orderId);
   if (!o) throw new HttpError(404, 'Заказ не найден');
   if (o.card_token) return o.card_token;
-  const t = crypto.randomBytes(9).toString('base64url');
+  // в филиале перед токеном — код сервиса (W2~…): по нему ссылка открывается в нужной базе
+  const t = (curBranch() === MAIN ? '' : curBranch() + '~') + crypto.randomBytes(9).toString('base64url');
   run('UPDATE orders SET card_token = ? WHERE id = ?', t, orderId);
   return t;
 }

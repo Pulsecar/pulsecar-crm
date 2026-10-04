@@ -11,6 +11,7 @@ import Cash from './pages/cash.js';
 import Sales, { SaleDocPage } from './pages/sales.js';
 import Pos from './pages/pos.js';
 import Finance from './pages/finance.js';
+import Owner, { switchBranch } from './pages/owner.js';
 import Reports from './pages/reports.js';
 import AuditPage from './pages/audit.js';
 import Settings from './pages/settings.js';
@@ -91,6 +92,29 @@ function BalanceModal({ app, b, onClose, reload }) {
   </${Modal}>`;
 }
 
+// ── Переключатель сервисов (филиалов) для владельца ───────────────────────────
+function BranchSwitch({ app }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (!e.target.closest('.bswitch')) setOpen(false); };
+    setTimeout(() => addEventListener('click', close));
+    return () => removeEventListener('click', close);
+  }, [open]);
+  if (!app.owner) return app.branch?.code !== 'main' ? html`<span class="chip bsw-chip" title="Сервис">${app.branch?.name}</span>` : '';
+  return html`<div class="bswitch umenu">
+    <button class="btn bsw-btn" onClick=${() => setOpen(!open)} aria-haspopup="menu" aria-expanded=${open} title="Сервис"><${Icon} n="home" /><span class="bsw-name">${app.branch?.name}</span><${Icon} n="down" /></button>
+    ${open && html`<div class="um-drop" role="menu" style="min-width:240px">
+      <a class="um-item" href="#/owner" onClick=${() => setOpen(false)}><${Icon} n="chart" /><b>Все сервисы — общий дашборд</b></a>
+      <div class="um-sep"></div>
+      ${app.branches.map((b) => html`<button class="um-item" onClick=${() => (b.code === app.branch?.code ? setOpen(false) : switchBranch(b.code))}>
+        <${Icon} n=${b.code === app.branch?.code ? 'check' : 'home'} /><span class="grow">${b.name}</span>${b.code !== 'main' ? html`<span class="muted small">${b.code}</span>` : ''}</button>`)}
+      <div class="um-sep"></div>
+      <a class="um-item" href="#/owner?manage=1" onClick=${() => setOpen(false)}><${Icon} n="plus" />Добавить сервис</a>
+    </div>`}
+  </div>`;
+}
+
 function UserMenu({ app }) {
   const [open, setOpen] = useState(false);
   const [screen, setScreen] = useState(false);
@@ -111,7 +135,7 @@ function UserMenu({ app }) {
     <button class="um-btn" onClick=${() => setOpen(!open)} aria-haspopup="menu" aria-expanded=${open} title=${app.user.name}>
       <span class="um-name">${app.user.name}</span><${Icon} n="userc" /></button>
     ${open && html`<div class="um-drop" role="menu">
-      <div class="um-head"><b>${app.user.name}</b><span class="muted small">${{ admin: 'Администратор', staff: 'Сотрудник', mechanic: 'Механик' }[app.user.role] || ''}</span></div>
+      <div class="um-head"><b>${app.user.name}</b><span class="muted small">${app.owner ? 'Владелец' : { admin: 'Администратор', staff: 'Сотрудник', mechanic: 'Механик' }[app.user.role] || ''}${app.branch?.code !== 'main' ? ' · ' + app.branch?.name : ''}</span></div>
       ${groups.map((g) => html`${g.map(item)}<div class="um-sep"></div>`)}
       <label class="um-item um-row"><${Icon} n="moon" /><span class="grow">Тёмный режим</span>
         <span class="toggle"><input type="checkbox" checked=${dark} onChange=${(e) => { setDark(e.target.checked); setTheme(e.target.checked); }} /><i></i></span></label>
@@ -163,6 +187,7 @@ function Shell({ app }) {
 
   let page;
   if (!p0) page = html`<${Dashboard} />`;
+  else if (p0 === 'owner') page = html`<${Owner} manage=${route.query.manage === '1'} key=${route.query.manage || ''} />`;
   else if (p0 === 'orders' || p0 === 'quotes') {
     const kind = p0 === 'quotes' ? 'quote' : 'order';
     page = p1 === 'new' ? html`<${NewOrder} kind=${kind} query=${route.query} />` : p1 ? html`<${OrderPage} id=${p1} key=${p1} />` : html`<${OrdersList} kind=${kind} query=${route.query} />`;
@@ -193,6 +218,7 @@ function Shell({ app }) {
     <aside class=${'side' + (menu ? ' open' : '')}>
       <button class="side-toggle" onClick=${toggleMini} title=${mini ? 'Развернуть меню' : 'Свернуть меню'} aria-label=${mini ? 'Развернуть меню' : 'Свернуть меню'}><${Icon} n=${mini ? 'right' : 'left'} /></button>
       <a class="brand" href="#/" title="На главную" onClick=${() => setMenu(false)}><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar — на главную" /></a>
+      ${app.owner && html`<a class=${'nav-item' + (active('/owner') ? ' on' : '')} href="#/owner" title="Все сервисы" data-ui="menu.owner"><${Icon} n="chart" /><span class="nl">Все сервисы</span></a>`}
       ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
         <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label} data-ui=${'menu.' + (n.to.slice(1) || 'home')}>
           <${Icon} n=${n.icon} /><span class="nl">${n.label}</span>${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}
@@ -205,6 +231,7 @@ function Shell({ app }) {
           <input type="search" placeholder="Поиск: клиент, телефон, номер авто, VIN, заказ…" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Поиск" />
         </form>
         <a class="btn primary" data-ui="top.neworder" href="#/orders/new"><${Icon} n="plus" />Заказ</a>
+        <${BranchSwitch} app=${app} />
         <span data-ui="top.balances" style="display:contents"><${Balances} app=${app} /></span>
         <${UserMenu} app=${app} />
       </div>

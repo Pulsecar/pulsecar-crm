@@ -3,7 +3,7 @@ import { html, useState, useData, api, qs, useApp, Loading, ErrorBox, Modal, zl,
 import { Columns, HBars, InOut, SERIES } from '../charts.js';
 
 const d2s = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
-function range(p) {
+export function range(p) {
   const n = new Date();
   const y = n.getFullYear(), m = n.getMonth();
   switch (p) {
@@ -21,7 +21,7 @@ function range(p) {
     default: return null;
   }
 }
-const PRESETS = [['today', 'Сегодня'], ['yesterday', 'Вчера'], ['week', 'Неделя'], ['month', 'Этот месяц'], ['lastmonth', 'Прошлый месяц'], ['quarter', 'Квартал'], ['90', '90 дней'], ['year', 'Этот год'], ['lastyear', 'Прошлый год'], ['12m', '12 месяцев'], ['all', 'Всё время']];
+export const PRESETS = [['today', 'Сегодня'], ['yesterday', 'Вчера'], ['week', 'Неделя'], ['month', 'Этот месяц'], ['lastmonth', 'Прошлый месяц'], ['quarter', 'Квартал'], ['90', '90 дней'], ['year', 'Этот год'], ['lastyear', 'Прошлый год'], ['12m', '12 месяцев'], ['all', 'Всё время']];
 const pctf = (v) => (v == null ? '—' : `${num(v, 1)}%`);
 
 /** Плитка показателя с изменением к прошлому периоду (цвет = направление × хорошо ли рост) */
