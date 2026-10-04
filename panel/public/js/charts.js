@@ -93,7 +93,7 @@ export function MultiLine({ days, series, fmt, height = 220 }) {
   const [hover, setHover] = useState(null);
   if (!days.length) return html`<div class="empty">Нет данных за период</div>`;
   const W = Math.max(1000, days.length * 26), H = height, padL = 58, padB = 26, padT = 12;
-  const max = niceMax(Math.max(1, ...series.flatMap((s) => s.values)));
+  const max = niceMax(Math.max(100, ...series.flatMap((s) => s.values))); // не меньше 100 — иначе шкала из одинаковых «1»
   const y = (v) => padT + (H - padT - padB) * (1 - v / max);
   const step = days.length > 1 ? (W - padL - 12) / (days.length - 1) : 0;
   const x = (i) => padL + (days.length > 1 ? step * i : (W - padL) / 2);
