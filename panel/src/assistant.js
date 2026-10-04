@@ -299,6 +299,7 @@ assistant.post('/chat-api/message', express.json({ limit: '50kb' }), async (req,
 
   const ctx = { sessionId, lang };
   let reply = '', booking = null;
+  const parts = []; // текст до и после вызовов инструментов (например, цена → потом окна)
   try {
     const system = systemPrompt(c, lang);
     for (let i = 0; i < MAX_ROUNDS; i++) {
@@ -306,7 +307,8 @@ assistant.post('/chat-api/message', express.json({ limit: '50kb' }), async (req,
       history.push({ role: 'assistant', content: r.content });
       const uses = (r.content || []).filter((b) => b.type === 'tool_use');
       const text = (r.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-      if (r.stop_reason !== 'tool_use' || !uses.length) { reply = text; break; }
+      if (text) parts.push(text);
+      if (r.stop_reason !== 'tool_use' || !uses.length) break;
       history.push({ role: 'user', content: uses.map((u) => {
         let out;
         try { out = runTool(c, u.name, u.input || {}, ctx); } catch (e) { console.error('assistant tool', e); out = { ok: false, error: 'tool_failed' }; }
@@ -317,6 +319,7 @@ assistant.post('/chat-api/message', express.json({ limit: '50kb' }), async (req,
   } catch (e) {
     console.error('assistant:', e.message);
   }
+  reply = parts.join('\n\n');
   if (!reply) reply = FALLBACK[lang];
   transcript.push({ role: 'assistant', text: reply, at: localShift(0) });
   run(`UPDATE chat_sessions SET history = ?, transcript = ?, msg_count = msg_count + 1, lang = ?, page = COALESCE(NULLIF(?, ''), page), updated_at = datetime('now') WHERE id = ?`,

@@ -31,6 +31,7 @@ const mock = createServer(async (req, res) => {
     }
     return text('RESULT ' + last.content[0].content);
   }
+  if (/price\+slots/.test(last.content)) return json(200, { content: [{ type: 'text', text: 'Diagnostyka od 100 zł.' }, { type: 'tool_use', id: 'tu_ps', name: 'get_available_slots', input: { days: 2 } }], stop_reason: 'tool_use' });
   if (/book|slots/.test(last.content)) return tool('get_available_slots', { days: 7 });
   if (/human/.test(last.content)) return tool('request_human', { name: 'Ola', phone: '+48 500 200 300', topic: 'laweta' });
   if (/noconsent/.test(last.content)) return tool('create_booking', { name: 'A', phone: '600100200', car: 'x', service: 'y', slot: '2099-01-01 10:00', consent: false });
@@ -130,6 +131,10 @@ try {
   assert.ok(!t2.includes(after[0].times[0]), 'окно с записью на посту занято');
   console.log('✓ свободные окна учитывают Терминарз');
 
+  // текст до вызова инструмента не теряется
+  j = await (await chat('price+slots', sid)).json();
+  assert.match(j.reply, /^Diagnostyka od 100 zł\.\n\nSLOTS /);
+  console.log('✓ ответ из нескольких частей (цена + окна)');
   // согласие обязательно
   j = await (await chat('noconsent', sid)).json();
   assert.match(j.reply, /consent_required/);
