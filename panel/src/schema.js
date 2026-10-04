@@ -701,4 +701,5 @@ db.exec(`CREATE TABLE IF NOT EXISTS chat_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
 db.exec('CREATE INDEX IF NOT EXISTS chat_sessions_updated ON chat_sessions(updated_at)');
+addColumn('staff', 'dash', 'TEXT');               // своя главная: JSON {v, widgets:[{id,type,size,…}]}
 }

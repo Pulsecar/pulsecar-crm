@@ -20,7 +20,7 @@ export function Columns({ rows, value, label, fmt, color = ACCENT, prev, prevLab
   const W = Math.max(1000, rows.length * 34), H = height, padL = 58, padB = 26, padT = 10;
   const vals = rows.map(value);
   const pv = prev ? rows.map((_, i) => prev[i] ?? null) : null;
-  const max = niceMax(Math.max(...vals, ...(pv || []).filter((x) => x != null), 0));
+  const max = niceMax(Math.max(...vals, ...(pv || []).filter((x) => x != null), 0) || 100);
   const min = Math.min(0, ...vals);
   const span = max - min || 1;
   const y = (v) => padT + (H - padT - padB) * (1 - (v - min) / span);

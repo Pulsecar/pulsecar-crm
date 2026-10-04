@@ -3,11 +3,7 @@
 // Элемент помечается data-ui="ключ"; колонка таблицы — <table data-cols="таблица"> + <th data-c="колонка">.
 
 export const UI_GROUPS = [
-  ['Главная (дашборд)', [
-    ['dash.btn.calendar', 'Кнопка «Терминарз»'], ['dash.btn.neworder', 'Кнопка «Новый заказ»'],
-    ['dash.stat.today', 'Плитка «Поступило сегодня»'], ['dash.stat.month', 'Плитка «Поступило за месяц»'], ['dash.stat.closed', 'Плитка «Закрыто заказов за месяц»'], ['dash.stat.inwork', 'Плитка «Заказов в работе»'],
-    ['dash.statuses', 'Полоса статусов заказов'], ['dash.myorders', 'Мои заказы в работе (для механика)'], ['dash.calendar', 'Сегодня в терминарзе'], ['dash.requests', 'Новые заявки'],
-    ['dash.unpaid', 'Завершены, но не оплачены'], ['dash.attention', 'Требует внимания (склад, хранение)']]],
+  ['Главная (кнопки вверху)', [['dash.btn.calendar', 'Кнопка «Терминарз»'], ['dash.btn.neworder', 'Кнопка «Новый заказ»']]],
   ['Левое меню', [
     ['menu.home', 'Главная'], ['menu.orders', 'Заказы'], ['menu.quotes', 'Выцены'], ['menu.calendar', 'Терминарз'], ['menu.customers', 'Клиенты'], ['menu.cars', 'Автомобили'],
     ['menu.stock', 'Склад'], ['menu.purchases', 'Закупки'], ['menu.storage', 'Хранение и парковка'], ['menu.sales', 'Продажи'], ['menu.cash', 'Касса'], ['menu.pos', 'Pulse Points'],

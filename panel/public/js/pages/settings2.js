@@ -1,6 +1,7 @@
 // Настройки как в Motowarsztat: параметры, нумерация, сотрудники и доступы, прайс работ, шаблоны заказов, чек-листы, справочники
 import { html, useState, useData, api, act, useApp, Loading, ErrorBox, Icon, Modal, ConfirmButton, Badge, zl, num, fdt, toast } from '../lib.js';
-import { UI_GROUPS, UI_PRESETS, applyUi, dashOrder, DASH_TILES, DASH_CARDS, DASH_OTHER } from '../ui.js';
+import { UI_GROUPS, UI_PRESETS, applyUi } from '../ui.js';
+import { StaffDashboard } from './dashboard.js';
 
 // ── Параметры (строятся по описанию с сервера) ─────────────────────────────
 const DAYS = [[1, 'Пн'], [2, 'Вт'], [3, 'Ср'], [4, 'Чт'], [5, 'Пт'], [6, 'Сб'], [0, 'Вс']];
@@ -62,35 +63,6 @@ export function Numbering() {
 }
 
 
-
-// ── Главная (дашборд) сотрудника: какие блоки видит и в каком порядке ──────────
-const DASH_LABEL = Object.fromEntries(UI_GROUPS[0][1]);
-function DashEditor({ edit, setEdit }) {
-  const ui = edit.ui || [];
-  const hid = new Set(ui.filter((k) => !k.startsWith('@')));
-  const order = dashOrder(ui);
-  const write = (h, ord) => setEdit({ ...edit, ui: [...h, ...ui.filter((k) => k.startsWith('@') && !k.startsWith('@dash:')), '@dash:' + ord.join(',')] });
-  const toggle = (k, on) => { const h = new Set(hid); on ? h.delete(k) : h.add(k); write(h, order); };
-  const move = (k, d, group) => {
-    const g = order.filter((x) => group.includes(x)); const i = g.indexOf(k), j = i + d;
-    if (j < 0 || j >= g.length) return;
-    [g[i], g[j]] = [g[j], g[i]];
-    write(hid, [...g, ...order.filter((x) => !group.includes(x))]);
-  };
-  const row = (k, group) => html`<div class=${'dash-ed-row' + (hid.has(k) ? ' off' : '')}>
-    <label class="toggle" title=${hid.has(k) ? 'Показать' : 'Скрыть'}><input type="checkbox" checked=${!hid.has(k)} onChange=${(e) => toggle(k, e.target.checked)} /><i></i></label>
-    <span class="grow">${DASH_LABEL[k] || k}</span>
-    ${group ? html`<button class="icon-btn" title="Выше" disabled=${order.filter((x) => group.includes(x))[0] === k} onClick=${() => move(k, -1, group)}>▲</button>
-      <button class="icon-btn" title="Ниже" disabled=${order.filter((x) => group.includes(x)).slice(-1)[0] === k} onClick=${() => move(k, 1, group)}>▼</button>` : ''}</div>`;
-  return html`<div class="card" style="background:var(--surface2);margin-top:12px">
-    <div class="row"><b>Главная (дашборд) этого сотрудника</b><span class="muted small">включите нужные блоки и расставьте стрелками</span>
-      <button class="btn ghost sm" style="margin-left:auto" onClick=${() => setEdit({ ...edit, ui: ui.filter((k) => !k.startsWith('dash.') && !k.startsWith('@dash:')) })}>Как по умолчанию</button></div>
-    <div class="grid g3" style="margin-top:8px;align-items:start">
-      <div><div class="muted small" style="margin-bottom:4px">Плитки с цифрами</div>${order.filter((k) => DASH_TILES.includes(k)).map((k) => row(k, DASH_TILES))}</div>
-      <div><div class="muted small" style="margin-bottom:4px">Блоки</div>${order.filter((k) => DASH_CARDS.includes(k)).map((k) => row(k, DASH_CARDS))}</div>
-      <div><div class="muted small" style="margin-bottom:4px">Кнопки и полоса статусов</div>${DASH_OTHER.map((k) => row(k, null))}</div>
-    </div></div>`;
-}
 
 // ── Интерфейс сотрудника: что он видит (виджеты главной, меню, кнопки, вкладки, колонки) ──
 function UiEditor({ edit, setEdit, others }) {
@@ -172,7 +144,9 @@ export function StaffAccess() {
         <label class="f">% считать от<select value=${edit.pay_base || 'net'} onChange=${(e) => setEdit({ ...edit, pay_base: e.target.value })}><option value="net">нетто</option><option value="gross">брутто</option></select></label>
         <label class="f">% от маржи запчастей к его работам<input type="number" value=${edit.parts_pct || 0} onInput=${(e) => setEdit({ ...edit, parts_pct: e.target.value })} /></label>
         <div class="muted small" style="align-self:end">Эти условия считает рапорт «Расчёт сотрудников».</div></div>
-      <${DashEditor} edit=${edit} setEdit=${setEdit} />
+      <div class="card" style="background:var(--surface2);margin-top:12px"><b>Главная (дашборд) этого сотрудника</b>
+        <div class="muted small" style="margin:4px 0 8px">Какие блоки он видит на главной. Сотрудник может и сам настроить главную под себя (кнопка «Настроить главную»), если у него есть право «Настраивать свою главную страницу». Блоки — только из данных, к которым у него есть доступ.</div>
+        ${edit.id ? html`<${StaffDashboard} staffId=${edit.id} key=${edit.id + ':' + edit.role} />` : html`<div class="muted small">Сохраните сотрудника — потом здесь можно будет настроить его главную.</div>`}</div>
       ${edit.role === 'admin' ? html`<div class="muted small" style="margin-top:10px">Администратор может всё.</div>` : html`
         <div class="row" style="margin-top:12px"><b>Права</b><span class="muted small">Галочки по умолчанию — от роли «${ROLE[edit.role]}».</span>
           <button class="btn ghost sm" style="margin-left:auto" onClick=${() => setEdit({ ...edit, permissions: {} })}>Сбросить к роли</button></div>

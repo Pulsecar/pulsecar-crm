@@ -339,7 +339,20 @@ try {
   // интерфейс сотрудника: скрытые элементы сохраняются и приходят в /me
   ok(await req('/crm-api/staff', { body: { ...me0, effective: undefined, password: '', ui: ['dash.unpaid', 'orders.paid', 'orders.paid', 42] } }), 'save ui');
   assert.deepEqual(ok(await req('/crm-api/me'), 'me ui').ui, ['dash.unpaid', 'orders.paid']);
-  assert.ok(Array.isArray(ok(await req('/crm-api/dashboard'), 'dash').mine));
+  // своя главная: блоки по правам, сохранение раскладки, сброс
+  let dsh = ok(await req('/crm-api/dashboard'), 'dash');
+  assert.ok(dsh.layout.length && dsh.catalog.some((c) => c.type === 'kpi_today') && dsh.canEdit);
+  ok(await req('/crm-api/me/dashboard', { method: 'PUT', body: { widgets: [{ id: 'a', type: 'note', size: 'm', text: 'мой текст' }, { id: 'b', type: 'kpi_today', size: 's' }, { id: 'c', type: 'nope' }] } }), 'save dash');
+  dsh = ok(await req('/crm-api/dashboard'), 'dash2');
+  assert.deepEqual(dsh.layout.map((w) => w.type), ['note', 'kpi_today']); assert.equal(dsh.layout[0].text, 'мой текст'); assert.ok('kpi_today' in dsh.data);
+  ok(await req('/crm-api/me/dashboard', { method: 'PUT', body: { widgets: null } }), 'reset dash');
+  assert.ok(ok(await req('/crm-api/dashboard'), 'dash3').layout.length > 2);
+  if (mech) {
+    const md = ok(await req(`/crm-api/staff/${mech.id}/dashboard`), 'mech dash');
+    assert.ok(!md.catalog.some((c) => c.type === 'kpi_today'), 'механику без доступа к кассе — нет блоков с деньгами');
+    ok(await req(`/crm-api/staff/${mech.id}/dashboard`, { method: 'PUT', body: { widgets: [{ type: 'kpi_today' }, { type: 'my_jobs' }] } }), 'admin sets mech dash');
+    assert.deepEqual(ok(await req(`/crm-api/staff/${mech.id}/dashboard`), 'mech dash2').layout.map((w) => w.type), ['my_jobs']);
+  }
   ok(await req('/crm-api/staff', { body: { ...me0, effective: undefined, password: '', ui: [] } }), 'reset ui');
   assert.equal((await req(`/crm-api/staff/${me0.id}/active`, { body: { active: false } })).status, 400);
   // фактура без заказа (без KSeF): можно открыть, изменить, авто сохраняется в CRM

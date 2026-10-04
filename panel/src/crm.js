@@ -20,6 +20,7 @@ import { createStockDoc, findOrCreateProduct } from './stock.js';
 import { publicList, save as saveIntegration, cfg, setState, def as integrationDef } from './integrations/index.js';
 import * as IC from './integrations/intercars.js';
 import * as RMI from './integrations/tecrmi.js';
+import * as DASH from './dashboard.js';
 import * as SUP from './integrations/suppliers.js';
 import { polishNames, glossaryPl, hasCyr } from './pl-names.js';
 import { notify, testTelegram } from './integrations/notify.js';
@@ -246,32 +247,42 @@ crm.get('/owner/dashboard', (req, res) => {
 // ── Главная ────────────────────────────────────────────────────────────────
 crm.get('/dashboard', (req, res) => {
   const me = who(req);
-  const d = today();
-  const month = d.slice(0, 7);
+  const P = permsOf(me);
+  const layout = DASH.layoutOf(me, P);
   res.json({
-    mine: all(`SELECT o.id, o.number, o.pickup_at, st.name status_name, st.color status_color, c.name customer_name, k.make, k.model, k.plate FROM orders o
-      JOIN order_statuses st ON st.id = o.status_id LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id
-      WHERE o.kind = 'order' AND st.is_final = 0 AND (o.mechanic_id = ? OR o.id IN (SELECT order_id FROM order_items WHERE mechanic_id = ?)) ORDER BY o.id DESC LIMIT 20`, me.id, me.id),
-    byStatus: all(`SELECT st.id, st.name, st.color, COUNT(o.id) n FROM order_statuses st LEFT JOIN orders o ON o.status_id = st.id AND o.kind = 'order'
-      WHERE st.is_final = 0 GROUP BY st.id ORDER BY st.pos`),
-    todayAppointments: all(`SELECT a.*, st.name station_name, c.name customer_name, k.make, k.model, k.plate, o.number order_number
-      FROM appointments a LEFT JOIN stations st ON st.id = a.station_id LEFT JOIN customers c ON c.id = a.customer_id
-      LEFT JOIN cars k ON k.id = a.car_id LEFT JOIN orders o ON o.id = a.order_id
-      WHERE substr(a.start_at,1,10) = ? AND a.status <> 'cancelled' ORDER BY a.start_at`, d),
-    requests: all(`SELECT a.*, c.name customer_name FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id
-      WHERE a.status = 'request' ORDER BY a.id DESC LIMIT 20`),
-    revenue: {
-      today: one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='in' AND method <> 'points' AND transfer_id IS NULL AND substr(created_at,1,10) = ?`, d).s,
-      month: one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction='in' AND method <> 'points' AND transfer_id IS NULL AND substr(created_at,1,7) = ?`, month).s,
-      closedMonth: one(`SELECT COUNT(*) n, COALESCE(SUM(total),0) s FROM orders WHERE kind='order' AND substr(closed_at,1,7) = ?`, month),
-    },
-    unpaid: all(`SELECT o.id, o.number, o.total, o.paid, c.name customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
-      JOIN order_statuses st ON st.id = o.status_id WHERE o.kind='order' AND st.is_final = 1 AND o.paid < o.total - 0.01 AND o.source <> 'import'
-      ORDER BY o.closed_at DESC LIMIT 10`),
-    lowStock: all('SELECT id, name, code, stock, min_stock FROM products WHERE active = 1 AND min_stock > 0 AND stock <= min_stock ORDER BY name LIMIT 10'),
-    storageDue: all(`SELECT s.*, c.name customer_name FROM storage s LEFT JOIN customers c ON c.id = s.customer_id
-      WHERE s.date_out IS NULL AND s.date_until IS NOT NULL AND s.date_until <= date('now','+14 days') ORDER BY s.date_until LIMIT 10`),
+    layout, catalog: DASH.allowedWidgets(P), canEdit: !!P['dashboard.edit'] || me.role === 'admin', custom: !!me.dash,
+    data: DASH.widgetData(me, P, layout.map((w) => w.type)),
   });
+});
+/** Данные для одного блока (при добавлении на главную) */
+crm.get('/dashboard/widget/:type', (req, res) => {
+  const me = who(req);
+  res.json(DASH.widgetData(me, permsOf(me), [req.params.type])[req.params.type] ?? null);
+});
+/** Своя главная: сохранить раскладку / сбросить (widgets: null) */
+crm.put('/me/dashboard', (req, res) => {
+  const me = who(req);
+  const P = permsOf(me);
+  if (!P['dashboard.edit'] && me.role !== 'admin') throw new HttpError(403, 'Менять главную вам не разрешено — обратитесь к администратору');
+  const w = req.body?.widgets;
+  run('UPDATE staff SET dash = ? WHERE id = ?', w === null ? null : JSON.stringify({ v: 1, widgets: DASH.cleanLayout(w, P) }), me.id);
+  res.json({ ok: true });
+});
+/** Главная сотрудника — администратор настраивает её в карточке сотрудника */
+crm.get('/staff/:id/dashboard', (req, res) => {
+  who(req, 'settings.manage');
+  const s = one('SELECT * FROM staff WHERE id = ?', Number(req.params.id));
+  if (!s) throw new HttpError(404, 'Сотрудник не найден');
+  const P = permsOf(s);
+  res.json({ layout: DASH.layoutOf(s, P), catalog: DASH.allowedWidgets(P), custom: !!s.dash });
+});
+crm.put('/staff/:id/dashboard', (req, res) => {
+  who(req, 'settings.manage');
+  const s = one('SELECT * FROM staff WHERE id = ?', Number(req.params.id));
+  if (!s) throw new HttpError(404, 'Сотрудник не найден');
+  const w = req.body?.widgets;
+  run('UPDATE staff SET dash = ? WHERE id = ?', w === null ? null : JSON.stringify({ v: 1, widgets: DASH.cleanLayout(w, permsOf(s)) }), s.id);
+  res.json({ ok: true });
 });
 
 // ── Клиенты ────────────────────────────────────────────────────────────────
