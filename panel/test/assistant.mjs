@@ -99,7 +99,7 @@ try {
   assert.equal(r.headers.get('access-control-allow-origin'), null);
   const sys = seen.at(-1).system[0].text;
   assert.doesNotMatch(sys, /Diagnostyka komputerowa: od/, 'цена диагностики только из настроек чата');
-  assert.match(sys, /Diagnostics \(any kind[^\n]*50–150 zł/);
+  assert.match(sys, /Diagnostics \(any kind[^\n]*FREE/);
   assert.match(sys, /: od \d+ zł/, 'прайс ремонта из CRM в инструкциях');
   assert.match(sys, /NEVER "ты"/);
   assert.match(sys, /Gwarancja: 6 miesięcy/);
@@ -121,14 +121,14 @@ try {
   assert.equal(a.status, 'planned'); const st1 = (await req('/crm-api/integrations')).j.stations.find((x) => /^1 /.test(x.name)); assert.equal(a.station_id, st1.id, 'пост «1 Подъёмник»'); assert.equal(a.source, 'chat'); assert.equal(a.start_at, first);
   assert.equal(a.contact_phone, '+48600100200'); assert.match(a.note, /Nr: WX12345/); assert.match(a.note, /AI-czat \(RU\)/);
   assert.equal(a.duration_min, 30, 'диагностика 30 минут'); assert.match(a.title, /^Diagnostyka · stuk z przodu/);
-  assert.match(a.note, /cena podana w czacie: od 30 zł/, 'цена не ниже минимальной');
+  assert.match(a.note, /cena podana w czacie: 0 zł/, 'бесплатная диагностика в записи');
   assert.equal(j.booking.sms_sent, false, 'без SMS-провайдера SMS только в журнале');
   const smsLog = JSON.stringify((await req('/crm-api/sms')).j);
   assert.match(smsLog, /podtverzhdaem vizit - diagnostika/, 'SMS-подтверждение на языке клиента в журнале SMS');
-  assert.match(smsLog, /besplatno \(novyi klient\)/, 'в SMS новому клиенту — бесплатно');
+  assert.match(smsLog, /Stoimost diagnostiki: besplatno/, 'в SMS — бесплатно');
   assert.equal(j.booking.free_diagnosis, true);
   const sysB = seen.find((x) => x.system)?.system[0].text;
-  assert.match(sysB, /DIAGNOSTICS/); assert.match(sysB, /FREE for new customers/); assert.match(sysB, /50–150 zł/); assert.match(sysB, /od 30 zł/);
+  assert.match(sysB, /DIAGNOSTICS/); assert.match(sysB, /FREE for every customer/); assert.doesNotMatch(sysB, /50–150 zł/, 'другую цену диагностики чат не знает');
   assert.ok(a.order_id, 'запись связана со злецением'); assert.ok(a.customer_id && a.car_id, 'запись связана с клиентом и авто');
   assert.match(j.booking.order_number, /^ZL /);
   const ord = (await req('/crm-api/orders/' + a.order_id)).j;
@@ -137,7 +137,7 @@ try {
   const items = ord.items || o.items || [];
   const dItem = items.find((i) => /^Diagnostyka/.test(i.name));
   assert.ok(dItem, 'в злецении позиция «Diagnostyka»');
-  assert.equal(Number(dItem.price), 0, 'новому клиенту диагностика бесплатно'); assert.match(o.internal_note, /NOWY KLIENT/);
+  assert.equal(Number(dItem.price), 0, 'диагностика бесплатно'); assert.match(o.internal_note, /BEZPŁATNA/);
   const cust = (await req('/crm-api/customers/' + a.customer_id)).j;
   const cu = cust.customer || cust;
   assert.equal(cu.name, 'Jan Test'); assert.equal(cu.phone, '+48600100200');
@@ -150,7 +150,7 @@ try {
   assert.notEqual(a2.car_id, a.car_id, 'второе авто клиента по VIN');
   const ord2 = (await req('/crm-api/orders/' + a2.order_id)).j;
   const it2 = (ord2.items || (ord2.order || ord2).items || []).find((i) => /^Diagnostyka/.test(i.name));
-  assert.equal(Number(it2.price), 50, 'повторному клиенту — обычная цена');
+  assert.equal(Number(it2.price), 0, 'повторному клиенту тоже бесплатно');
   const cust2 = JSON.stringify((await req('/crm-api/customers/' + a.customer_id)).j);
   assert.ok(cust2.includes('WVWZZZ1KZAW000001') && cust2.includes('Volkswagen'), 'VIN расшифрован в марку');
   console.log('✓ повторный клиент без дубля, авто по VIN с маркой');
