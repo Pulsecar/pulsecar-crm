@@ -51,9 +51,12 @@ const addDays = (ymd, n) => { const [y, m, d] = ymd.split('-').map(Number); retu
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
 const addMin = (stamp, n) => { const [d, t] = stamp.split(' '); const m = toMin(t) + n; return `${addDays(d, Math.floor(m / 1440))} ${toTime(((m % 1440) + 1440) % 1440)}`; };
 
-function capacity(c) {
-  if (Number(c.capacity) > 0) return Number(c.capacity);
-  return Math.max(1, one('SELECT COUNT(*) n FROM stations WHERE active = 1').n);
+/** Пост, на который ставится диагностика (по умолчанию «1 Подъёмник / развал») */
+function diagStation(c) {
+  const want = String(c.station || '1').trim().toLowerCase();
+  const list = all('SELECT id, name FROM stations WHERE active = 1 ORDER BY pos, id');
+  return list.find((x) => String(x.id) === want) || list.find((x) => x.name.toLowerCase().startsWith(want))
+    || list.find((x) => x.name.trim().startsWith('1')) || list[0] || null;
 }
 function dayGrid(c, ymd) {
   if (c.closed.includes(ymd)) return [];
@@ -63,25 +66,23 @@ function dayGrid(c, ymd) {
   for (let t = toMin(h[0]); t + c.slotMin <= toMin(h[1]); t += c.slotMin) out.push(toTime(t));
   return out;
 }
-/** Сколько машин уже стоит в окне [start, start+len): записи на постах + неназначенные заявки со временем */
-function busy(start, len) {
-  const end = addMin(start, len);
-  const rows = all(`SELECT station_id, status FROM appointments WHERE start_at IS NOT NULL AND status NOT IN ('cancelled','no_show')
-    AND start_at < ? AND datetime(start_at, '+' || duration_min || ' minutes') > datetime(?)`, end, start);
-  if (rows.some((r) => r.status === 'block' && !r.station_id)) return Infinity;
-  return new Set(rows.filter((r) => r.station_id).map((r) => r.station_id)).size + rows.filter((r) => !r.station_id).length;
+/** Окно свободно, если на посту диагностики нет пересекающейся записи (и нет общей блокировки / неназначенной заявки на это время) */
+function slotBusy(c, start) {
+  const st = diagStation(c);
+  const end = addMin(start, c.slotMin);
+  return !!one(`SELECT 1 FROM appointments WHERE start_at IS NOT NULL AND status NOT IN ('cancelled','no_show')
+    AND (station_id = ? OR station_id IS NULL) AND start_at < ? AND datetime(start_at, '+' || duration_min || ' minutes') > datetime(?) LIMIT 1`, st?.id ?? -1, end, start);
 }
 export function freeSlots(c, { from, days } = {}) {
   const today = localShift(0).slice(0, 10);
   const last = addDays(today, c.daysAhead);
   const start = /^\d{4}-\d{2}-\d{2}$/.test(from || '') && from > today ? from : today;
   const minStamp = localShift(c.minHoursAhead * 60);
-  const cap = capacity(c);
   const out = [];
   for (let i = 0; i < Math.min(Math.max(Number(days) || 5, 1), 7); i++) {
     const d = addDays(start, i);
     if (d > last) break;
-    const times = dayGrid(c, d).filter((t) => `${d} ${t}` >= minStamp && busy(`${d} ${t}`, c.slotMin) < cap);
+    const times = dayGrid(c, d).filter((t) => `${d} ${t}` >= minStamp && !slotBusy(c, `${d} ${t}`));
     if (times.length) out.push({ date: d, weekday: DAY[weekday(d)], times });
   }
   return out;
@@ -90,7 +91,7 @@ export function slotFree(c, slot) {
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(slot || '')) return false;
   const [d, t] = slot.split(' ');
   if (d > addDays(localShift(0).slice(0, 10), c.daysAhead) || slot < localShift(c.minHoursAhead * 60)) return false;
-  return dayGrid(c, d).includes(t) && busy(slot, c.slotMin) < capacity(c);
+  return dayGrid(c, d).includes(t) && !slotBusy(c, slot);
 }
 
 // ── инструкции модели ──────────────────────────────────────────────────────
@@ -142,7 +143,8 @@ At Pulsecar every visit starts with a diagnosis (${c.slotMin} minutes, price ${c
 # Booking flow
 1. Briefly find out the problem and the car: make, model, year.
 2. Call get_available_slots and offer concrete free times. Offer ONLY times returned by the tool.
-3. Collect the owner's name and phone number AND the car's registration number (tablica) or VIN — at least one of them is REQUIRED, we use it to create the work order and the car card in our system. Optionally ask for a referral code.
+3. Collect the owner's name and phone number AND the car's registration number or VIN — at least one of them is REQUIRED (we create the work order and the car card from it). Ask for everything missing in ONE message, and do NOT call create_booking until you have name, phone, plate-or-VIN and consent. Optionally ask for a referral code.
+   Words for the registration number: Polish "numer rejestracyjny" (tablica rejestracyjna); Russian "регистрационный номер" / "госномер"; Ukrainian "реєстраційний номер"; Belarusian "рэгістрацыйны нумар"; English "registration number". Never call it "таблица" in Russian/Ukrainian/Belarusian.
 4. Ask for consent, e.g. "Do you agree that we process your name and phone number to handle this booking?" Set consent=true only after a clear yes.
 5. Call create_booking with slot exactly "YYYY-MM-DD HH:MM" and quoted_price = the diagnosis price you agreed with the customer (${c.diagPrice}, or ${c.diagMinPrice} if you gave the discount).
 6. After success: tell the customer they are booked for diagnosis (date, time, address) and — only if the tool result says sms_sent=true — that an SMS confirmation was sent to their phone.
@@ -258,12 +260,13 @@ async function runTool(c, name, inp, ctx) {
       const note = [`Diagnostyka (${c.slotMin} min) · cena podana w czacie: ${price}`, `Zlecenie: ${order.number}`, `Problem: ${problem}`, `Auto: ${String(inp.car).slice(0, 120)}`,
         plate && `Nr: ${plate}`, vin && `VIN: ${vin}`, inp.description && String(inp.description).slice(0, 1000),
         inp.referral_code && `Kod polecenia: ${String(inp.referral_code).slice(0, 40)}`, `AI-czat (${LANG_TAG[ctx.lang]})`].filter(Boolean).join('\n');
+      const st = diagStation(c);
       const apptId = insert('appointments', {
-        station_id: null, order_id: orderId, customer_id: customerId, car_id: carId,
+        station_id: st?.id ?? null, order_id: orderId, customer_id: customerId, car_id: carId,
         title: `Diagnostyka · ${problem}${plate ? ' · ' + plate : ''}`.slice(0, 120), note, start_at: inp.slot, duration_min: c.slotMin,
-        status: 'request', source: 'chat', contact_name: name, contact_phone: phone, preferred: inp.slot,
+        status: st ? 'planned' : 'request', source: 'chat', contact_name: name, contact_phone: phone, preferred: inp.slot,
       });
-      return { apptId, orderId, orderNo: order.number, customerId, carId, newCustomer, newCar };
+      return { apptId, orderId, orderNo: order.number, customerId, carId, newCustomer, newCar, station: st?.name || null };
     });
     run('UPDATE chat_sessions SET appointment_id = ?, contact_name = ?, contact_phone = ? WHERE id = ?', res.apptId, name, phone, ctx.sessionId);
     let sms = 'off';
@@ -272,7 +275,7 @@ async function runTool(c, name, inp, ctx) {
       catch (e) { sms = 'failed'; console.error('assistant sms:', e.message); }
     }
     const smsInfo = { sent: '✅ SMS отправлено', logged: '⚠️ SMS не отправлено — SMS-провайдер не подключён', failed: '❌ SMS не ушло — проверьте SMS-интеграцию', off: 'SMS выключено' }[sms] || sms;
-    notify('booking', `🤖 Запись на диагностику из AI-чата: ${name} ${phone}${res.newCustomer ? ' (новый клиент)' : ''}\n🕒 ${inp.slot} (${c.slotMin} мин)\n📄 Злецение ${res.orderNo}\n💰 ${price}\n🚗 ${inp.car}${plate ? ' · ' + plate : ''}${vin ? ' · VIN ' + vin : ''}${res.newCar ? ' (новое авто)' : ''}\n🔧 ${problem}${inp.description ? '\n📝 ' + String(inp.description).slice(0, 300) : ''}${inp.referral_code ? '\n🎁 ' + inp.referral_code : ''}\n🌐 ${LANG_TAG[ctx.lang]} · ${smsInfo}\nТерминарз → «Не распределено»`,
+    notify('booking', `🤖 Запись на диагностику из AI-чата: ${name} ${phone}${res.newCustomer ? ' (новый клиент)' : ''}\n🕒 ${inp.slot} (${c.slotMin} мин)\n📄 Злецение ${res.orderNo}\n💰 ${price}\n🚗 ${inp.car}${plate ? ' · ' + plate : ''}${vin ? ' · VIN ' + vin : ''}${res.newCar ? ' (новое авто)' : ''}\n🔧 ${problem}${inp.description ? '\n📝 ' + String(inp.description).slice(0, 300) : ''}${inp.referral_code ? '\n🎁 ' + inp.referral_code : ''}\n🌐 ${LANG_TAG[ctx.lang]} · ${smsInfo}\nТерминарз → ${res.station || '«Не распределено»'}`,
       { appointment: res.apptId, order: res.orderNo, source: 'chat' });
     return { ok: true, booking_id: res.apptId, order_number: res.orderNo, status: 'booked', slot: inp.slot, duration_min: c.slotMin, price, sms_sent: sms === 'sent' };
   }
@@ -395,15 +398,18 @@ assistant.post('/chat-api/message', express.json({ limit: '50kb' }), async (req,
       history.push({ role: 'assistant', content: r.content });
       const uses = (r.content || []).filter((b) => b.type === 'tool_use');
       const text = (r.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-      if (text) parts.push(text);
-      if (r.stop_reason !== 'tool_use' || !uses.length) break;
+      if (r.stop_reason !== 'tool_use' || !uses.length) { if (text) parts.push(text); break; }
       const results = [];
+      let failed = false;
       for (const u of uses) {
         let out;
         try { out = await runTool(c, u.name, u.input || {}, ctx); } catch (e) { console.error('assistant tool', e); out = { ok: false, error: 'tool_failed' }; }
         if (u.name === 'create_booking' && out.ok) booking = out;
+        if (out.ok === false) failed = true;
         results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out) });
       }
+      // текст перед неудачным вызовом (например, запись без номера авто) не показываем — модель ответит заново
+      if (text && !failed) parts.push(text);
       history.push({ role: 'user', content: results });
     }
   } catch (e) {

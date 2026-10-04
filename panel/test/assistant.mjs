@@ -35,6 +35,7 @@ const mock = createServer(async (req, res) => {
   if (/price\+slots/.test(last.content)) return json(200, { content: [{ type: 'text', text: 'Diagnostyka od 100 zł.' }, { type: 'tool_use', id: 'tu_ps', name: 'get_available_slots', input: { days: 2 } }], stop_reason: 'tool_use' });
   if (/book|slots/.test(last.content)) return tool('get_available_slots', { days: 7 });
   if (/human/.test(last.content)) return tool('request_human', { name: 'Ola', phone: '+48 500 200 300', topic: 'laweta' });
+  if (/dupe/.test(last.content)) return json(200, { content: [{ type: 'text', text: 'PREMATURE' }, { type: 'tool_use', id: 'tu_d', name: 'create_booking', input: { name: 'C', phone: '600100209', car: 'Opel', problem: 'x', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: true } }], stop_reason: 'tool_use' });
   if (/noplate/.test(last.content)) return tool('create_booking', { name: 'B', phone: '600100201', car: 'Opel', problem: 'check', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: true });
   if (/noconsent/.test(last.content)) return tool('create_booking', { name: 'A', phone: '600100200', car: 'x', plate: 'WA1', problem: 'y', quoted_price: '50–150 zł', slot: '2099-01-01 10:00', consent: false });
   return text('Dzień dobry!');
@@ -115,9 +116,9 @@ try {
   assert.ok(j.booking?.ok, JSON.stringify(j));
   assert.equal(j.booking.slot, first);
   const appts = (await req(`/crm-api/appointments?from=${days[0].date}&to=${days[0].date}`)).j;
-  const a = appts.unassigned.find((x) => x.id === j.booking.booking_id);
-  assert.ok(a, 'заявка в «Не распределено»');
-  assert.equal(a.status, 'request'); assert.equal(a.source, 'chat'); assert.equal(a.start_at, first);
+  const a = appts.rows.find((x) => x.id === j.booking.booking_id);
+  assert.ok(a, 'диагностика сразу в графике');
+  assert.equal(a.status, 'planned'); const st1 = (await req('/crm-api/integrations')).j.stations.find((x) => /^1 /.test(x.name)); assert.equal(a.station_id, st1.id, 'пост «1 Подъёмник»'); assert.equal(a.source, 'chat'); assert.equal(a.start_at, first);
   assert.equal(a.contact_phone, '+48600100200'); assert.match(a.note, /Nr: WX12345/); assert.match(a.note, /AI-czat \(RU\)/);
   assert.equal(a.duration_min, 30, 'диагностика 30 минут'); assert.match(a.title, /^Diagnostyka · stuk z przodu/);
   assert.match(a.note, /cena podana w czacie: od 30 zł/, 'цена не ниже минимальной');
@@ -140,13 +141,13 @@ try {
   console.log('✓ запись → клиент + авто + злецение', j.booking.order_number);
   const j2 = await (await chat('please bookvin', sid)).json();
   assert.ok(j2.booking?.ok, JSON.stringify(j2));
-  const a2 = (await req(`/crm-api/appointments?from=${days[0].date}&to=${days[0].date}`)).j.unassigned.find((x) => x.id === j2.booking.booking_id);
+  const a2 = (await req(`/crm-api/appointments?from=${days[0].date}&to=${days[0].date}`)).j.rows.find((x) => x.id === j2.booking.booking_id);
   assert.equal(a2.customer_id, a.customer_id, 'тот же клиент по телефону — без дубля');
   assert.notEqual(a2.car_id, a.car_id, 'второе авто клиента по VIN');
   const cust2 = JSON.stringify((await req('/crm-api/customers/' + a.customer_id)).j);
   assert.ok(cust2.includes('WVWZZZ1KZAW000001') && cust2.includes('Volkswagen'), 'VIN расшифрован в марку');
   console.log('✓ повторный клиент без дубля, авто по VIN с маркой');
-  console.log('✓ запись → Терминарз «Не распределено»', first);
+  console.log('✓ запись → Терминарз, пост «1 Подъёмник»', first);
 
   // ёмкость 1: окно занято → больше не предлагается; повторная запись на то же время — отказ
   j = await (await chat('show slots', sid)).json();
@@ -167,6 +168,10 @@ try {
   j = await (await chat('price+slots', sid)).json();
   assert.match(j.reply, /^Diagnostyka od 100 zł\.\n\nSLOTS /);
   console.log('✓ ответ из нескольких частей (цена + окна)');
+  // текст перед неудачным вызовом не дублируется
+  j = await (await chat('dupe', sid)).json();
+  assert.doesNotMatch(j.reply, /PREMATURE/); assert.match(j.reply, /plate_or_vin_required/);
+  console.log('✓ без дублей текста при отказе инструмента');
   // без номера и VIN записи нет
   j = await (await chat('noplate', sid)).json();
   assert.match(j.reply, /plate_or_vin_required/);

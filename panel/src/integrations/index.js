@@ -237,7 +237,7 @@ export const DEFS = [
       { k: 'apiKey', label: 'Ключ Claude API', secret: true, required: true },
       { k: 'workspaceId', label: 'ID рабочего пространства (только для ключей sk-ant-usr-…)', placeholder: 'wrkspc_…' },
       { k: 'model', label: 'Модель', type: 'select', options: [['claude-haiku-4-5-20251001', 'Claude Haiku 4.5 — быстро и дёшево (рекомендуется)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 — умнее, дороже']], def: 'claude-haiku-4-5-20251001' },
-      { k: 'capacity', label: 'Сколько машин можно принять на одно время (0 — по числу постов)', type: 'number', def: 0 },
+      { k: 'station', label: 'Пост для диагностики в Терминарзе (название или его начало)', def: '1 Подъёмник' },
       { k: 'diagMin', label: 'Длительность диагностики (окно записи), минут', type: 'number', def: 30 },
       { k: 'diagPrice', label: 'Цена диагностики, которую называет чат', def: '50–150 zł' },
       { k: 'diagMinPrice', label: 'Минимальная цена, до которой чат может опустить, если клиент сомневается', def: 'od 30 zł' },
