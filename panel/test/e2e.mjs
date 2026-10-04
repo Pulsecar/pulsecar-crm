@@ -422,6 +422,28 @@ try {
   ok(await req('/api/me/delete', { body: {}, token: sess.token }), 'delete');
   assert.equal((await req('/api/me', { token: sess.token })).status, 401);
   console.log('✓ удаление аккаунта');
+  // массовые действия
+  const bo1 = ok(await req('/crm-api/orders', { body: { kind: 'quote' } }), 'bq1'), bo2 = ok(await req('/crm-api/orders', { body: { kind: 'quote' } }), 'bq2');
+  const st0 = ok(await req('/crm-api/me'), 'me st').statuses.find((x) => (x.scope || 'all') === 'all' && !x.is_final);
+  let br = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id, bo2.id], action: 'followup', value: 'thinking' } }), 'bulk fu');
+  assert.equal(br.done, 2);
+  br = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id, bo2.id], action: 'status', value: st0.id } }), 'bulk st');
+  br = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id, bo2.id], action: 'delete' } }), 'bulk del');
+  assert.equal(br.done, 2); assert.equal((await req('/crm-api/orders/' + bo1.id)).status, 404);
+  const bp = ok(await req('/crm-api/products', { body: { name: 'Bulk test', code: 'BLK-1', sell_price: 100 } }), 'bp');
+  const bpid = bp.id || bp.product?.id;
+  ok(await req('/crm-api/bulk/products', { body: { ids: [bpid], action: 'price_pct', value: 10 } }), 'pct');
+  ok(await req('/crm-api/bulk/products', { body: { ids: [bpid], action: 'location', value: 'A-3' } }), 'loc');
+  let bpr = ok(await req('/crm-api/products?q=BLK-1'), 'bp list').rows[0];
+  assert.equal(bpr.sell_price, 110); assert.equal(bpr.location, 'A-3');
+  ok(await req('/crm-api/bulk/products', { body: { ids: [bpid], action: 'archive' } }), 'arch');
+  assert.equal(ok(await req('/crm-api/products?q=BLK-1'), 'bp2').rows.length, 0);
+  assert.equal(ok(await req('/crm-api/products?q=BLK-1&archived=1'), 'bp3').rows.length, 1);
+  assert.equal(ok(await req('/crm-api/bulk/products', { body: { ids: [bpid], action: 'delete' } }), 'pdel').done, 1);
+  const bc = ok(await req('/crm-api/customers', { body: { name: 'Bulk Del', phone: '+48600999000' } }), 'bc');
+  br = ok(await req('/crm-api/bulk/customers', { body: { ids: [bc.id, jan.id], action: 'delete' } }), 'cdel');
+  assert.equal(br.done, 1); assert.equal(br.skipped.length, 1, 'клиент с заказами пропущен');
+  console.log('✓ массовые действия: статус, обзвон, удаление выцен; товары — цена %, место, архив, удаление; клиенты — удаление с пропуском занятых');
   console.log('\nВСЕ ПРОВЕРКИ ПРОЙДЕНЫ');
 } catch (e) {
   console.error('✗', e.message);

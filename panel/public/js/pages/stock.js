@@ -1,5 +1,6 @@
 import { html, useState, useEffect, useData, api, act, go, qs, useApp, Loading, ErrorBox, Icon, Modal, Pager, Picker, ConfirmButton, useDebounced, zl, num, fdate, fdt, todayStr, toast } from '../lib.js';
 import { SuppliersPage } from './suppliers.js';
+import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
 
 const DOC = { PZ: 'Приход (PZ)', WZ: 'Выдача в заказ (WZ)', RW: 'Списание (RW)', PW: 'Оприходование (PW)' };
 
@@ -26,31 +27,46 @@ export default function Stock({ sub, id }) {
 function Products({ openId }) {
   const [q, setQ] = useState('');
   const [low, setLow] = useState(false);
+  const [arch, setArch] = useState(false);
   const [page, setPage] = useState(0);
+  const app = useApp();
+  const sel = useSel();
   const [edit, setEdit] = useState(null);
   const [open, setOpen] = useState(openId);
   const dq = useDebounced(q);
-  useEffect(() => setPage(0), [dq, low]);
-  const { data, loading, error, reload } = useData('products?' + qs({ q: dq, low: low ? 1 : '', page }));
+  useEffect(() => { setPage(0); sel.clear(); }, [dq, low, arch]);
+  const { data, loading, error, reload } = useData('products?' + qs({ q: dq, low: low ? 1 : '', archived: arch ? 1 : '', page }));
+  const can = app.perms?.['products.create'];
+  const bulkActions = can ? [
+    arch ? { key: 'restore', label: 'Вернуть из архива', icon: 'history' } : { key: 'archive', label: 'В архив', icon: 'box', confirm: 'Убрать выбранные товары в архив? Они пропадут из поиска и списков, история сохранится. Вернуть можно через «Архив».' },
+    { key: 'location', label: 'Место на складе', icon: 'tag', input: { label: 'Место (полка, стеллаж)', type: 'text', placeholder: 'A-3' } },
+    { key: 'min_stock', label: 'Минимальный остаток', icon: 'box', input: { label: 'Минимум', type: 'number' } },
+    { key: 'price_pct', label: 'Изменить цену продажи, %', icon: 'cash', input: { label: 'На сколько процентов (+10 поднять, -5 снизить)', type: 'number', hint: 'Цена продажи брутто каждого выбранного товара умножается на (1 + %/100).' } },
+    ...(app.price_groups?.length ? [{ key: 'price_group', label: 'Ценовая группа', icon: 'tag', input: { label: 'Группа', type: 'select', options: [['', '— без группы'], ...app.price_groups.map((g) => [g.id, g.name])] } }] : []),
+    { key: 'delete', label: 'Удалить', icon: 'trash', danger: true, confirm: 'Удалить выбранные товары насовсем? Товары с остатком или с движениями по складу/в заказах будут пропущены — их можно убрать «В архив».' },
+  ] : [];
+  const csv = [['name', 'Nazwa'], ['code', 'Indeks'], ['manufacturer', 'Producent'], ['stock', 'Stan'], ['unit', 'J.m.'], ['purchase_price', 'Cena zakupu netto'], ['sell_price', 'Cena sprzedaży brutto'], ['location', 'Miejsce']];
   return html`
     <div class="card" style="margin-bottom:12px"><div class="row">
       <input class="grow" type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Название, индекс, производитель…" aria-label="Поиск товаров" />
       <label class="check"><input type="checkbox" checked=${low} onChange=${(e) => setLow(e.target.checked)} />Только заканчивающиеся</label>
+      <label class="check"><input type="checkbox" checked=${arch} onChange=${(e) => setArch(e.target.checked)} />Архив</label>
       <button class="btn" onClick=${() => setEdit({})}><${Icon} n="plus" />Товар</button>
       ${data && html`<span class="muted small">Склад по закупке: <b>${zl(data.stockValue)}</b> нетто</span>`}
     </div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="stock">
-      <thead><tr><th data-c="name">Товар</th><th data-c="code">Индекс</th><th data-c="brand">Производитель</th><th data-c="qty" class="r">Остаток</th><th data-c="reserved" class="r">В резерве</th><th data-c="free" class="r">Доступно</th><th data-c="buy" class="r">Закупка нетто</th><th data-c="sell" class="r">Продажа брутто</th><th data-c="place">Место</th></tr></thead>
+      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="name">Товар</th><th data-c="code">Индекс</th><th data-c="brand">Производитель</th><th data-c="qty" class="r">Остаток</th><th data-c="reserved" class="r">В резерве</th><th data-c="free" class="r">Доступно</th><th data-c="buy" class="r">Закупка нетто</th><th data-c="sell" class="r">Продажа брутто</th><th data-c="place">Место</th></tr></thead>
       <tbody>${(data?.rows || []).map((p) => {
         const avail = p.stock - p.reserved;
-        return html`<tr class="click" onClick=${() => setOpen(p.id)}>
-          <td><b>${p.name}</b></td><td class="sub">${p.code || ''}</td><td class="sub">${p.manufacturer || ''}</td>
+        return html`<tr class=${'click' + (sel.has(p.id) ? ' on' : '')} onClick=${() => setOpen(p.id)}>
+          <${SelCell} sel=${sel} row=${p} /><td><b>${p.name}</b></td><td class="sub">${p.code || ''}</td><td class="sub">${p.manufacturer || ''}</td>
           <td class=${'r ' + (p.min_stock && p.stock <= p.min_stock ? 'neg' : '')}>${num(p.stock, 2)} ${p.unit}</td>
           <td class="r sub">${p.reserved ? num(p.reserved, 2) : ''}</td><td class=${'r ' + (avail < 0 ? 'neg' : '')}><b>${num(avail, 2)}</b></td>
           <td class="r">${zl(p.purchase_price)}</td><td class="r">${zl(p.sell_price)}</td><td class="sub">${p.location || ''}</td></tr>`;
       })}</tbody></table></div>
       ${!loading && !data?.rows?.length ? html`<div class="empty">Товаров нет — добавьте через «Приход товара» или импорт</div>` : ''}
       ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
+    <${BulkBar} sel=${sel} entity="products" actions=${bulkActions} csv=${csv} csvName="towary" onDone=${reload} />
     ${edit && html`<${ProductForm} p=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}
     ${open && html`<${ProductCard} id=${open} onClose=${() => { setOpen(null); reload(); }} onEdit=${(p) => { setOpen(null); setEdit(p); }} />`}`;
 }

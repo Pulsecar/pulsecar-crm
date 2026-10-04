@@ -4,6 +4,7 @@ import {
 } from '../lib.js';
 import { SupplierParts } from './suppliers.js';
 import { uiOn } from '../ui.js';
+import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
 import { DocsMenu, SalesDocs, Intake } from './order-docs.js';
 import { OrderMain, ItemsMW } from './order-form.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
@@ -32,7 +33,16 @@ export function OrdersList({ kind, query }) {
   const [page, setPage] = useState(0);
   const dq = useDebounced(q);
   useEffect(() => setPage(0), [dq, status, from, to, fu]);
-  const { data, loading, error } = useData('orders?' + qs({ kind, q: dq, status, from, to, page, followup: kind === 'quote' ? fu : '' }));
+  const { data, loading, error, reload } = useData('orders?' + qs({ kind, q: dq, status, from, to, page, followup: kind === 'quote' ? fu : '' }));
+  const sel = useSel();
+  const P = app.perms || {};
+  const bulkActions = [
+    P['orders.status'] && { key: 'status', label: 'Сменить статус', icon: 'arrows', input: { label: 'Новый статус', type: 'select', options: app.statuses.filter((s) => (s.scope || 'all') === 'all' || s.scope === kind).map((s) => [s.id, s.name]) }, },
+    kind === 'order' && P['orders.edit'] && { key: 'mechanic', label: 'Назначить механика', icon: 'wrench', input: { label: 'Механик', type: 'select', options: [['', '— без механика'], ...app.staff.filter((s) => s.active && s.is_mechanic).map((s) => [s.id, s.name])] } },
+    kind === 'quote' && P['quotes.manage'] && { key: 'followup', label: 'Статус обзвона', icon: 'phone', input: { label: 'Обзвон', type: 'select', options: [['', '— без статуса'], ...Object.entries(FOLLOWUP).map(([k, [l]]) => [k, l])] } },
+    P['orders.delete'] && { key: 'delete', label: 'Удалить', icon: 'trash', danger: true, confirm: kind === 'quote' ? 'Удалить выбранные выцены?' : 'Удалить выбранные заказы? Заказы с оплатами, выданными со склада запчастями или фактурами будут пропущены.' },
+  ].filter(Boolean);
+  const csv = [['number', 'Номер'], [(o) => (o.created_at || '').slice(0, 10), 'Создан'], ['status_name', 'Статус'], ['customer_name', 'Клиент'], ['customer_phone', 'Телефон'], [(o) => carName(o), 'Авто'], ['plate', 'Номер авто'], ['total', 'Сумма'], ['paid', 'Оплачено']];
   const base = kind === 'quote' ? '/quotes' : '/orders';
   return html`
     <div class="page-head"><h1>${kind === 'quote' ? 'Выцены' : 'Заказы'}</h1>
@@ -48,9 +58,9 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="orders">
-      <thead><tr><th data-c="number">Номер</th><th data-c="created">Создан</th><th data-c="status">Статус</th>${kind === 'quote' && html`<th data-c="followup">Обзвон</th>`}<th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="intake">${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th data-c="source">Источник</th><th class="r" data-c="total">Сумма</th><th class="r" data-c="paid">Оплачено</th></tr></thead>
-      <tbody>${(data?.rows || []).map((o) => html`<tr class="click" onClick=${() => go(base + '/' + o.id)}>
-        <td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
+      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="number">Номер</th><th data-c="created">Создан</th><th data-c="status">Статус</th>${kind === 'quote' && html`<th data-c="followup">Обзвон</th>`}<th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="intake">${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th data-c="source">Источник</th><th class="r" data-c="total">Сумма</th><th class="r" data-c="paid">Оплачено</th></tr></thead>
+      <tbody>${(data?.rows || []).map((o) => html`<tr class=${'click' + (sel.has(o.id) ? ' on' : '')} onClick=${() => go(base + '/' + o.id)}>
+        <${SelCell} sel=${sel} row=${o} /><td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
         <td><${Badge} color=${o.status_color}>${o.status_name || '—'}</${Badge}></td>
         ${kind === 'quote' && html`<td class="nowrap"><${FuBadge} k=${o.followup} />${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
@@ -61,10 +71,11 @@ export function OrdersList({ kind, query }) {
         <td class="r nowrap"><b>${zl(o.total)}</b></td>
         <td class="r nowrap ${o.total > 0 && o.paid >= o.total - 0.01 ? 'pos' : o.paid > 0 ? '' : 'faint'}">${o.paid > 0 ? zl(o.paid) : '—'}</td>
       </tr>`)}</tbody>
-      ${data?.rows?.length ? html`<tfoot><tr><td colspan=${kind === 'quote' ? 8 : 7}>Итого по фильтру: ${num(data.total)}</td><td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
+      ${data?.rows?.length ? html`<tfoot><tr><td colspan=${kind === 'quote' ? 9 : 8}>Итого по фильтру: ${num(data.total)}</td><td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
     </table></div>
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
-    ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}`;
+    ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
+    <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />`;
 }
 
 // ── Выбор клиента и авто (используется и в новом заказе, и в карточке) ─────────

@@ -770,6 +770,94 @@ crm.delete('/orders/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Массовые действия в списках (выделенные строки) ─────────────────────────
+crm.post('/bulk/:entity', (req, res) => {
+  const b = req.body || {};
+  const ids = [...new Set((b.ids || []).map(Number).filter((x) => x > 0))].slice(0, 1000);
+  if (!ids.length) throw new HttpError(400, 'Ничего не выбрано');
+  const v = b.value;
+  let done = 0; const skipped = [];
+  const each = (rows, label, fn) => {
+    for (const r of rows) {
+      try { if (fn(r) === false) continue; done++; } catch (e) { skipped.push({ id: r.id, label: label(r), reason: e.message }); }
+    }
+  };
+  const q = `(${ids.map(() => '?').join(',')})`;
+  const E = req.params.entity, A = b.action;
+  if (E === 'orders') {
+    const need = { delete: 'orders.delete', status: 'orders.status', mechanic: 'orders.edit', followup: 'quotes.manage' }[A];
+    if (!need) throw new HttpError(400, 'Неизвестное действие');
+    const s = who(req, need);
+    const rows = all(`SELECT * FROM orders WHERE id IN ${q}`, ...ids);
+    const lbl = (o) => o.number;
+    if (A === 'delete') each(rows, lbl, (o) => {
+      if (one('SELECT 1 FROM payments WHERE order_id = ?', o.id)) throw new HttpError(400, 'есть оплаты — сначала удалите их');
+      if (one('SELECT 1 FROM stock_docs WHERE order_id = ?', o.id)) throw new HttpError(400, 'выданы запчасти со склада');
+      if (one('SELECT 1 FROM sales_docs WHERE order_id = ?', o.id)) throw new HttpError(400, 'есть фактура / документ продажи');
+      tx(() => { run('DELETE FROM orders WHERE id = ?', o.id); log('order', o.id, 'delete', o.number + ' (массово)', s.name); });
+    });
+    if (A === 'status') {
+      const st = one('SELECT * FROM order_statuses WHERE id = ?', Number(v));
+      if (!st) throw new HttpError(400, 'Выберите статус');
+      each(rows, lbl, (o) => {
+        if (o.status_id === st.id) return false;
+        if ((st.scope || 'all') !== 'all' && st.scope !== o.kind) throw new HttpError(400, 'этот статус не для ' + (o.kind === 'quote' ? 'выцен' : 'заказов'));
+        setStatus(o.id, st.id, s.name);
+      });
+    }
+    if (A === 'mechanic') {
+      const m = v ? one('SELECT id FROM staff WHERE id = ? AND active = 1', Number(v)) : null;
+      if (v && !m) throw new HttpError(400, 'Сотрудник не найден');
+      each(rows, lbl, (o) => { if (o.kind !== 'order') throw new HttpError(400, 'это выцена'); run('UPDATE orders SET mechanic_id = ? WHERE id = ?', m?.id ?? null, o.id); });
+    }
+    if (A === 'followup') each(rows, lbl, (o) => { if (o.kind !== 'quote') throw new HttpError(400, 'это заказ'); run('UPDATE orders SET followup = ? WHERE id = ?', String(v || '') || null, o.id); });
+  } else if (E === 'products') {
+    const s = who(req, 'products.create');
+    const rows = all(`SELECT * FROM products WHERE id IN ${q}`, ...ids);
+    const lbl = (p) => p.name + (p.code ? ' · ' + p.code : '');
+    if (A === 'archive') each(rows, lbl, (p) => run('UPDATE products SET active = 0 WHERE id = ?', p.id));
+    else if (A === 'restore') each(rows, lbl, (p) => run('UPDATE products SET active = 1 WHERE id = ?', p.id));
+    else if (A === 'delete') each(rows, lbl, (p) => {
+      if (Math.abs(Number(p.stock) || 0) > 0.0001) throw new HttpError(400, 'есть остаток на складе');
+      if (one('SELECT 1 FROM order_items WHERE product_id = ?', p.id) || one('SELECT 1 FROM stock_doc_items WHERE product_id = ?', p.id)) throw new HttpError(400, 'есть движения по складу или в заказах — используйте «В архив»');
+      run('DELETE FROM products WHERE id = ?', p.id);
+    });
+    else if (A === 'location') each(rows, lbl, (p) => run('UPDATE products SET location = ? WHERE id = ?', String(v || '').trim().slice(0, 80) || null, p.id));
+    else if (A === 'min_stock') { const n = Number(v); if (!(n >= 0)) throw new HttpError(400, 'Минимум — число ≥ 0'); each(rows, lbl, (p) => run('UPDATE products SET min_stock = ? WHERE id = ?', n, p.id)); }
+    else if (A === 'price_pct') {
+      const pct = Number(v); if (!Number.isFinite(pct) || pct <= -100 || pct > 1000) throw new HttpError(400, 'Процент от -99 до 1000');
+      each(rows, lbl, (p) => run('UPDATE products SET sell_price = ? WHERE id = ?', round2((Number(p.sell_price) || 0) * (1 + pct / 100)), p.id));
+    }
+    else if (A === 'price_group') each(rows, lbl, (p) => run('UPDATE products SET price_group_id = ? WHERE id = ?', Number(v) || null, p.id));
+    else throw new HttpError(400, 'Неизвестное действие');
+    log('product', 0, 'bulk', `${A}: ${done} поз.`, s.name);
+  } else if (E === 'customers') {
+    const s = who(req, A === 'delete' ? 'clients.edit' : 'clients.edit');
+    const rows = all(`SELECT * FROM customers WHERE id IN ${q}`, ...ids);
+    const lbl = (c) => c.name || c.company || c.phone || '#' + c.id;
+    if (A === 'delete') each(rows, lbl, (c) => {
+      if (one('SELECT 1 FROM orders WHERE customer_id = ?', c.id)) throw new HttpError(400, 'есть заказы или выцены');
+      if (one('SELECT 1 FROM transactions WHERE customer_id = ?', c.id)) throw new HttpError(400, 'есть история Pulse Points');
+      if (c.registered_at) throw new HttpError(400, 'клиент зарегистрирован в приложении');
+      if (one('SELECT 1 FROM payments WHERE customer_id = ?', c.id)) throw new HttpError(400, 'есть платежи');
+      tx(() => { run('UPDATE cars SET customer_id = NULL WHERE customer_id = ?', c.id); run('DELETE FROM customers WHERE id = ?', c.id); log('customer', c.id, 'delete', lbl(c) + ' (массово)', s.name); });
+    });
+    else if (A === 'discount_labor' || A === 'discount_parts') { const n = Number(v); if (!(n >= 0 && n <= 100)) throw new HttpError(400, 'Скидка 0–100%'); each(rows, lbl, (c) => run(`UPDATE customers SET ${A} = ? WHERE id = ?`, n, c.id)); }
+    else if (A === 'consent_on' || A === 'consent_off') each(rows, lbl, (c) => run('UPDATE customers SET marketing_consent = ? WHERE id = ?', A === 'consent_on' ? 1 : 0, c.id));
+    else throw new HttpError(400, 'Неизвестное действие');
+  } else if (E === 'cars') {
+    const s = who(req, 'cars.edit');
+    const rows = all(`SELECT * FROM cars WHERE id IN ${q}`, ...ids);
+    const lbl = (k) => [k.make, k.model, k.plate].filter(Boolean).join(' ') || '#' + k.id;
+    if (A === 'delete') each(rows, lbl, (k) => {
+      if (one('SELECT 1 FROM orders WHERE car_id = ?', k.id)) throw new HttpError(400, 'есть заказы или выцены');
+      run('DELETE FROM cars WHERE id = ?', k.id); log('car', k.id, 'delete', lbl(k) + ' (массово)', s.name);
+    });
+    else throw new HttpError(400, 'Неизвестное действие');
+  } else throw new HttpError(404, 'Нет такого списка');
+  res.json({ ok: true, done, skipped });
+});
+
 // ── Терминарз ──────────────────────────────────────────────────────────────
 /** Часы работ заказа: работы в нормо-часах (не «szt/usł») */
 const LABOR_H = `SUM(CASE WHEN i.kind = 'labor' AND lower(COALESCE(i.unit,'')) NOT GLOB '*szt*' AND lower(COALESCE(i.unit,'')) NOT GLOB '*us*' THEN i.qty ELSE 0 END)`;
@@ -900,7 +988,7 @@ crm.get('/products', (req, res) => {
   who(req, 'products.view');
   const q = String(req.query.q || '').trim();
   const page = Math.max(0, Number(req.query.page) || 0);
-  const cond = ['p.active = 1'];
+  const cond = [req.query.archived === '1' ? 'p.active = 0' : 'p.active = 1'];
   const params = [];
   if (q) { cond.push('(p.name LIKE ? OR p.code LIKE ? OR p.manufacturer LIKE ?)'); params.push(like(q), like(q), like(q)); }
   if (req.query.low === '1') cond.push('p.min_stock > 0 AND p.stock <= p.min_stock');

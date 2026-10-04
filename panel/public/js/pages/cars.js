@@ -3,6 +3,8 @@
 import { html, useState, useEffect, useData, go, qs, Loading, ErrorBox, Badge, Icon, Pager, useDebounced, zl, num, fdate, carName, Picker, api, act, toast } from '../lib.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ObjectHistory } from './audit.js';
+import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
+import { useApp } from '../lib.js';
 
 export const VEHICLE_TYPES = [['Samochód osobowy', 'Легковой автомобиль'], ['Samochód dostawczy', 'Фургон / доставка'], ['Samochód ciężarowy', 'Грузовик'], ['Motocykl', 'Мотоцикл'],
   ['Motorower', 'Мопед'], ['Autobus', 'Автобус'], ['Ciągnik', 'Трактор'], ['Przyczepa', 'Прицеп'], ['Kamper', 'Кемпер'], ['Inny', 'Другой']];
@@ -14,19 +16,24 @@ export function CarsList() {
   const [page, setPage] = useState(0);
   const dq = useDebounced(q);
   useEffect(() => setPage(0), [dq]);
-  const { data, loading, error } = useData('cars?' + qs({ q: dq, page }));
+  const { data, loading, error, reload } = useData('cars?' + qs({ q: dq, page }));
+  const app = useApp();
+  const sel = useSel();
+  const bulkActions = app.perms?.['cars.edit'] ? [{ key: 'delete', label: 'Удалить', icon: 'trash', danger: true, confirm: 'Удалить выбранные авто? Авто, по которым есть заказы или выцены, будут пропущены.' }] : [];
+  const csv = [['make', 'Marka'], ['model', 'Model'], ['plate', 'Nr rejestracyjny'], ['vin', 'VIN'], ['year', 'Rok'], ['owner_name', 'Właściciel'], ['owner_phone', 'Telefon'], ['last_mileage', 'Przebieg']];
   return html`
     <div class="page-head"><h1>Автомобили</h1><span class="muted">${data ? num(data.total) : ''}</span>
       <div class="actions"><a class="btn primary" href="#/cars/new"><${Icon} n="plus" />Новое авто</a></div></div>
     <div class="card" style="margin-bottom:12px"><input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, VIN, марка, модель, владелец…" aria-label="Поиск авто" /></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="cars">
-      <thead><tr><th data-c="name">Марка / модель</th><th data-c="plate">Номер</th><th data-c="vin">VIN</th><th data-c="owner">Владелец</th><th data-c="year" class="r">Год</th><th data-c="engine" class="r">Объём</th><th data-c="fuel">Топливо</th><th data-c="power" class="r">Мощность</th><th data-c="mileage" class="r">Пробег</th></tr></thead>
-      <tbody>${(data?.rows || []).map((k) => html`<tr class="click" onClick=${() => go('/cars/' + k.id)}>
-        <td><b>${carName(k)}</b></td><td>${k.plate ? html`<span class="plate">${k.plate}</span>` : ''}</td><td class="sub">${k.vin || ''}</td>
+      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="name">Марка / модель</th><th data-c="plate">Номер</th><th data-c="vin">VIN</th><th data-c="owner">Владелец</th><th data-c="year" class="r">Год</th><th data-c="engine" class="r">Объём</th><th data-c="fuel">Топливо</th><th data-c="power" class="r">Мощность</th><th data-c="mileage" class="r">Пробег</th></tr></thead>
+      <tbody>${(data?.rows || []).map((k) => html`<tr class=${'click' + (sel.has(k.id) ? ' on' : '')} onClick=${() => go('/cars/' + k.id)}>
+        <${SelCell} sel=${sel} row=${k} /><td><b>${carName(k)}</b></td><td>${k.plate ? html`<span class="plate">${k.plate}</span>` : ''}</td><td class="sub">${k.vin || ''}</td>
         <td>${k.owner_name || '—'}<div class="sub">${k.owner_phone || ''}</div></td><td class="r">${k.year || ''}</td><td class="r">${k.capacity || ''}</td>
         <td class="sub">${k.fuel || ''}</td><td class="r">${k.power_kw ? k.power_kw + ' kW' : ''}</td><td class="r">${k.last_mileage ? num(k.last_mileage) + ' ' + (k.mileage_unit || 'km') : ''}</td></tr>`)}</tbody></table></div>
       ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
-      ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}`;
+      ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
+    <${BulkBar} sel=${sel} entity="cars" actions=${bulkActions} csv=${csv} csvName="samochody" onDone=${reload} />`;
 }
 
 const KEYS = ['plate', 'vin', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'mileage_unit', 'notes', 'first_reg', 'engine_no',

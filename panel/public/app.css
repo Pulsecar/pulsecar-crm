@@ -690,3 +690,10 @@ a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; }
 @media (max-width: 1100px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dw-m, .dw-l { grid-column: 1 / -1; } }
 @media (max-width: 640px) { .dash-grid { grid-template-columns: 1fr; } .dw-s, .dw-m, .dw-l { grid-column: 1 / -1; } }
 .dw-tools select { max-width: 130px; font-size: 12px; }
+
+/* массовые действия: галочки в строках и панель внизу */
+.tbl .sel-col { width: 34px; padding-right: 0; }
+.tbl .sel-col input { width: 16px; height: 16px; cursor: pointer; }
+.tbl tr.on > td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.bulk-bar { position: sticky; bottom: 12px; z-index: 40; margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
