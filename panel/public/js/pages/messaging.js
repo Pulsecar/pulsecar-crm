@@ -55,7 +55,7 @@ export default function Messaging() {
 
     <div class="card stack">
       <h2>Сервисная книжка (pulsecar.pl/moje-auto)</h2>
-      <div class="muted small">Клиент входит на сайте по номеру телефона и коду из SMS и видит свои авто, историю, документы и рекомендации из заказов (вкладка «Рекомендации»).</div>
+      <div class="muted small">Клиент входит на сайте по номеру авто или VIN + телефону владельца из карточки клиента (код по SMS) и видит свои авто, историю, документы и рекомендации из заказов (вкладка «Рекомендации»).</div>
       <div class="row">${chk('sms_rec_on', 'SMS о рекомендации, когда подходит срок')}
         <label class="f" style="width:200px">За сколько дней до срока<input type="number" min="1" max="60" value=${v.sms_rec_days} onInput=${(e) => set('sms_rec_days', e.target.value)} /></label></div>
       ${tpl('sms_tpl_recommendation', 'Текст напоминания о рекомендации', 'Поля [[rekomendacja.tytul]], [[rekomendacja.termin]], [[link.mojeAuto]].')}

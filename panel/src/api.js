@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { all, one, run, tx, insert } from './db.js';
 import { config } from './config.js';
-import { HttpError, newCardNo, normPhone, randomHex, safeEqual, sha256 } from './util.js';
+import { HttpError, newCardNo, normPhone, normPlate, normVin, randomHex, safeEqual, sha256 } from './util.js';
 import { sendSms } from './sms.js';
 import { loyaltySummary, welcomeBonus } from './loyalty.js';
 import { notify } from './integrations/notify.js';
@@ -28,21 +28,16 @@ function limit(key, max, windowMs) {
 const isReview = (phone) => config.reviewPhone && normPhone(config.reviewPhone) === phone && config.reviewCode;
 
 // ── Вход по номеру телефона ────────────────────────────────────────────────
-api.post('/auth/request', async (req, res) => {
-  const phone = normPhone(req.body?.phone);
-  if (!phone) throw new HttpError(400, 'Неверный номер телефона.');
-  limit('ip:' + req.ip, 20, 3600_000);
-  limit('ph:' + phone, 5, 3600_000);
+async function sendLoginCode(phone, langIn) {
   const prev = one('SELECT sent_at FROM otp WHERE phone = ?', phone);
   if (prev && Date.now() - prev.sent_at < 60_000) throw new HttpError(429, 'Код уже отправлен. Повторить можно через минуту.');
-  if (isReview(phone)) return res.json({ ok: true });
-
+  if (isReview(phone)) return;
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
   run(
     'INSERT OR REPLACE INTO otp (phone, code_hash, expires_at, attempts, sent_at) VALUES (?, ?, ?, 0, ?)',
     phone, sha256(phone + code), Date.now() + 10 * 60_000, Date.now(),
   );
-  const lang = { ua: 'uk', by: 'ru' }[String(req.body?.lang || 'pl')] || String(req.body?.lang || 'pl');
+  const lang = { ua: 'uk', by: 'ru' }[String(langIn || 'pl')] || String(langIn || 'pl');
   const text = {
     pl: `Pulsecar: Twój kod logowania to ${code}`,
     en: `Pulsecar: your login code is ${code}`,
@@ -50,7 +45,43 @@ api.post('/auth/request', async (req, res) => {
     ru: `Pulsecar: ваш код входа ${code}`,
   }[lang] || `Pulsecar: ${code}`;
   await sendSms(phone, text, { kind: 'code' });
+}
+
+api.post('/auth/request', async (req, res) => {
+  const phone = normPhone(req.body?.phone);
+  if (!phone) throw new HttpError(400, 'Неверный номер телефона.');
+  limit('ip:' + req.ip, 20, 3600_000);
+  limit('ph:' + phone, 5, 3600_000);
+  await sendLoginCode(phone, req.body?.lang);
   res.json({ ok: true });
+});
+
+// ── Вход на сайте pulsecar.pl/moje-auto: номер авто (или VIN) + телефон владельца из CRM ──
+// Код уходит только если авто с таким номером/VIN числится за клиентом с этим телефоном.
+// Ответ одинаковый для «нет такого авто» и «телефон не совпадает» — нельзя перебором узнать, чьё авто.
+export function findOwnedCar(carInput, phone) {
+  const raw = String(carInput || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (raw.length < 4) return null;
+  const vin = normVin(raw);
+  const plate = normPlate(raw);
+  const cars = vin ? all('SELECT * FROM cars WHERE vin = ?', vin) : all('SELECT * FROM cars WHERE plate = ?', plate);
+  for (const k of cars) {
+    const owner = k.customer_id ? one('SELECT id, phone FROM customers WHERE id = ?', k.customer_id) : null;
+    if (owner?.phone && normPhone(owner.phone) === phone) return k;
+  }
+  return null;
+}
+api.post('/auth/car-request', async (req, res) => {
+  const phone = normPhone(req.body?.phone);
+  const carRaw = String(req.body?.car || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!phone) throw new HttpError(400, 'Неверный номер телефона.');
+  if (carRaw.length < 4) throw new HttpError(400, 'Укажите номер авто или VIN.');
+  limit('cip:' + req.ip, 15, 3600_000);
+  limit('cph:' + phone, 5, 3600_000);
+  const car = findOwnedCar(carRaw, phone);
+  if (!car) throw new HttpError(404, 'Авто с таким номером не найдено у клиента с этим телефоном.');
+  await sendLoginCode(phone, req.body?.lang);
+  res.json({ ok: true, carId: car.id });
 });
 
 api.post('/auth/verify', (req, res) => {

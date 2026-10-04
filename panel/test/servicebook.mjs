@@ -33,8 +33,9 @@ const ok = (x, msg) => { assert.ok(x.status < 300, `${msg}: ${x.status} ${JSON.s
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const day = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
-async function login(phone) {
-  ok(await req('/api/auth/request', { body: { phone, lang: 'ua' } }), 'otp');
+async function login(phone, car) {
+  const r = ok(await req('/api/auth/car-request', { body: { car, phone, lang: 'ua' } }), 'otp');
+  assert.ok(r.carId, 'carId в ответе');
   await wait(200);
   const m = [...out.matchAll(new RegExp(`\\+48${phone}\\] .*?(\\d{6})`, 'g'))].pop();
   assert.ok(m, 'SMS с кодом не найдено');
@@ -48,7 +49,7 @@ try {
   const done = me.statuses.find((s) => s.is_final && s.lock_edit && (s.scope || 'all') !== 'quote');
 
   const cust = ok(await req('/crm-api/customers', { body: { first_name: 'Ewa', last_name: 'Test', phone: '600 222 333' } }), 'customer');
-  const car = ok(await req('/crm-api/cars', { body: { customer_id: cust.id, plate: 'WI 12345', make: 'Skoda', model: 'Octavia', last_mileage: 120000, inspection_until: day(10) } }), 'car');
+  const car = ok(await req('/crm-api/cars', { body: { customer_id: cust.id, plate: 'WI 12345', vin: 'TMBJJ7NE0K0123456', make: 'Skoda', model: 'Octavia', last_mileage: 120000, inspection_until: day(10) } }), 'car');
   const other = ok(await req('/crm-api/customers', { body: { first_name: 'Obcy', phone: '600 999 111' } }), 'other');
   const ocar = ok(await req('/crm-api/cars', { body: { customer_id: other.id, plate: 'WX 99999', make: 'Fiat' } }), 'other car');
 
@@ -85,7 +86,18 @@ try {
   console.log('✓ CRM: рекомендации вручную, из чек-листа без дублей, файлы');
 
   // клиент на сайте: вход по SMS → сервисная книжка
-  const token = await login('600222333');
+  // вход только если авто (номер или VIN) числится за этим телефоном; ответ одинаковый для чужого и несуществующего авто
+  const wrongPhone = await req('/api/auth/car-request', { body: { car: 'WI 12345', phone: '600 999 111' } });
+  assert.equal(wrongPhone.status, 404, 'авто чужого клиента — нельзя');
+  const noCar = await req('/api/auth/car-request', { body: { car: 'XX 00000', phone: '600 222 333' } });
+  assert.equal(noCar.status, 404); assert.equal(noCar.j.error, wrongPhone.j.error, 'одинаковый ответ');
+  assert.equal((await req('/api/auth/car-request', { body: { car: 'ab', phone: '600 222 333' } })).status, 400);
+  assert.ok(!/\+48600999111\] Pulsecar/.test(out), 'SMS чужому телефону не ушло');
+  const token = await login('600222333', 'wi-12345');
+  const again = await req('/api/auth/car-request', { body: { car: 'TMBJJ7NE0K0123456', phone: '+48 600 222 333' } });
+  assert.equal(again.status, 200, 'по VIN тоже находит'); assert.equal(again.j.carId, car.id);
+  assert.equal((await req('/api/auth/car-request', { body: { car: 'TMBJJ7NE0K0123456', phone: '600222333' } })).status, 429, 'повторно — не раньше чем через минуту');
+  console.log('✓ вход: номер или VIN + телефон владельца из CRM; чужое/несуществующее авто — 404 без SMS');
   let my = ok(await req('/api/me', { token }), 'me');
   const c = my.cars.find((x) => x.plate === 'WI12345' || x.plate === 'WI 12345');
   assert.ok(c, 'авто клиента');
