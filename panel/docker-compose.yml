@@ -8,3 +8,11 @@ services:
       - ./data:/data            # база и ежедневные копии (data/backups)
     ports:
       - "127.0.0.1:3100:3100"   # наружу через прокси с HTTPS: panel.pulsecar.tech
+    networks:
+      - default
+      - proxy                   # общий Caddy (autoservice-smm-bot) обращается к pulsecar-panel:3100 по этой сети
+
+networks:
+  proxy:
+    name: autoservice-smm-bot_default
+    external: true
