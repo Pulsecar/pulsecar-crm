@@ -4,9 +4,20 @@
 (() => {
   const CRM = 'https://panel.pulsecar.tech/mw-import/';
   const ORDER = ['workers', 'scheduler-workplaces', 'clients', 'vehicles', 'products', 'job-templates', 'repair-orders', 'quotations', 'sale-documents', 'pro-forma-documents',
-    'cash-box-documents', 'sms-messages', 'warehouse-documents', 'repair-order-dates'];
+    'cash-box-documents', 'sms-messages', 'warehouse-documents', 'scheduler-events', 'visits', 'client-mails', 'repair-order-dates'];
   const TARGET = { 'scheduler-workplaces': 'workplaces', products: 'products', 'pro-forma-documents': 'sale-documents' };
-  const SOURCE = { products: 'warehouse-products', 'repair-order-dates': 'repair-orders' };
+  const SOURCE = { products: 'warehouse-products', 'repair-order-dates': 'repair-orders', visits: 'appointment-list' };
+  /** терминарз MW отдаёт события только по диапазону дат — идём месяцами с 2025 года до конца следующего года */
+  async function schedulerEvents() {
+    const out = new Map();
+    const y = new Date().getFullYear();
+    for (let d = new Date(Date.UTC(y - 1, 0, 1)); d < new Date(Date.UTC(y + 1, 11, 31)); d = new Date(d.getTime() + 31 * 864e5)) {
+      const a = d.toISOString().slice(0, 10), b = new Date(d.getTime() + 30 * 864e5).toISOString().slice(0, 10);
+      const j = await get(`scheduler-events?start=${a}&end=${b}`);
+      for (const e of j['hydra:member'] || j || []) out.set(e.id, e);
+    }
+    return [...out.values()];
+  }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function get(path) {
     for (let a = 0; a < 4; a++) {
@@ -35,6 +46,16 @@
         if (only ? !only.includes(e) : e === 'repair-order-dates') continue; // «только даты» — по отдельному запросу
         const src = SOURCE[e] || e, dst = TARGET[e] || e;
         const st = (log.steps[e] = { total: null, sent: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] });
+        if (e === 'scheduler-events') {
+          const evs = await schedulerEvents();
+          st.total = evs.length;
+          for (let i = 0; i < evs.length; i += 200) {
+            const r = await send(dst, evs.slice(i, i + 200), token);
+            st.sent += Math.min(200, evs.length - i); st.created += r.created; st.updated += r.updated; st.skipped += r.skipped; st.failed += r.failed;
+            if (r.errors?.length && st.errors.length < 10) st.errors.push(...r.errors.slice(0, 10 - st.errors.length));
+          }
+          continue;
+        }
         const per = ['repair-orders', 'repair-order-dates', 'quotations', 'sale-documents', 'warehouse-documents'].includes(e) ? 50 : 100;
         for (let page = 1; ; page++) {
           const j = await get(`${src}?page=${page}&itemsPerPage=${per}&order[id]=asc`);

@@ -329,6 +329,63 @@ function importStockDoc(w) {
   return r;
 }
 
+// ── Терминарз MW (scheduler-events): точное время заказов, отдельно запланированные работы (в т.ч. многодневные), блокировки ──
+const hm = (t) => { const [h, m] = String(t || '0:0').split(':').map(Number); return h * 60 + (m || 0); };
+const pad2 = (n) => String(n).padStart(2, '0');
+const hhmm = (min) => `${pad2(Math.floor(min / 60))}:${pad2(min % 60)}`;
+/** событие → куски по дням: [{ day, start 'HH:MM', dur }]. dayAllocation MW — часы по дням */
+function eventParts(e) {
+  const d0 = String(e.start || '').slice(0, 10), t0 = String(e.start || '').slice(11, 16) || '09:00';
+  const d1 = String(e.end || '').slice(0, 10), t1 = String(e.end || '').slice(11, 16);
+  const ws = hm(getSetting('hours_start', '08:00')), we = hm(getSetting('hours_end', '18:00'));
+  const alloc = e.dayAllocation && typeof e.dayAllocation === 'object' ? Object.entries(e.dayAllocation).filter(([, h]) => Number(h) > 0).sort() : [];
+  if (alloc.length > 1) return alloc.map(([day, h], i) => ({ day, start: i === 0 && day === d0 ? t0 : hhmm(ws), dur: Math.round(Number(h) * 60) }));
+  let dur = d1 === d0 && t1 ? hm(t1) - hm(t0) : 0;
+  if (!(dur > 0)) dur = d1 > d0 && t1 ? Math.max(we - hm(t0), 30) : Math.round((Number(e.estimatedHours) || 1) * 60);
+  return [{ day: d0, start: t0, dur: Math.min(dur, 16 * 60) }];
+}
+function importSchedulerEvent(e) {
+  if (!e?.start || !e.workplaceId) return { skipped: true };
+  const station = stationId({ id: e.workplaceId, name: '' });
+  const d = e.data || {};
+  let base, extra;
+  if (e.type === 'repair_order' || e.type === 'repair_order_job') {
+    const orderId = idOf('orders', 'ro:' + d.repairOrderId);
+    if (!orderId) return { skipped: true };
+    const o = one('SELECT customer_id, car_id, number FROM orders WHERE id = ?', orderId);
+    const done = /zako[nń]cz|wydan|odebran/i.test(d.statusName || '');
+    base = e.type === 'repair_order' ? 'ap:' + d.repairOrderId : 'aj:' + d.jobId;
+    extra = { order_id: orderId, customer_id: o.customer_id, car_id: o.car_id, title: e.type === 'repair_order' ? o.number : `${o.number} · ${s(d.jobName, 120) || ''}`,
+      status: done ? 'arrived' : 'planned', source: 'motowarsztat' };
+  } else if (e.type === 'time_block') {
+    base = 'tb:' + String(e.id).replace(/^tb-/, '');
+    extra = { title: s(d.reason || e.title, 120) || 'Blokada', status: 'block', source: 'motowarsztat' };
+  } else return { skipped: true };
+  const parts = d.blocksEntireDay ? [{ day: e.start.slice(0, 10), start: getSetting('hours_start', '08:00'), dur: hm(getSetting('hours_end', '18:00')) - hm(getSetting('hours_start', '08:00')) }] : eventParts(e);
+  let r;
+  parts.forEach((p, i) => { const x = upsert('appointments', i === 0 ? base : `${base}:${p.day}`, { ...extra, station_id: station, start_at: `${p.day} ${p.start}`, duration_min: Math.max(15, p.dur) }); if (i === 0) r = x; });
+  // лишние куски от прошлого переноса (событие стало короче) — убрать
+  for (const a of all(`SELECT id, mw_id FROM appointments WHERE mw_id LIKE ?`, base + ':%')) if (!parts.some((p, i) => i > 0 && a.mw_id === `${base}:${p.day}`)) run('DELETE FROM appointments WHERE id = ?', a.id);
+  return r;
+}
+/** «Wizyty» MW (WIZ …) без заказа → заявка в нераспределённых */
+function importVisit(v) {
+  if (v.repairOrderId) return { skipped: true };
+  const g = v.guestClient || {};
+  return upsert('appointments', 'wiz:' + v.id, { customer_id: idOf('customers', 'c:' + (v.client?.id || '')), car_id: idOf('cars', 'v:' + (v.vehicle?.id || '')),
+    title: s(v.number, 60) || 'Wizyta', note: s(v.problemDescription), status: 'request', source: 'motowarsztat',
+    contact_name: s(g.name || [g.firstname, g.lastname].filter(Boolean).join(' '), 120), contact_phone: g.phoneNumber?.number ? normPhone(g.phoneNumber.number) : null,
+    created_at: dt(v.createdAt) || undefined });
+}
+/** письма клиентам из MW → история сообщений клиента */
+function importMail(m) {
+  const to = (Array.isArray(m.emails) ? m.emails : [m.emails]).filter(Boolean).join(', ');
+  if (!to) return { skipped: true };
+  const text = [m.subject, String(m.content || '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n{3,}/g, '\n\n').trim()].filter(Boolean).join('\n\n');
+  return upsert('sms_log', 'mail:' + m.id, { phone: to.slice(0, 200), customer_id: idOf('customers', 'c:' + (m.client?.id || '')), kind: 'email', text: text.slice(0, 4000) || '(e-mail)',
+    provider: 'motowarsztat', status: m.errorMsg ? 'failed' : 'sent', error: s(m.errorMsg, 300), staff: 'Motowarsztat', created_at: dt(m.sendAt || m.createdAt) || undefined });
+}
+
 const HANDLERS = {
   workers: (x) => ({ id: staffId(x) }),
   workplaces: (x) => ({ id: stationId(x) }),
@@ -343,6 +400,9 @@ const HANDLERS = {
   'cash-box-documents': importCash,
   'sms-messages': importSms,
   'warehouse-documents': importStockDoc,
+  'scheduler-events': importSchedulerEvent,
+  visits: importVisit,
+  'client-mails': importMail,
 };
 
 /** Сохранить копию базы и удалить тестовые данные (клиенты, авто, заказы, склад, документы). Настройки, сотрудники, статусы, посты остаются. */

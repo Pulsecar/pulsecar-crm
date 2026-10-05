@@ -57,6 +57,14 @@ const kw = { id: 4002, number: 'KW 1/01/2026', total: 814.12, date: '2026-01-08'
 const sms = { id: 55, client: { id: 501 }, phoneNumber: { number: '601111222' }, content: 'Auto gotowe do odbioru', status: 'sent', sendAt: '2026-01-06 15:00:00', repairOrderId: 2000154 };
 const wd = { id: 8001, type: 'pz', number: 'PZ 1/01/2026', date: '2026-01-02', externalDocumentNumber: 'FV/IC/123', clientDetails: { name: 'Inter Cars' }, totalNet: 160,
   items: [{ count: 4, price: 40, warehouseProduct: { product: { id: 7101 } } }] };
+const evs = [
+  { id: 'ro-2000154', type: 'repair_order', workplaceId: 153617, start: '2026-01-06 10:00', end: '2026-01-06 12:30', estimatedHours: 2.5, data: { repairOrderId: 2000154, statusName: 'Zakończone' } },
+  { id: 'job-9001', type: 'repair_order_job', workplaceId: 172943, start: '2026-01-07 15:00', end: '2026-01-08 11:00', estimatedHours: 4, dayAllocation: { '2026-01-07': 2, '2026-01-08': 2 },
+    data: { jobId: 9001, jobName: 'Wymiana rozrządu', repairOrderId: 2000154, statusName: 'W trakcie naprawy' } },
+  { id: 'tb-abc-1', type: 'time_block', workplaceId: 153617, start: '2026-01-09 13:30', end: '2026-01-09 17:00', title: 'кадилак', data: { reason: 'кадилак', blocksEntireDay: false } },
+  { id: 'ro-404', type: 'repair_order', workplaceId: 153617, start: '2026-01-09 09:00', end: '2026-01-09 10:00', data: { repairOrderId: 404 } }];
+const visit = { id: 31, number: 'WIZ 1/07/2026', problemDescription: 'Stuk z przodu', status: 'new', client: { id: 501 }, vehicle: null, repairOrderId: null, createdAt: '2026-07-01 10:00:00' };
+const mail = { id: 71, client: { id: 501 }, subject: 'Wycena WYC 3/01/2026', emails: ['jan@x.pl'], content: '<p>Dzień dobry,<br>w załączniku wycena.</p>', sendAt: '2026-01-04 12:30:00' };
 const jt = { id: 3001, name: 'Geometria kół', price: 162.6, unitWork: 2, quantityEstimated: 1, jobCategory: { name: 'Zawieszenie' } };
 
 try {
@@ -79,7 +87,7 @@ try {
 
   const run = async () => {
     for (const [e, items] of [['workers', [worker]], ['workplaces', [{ id: 153617, name: '1 Подьемник/+развал' }, { id: 172943, name: 'Klimatizacja' }]], ['clients', [client, company]], ['vehicles', [veh]], ['products', [wp]], ['job-templates', [jt]], ['repair-orders', [ro]],
-      ['quotations', [quote]], ['sale-documents', [sale, receipt, corr]], ['cash-box-documents', [kp, kw]], ['sms-messages', [sms]], ['warehouse-documents', [wd]]]) {
+      ['quotations', [quote]], ['sale-documents', [sale, receipt, corr]], ['cash-box-documents', [kp, kw]], ['sms-messages', [sms]], ['warehouse-documents', [wd]], ['scheduler-events', evs], ['visits', [visit]], ['client-mails', [mail]]]) {
       const r = await send(e, items);
       assert.equal(r.status, 200, e + ' ' + JSON.stringify(r.j)); assert.equal(r.j.failed, 0, e + ' ' + JSON.stringify(r.j.errors));
     }
@@ -108,6 +116,18 @@ try {
     assert.equal(o2.closed_at, '2026-01-07 18:00:00'); assert.equal(o2.items.length, 3);
     await send('repair-order-dates', [ro]);
   }
+  { // терминарз MW: точное время заказа, многодневная работа по дням, блокировка; визит; письмо
+    const ap = ok(await req('/crm-api/appointments?from=2026-01-01&to=2026-01-31'), 'appts').rows;
+    const main = ap.filter((a) => a.order_id === o.id && /^ZL/.test(a.title || ''));
+    assert.ok(main.some((a) => a.start_at === '2026-01-06 10:00' && a.duration_min === 150), 'время заказа как в терминарзе MW');
+    const job = ap.filter((a) => /rozrządu/.test(a.title || '')).map((a) => a.start_at + '/' + a.duration_min).sort();
+    assert.deepEqual(job, ['2026-01-07 15:00/120', '2026-01-08 08:00/120'], 'многодневная работа — по дням');
+    assert.equal(ap.filter((a) => a.status === 'block' && a.title === 'кадилак').length, 1, 'блокировка');
+    const req2 = ok(await req('/crm-api/appointments?from=2026-07-01'), 'cal').unassigned;
+    assert.ok(JSON.stringify(req2).includes('WIZ 1/07/2026'), 'визит WIZ в нераспределённых');
+    const cust = ok(await req('/crm-api/customers/' + o.customer_id), 'cust');
+    assert.ok(cust.sms.some((x) => x.kind === 'email' && /w załączniku wycena/.test(x.text)), 'письмо в истории клиента');
+  }
   { // возврат по корректе → расход из кассы (KW), без задвоения
     const cash = ok(await req('/crm-api/cash?from=2026-01-01&to=2026-01-31'), 'cash');
     const refunds = cash.rows.filter((p) => /Zwrot/.test(p.note || ''));
@@ -119,7 +139,7 @@ try {
   assert.ok(part.product_id && part.task_id, 'запчасть связана с товаром и работой');
   assert.equal(o.paid, 291.58, 'оплата из фактуры'); assert.equal(o.invoice_no, 'FS 1/01/2026');
   assert.ok(o.sales_docs.some((d) => d.number === 'FS 1/01/2026'));
-  assert.ok((o.appointments || []).some((a) => a.start_at === '2026-01-06 10:00' && a.duration_min === 120), 'запись в графике');
+  assert.ok((o.appointments || []).some((a) => a.start_at === '2026-01-06 10:00' && a.duration_min === 150), 'запись в графике (время из терминарза MW)');
   const me = ok(await req('/crm-api/me'), 'me');
   const ap = o.appointments.find((a) => a.start_at === '2026-01-06 10:00');
   assert.match(me.stations.find((x) => x.id === ap.station_id).name, /^1/, 'пост MW сопоставлен с нашим «1 …»');

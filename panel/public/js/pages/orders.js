@@ -28,7 +28,7 @@ const TEXT_SORT = new Set(['customer', 'car', 'source', 'status']);
 export function OrdersList({ kind, query }) {
   const app = useApp();
   const [q, setQ] = useState(query.q || '');
-  const [status, setStatus] = useState(query.status || (kind === 'order' ? 'open' : ''));
+  const [status, setStatus] = useState(query.status ?? ''); // по умолчанию — все заказы, включая закрытые (история из Motowarsztat)
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [fu, setFu] = useState(query.followup || '');
