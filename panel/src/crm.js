@@ -481,10 +481,26 @@ crm.get('/orders', (req, res) => {
       (SELECT text FROM order_comments WHERE order_id = o.id AND COALESCE(text,'') <> '' ORDER BY id DESC LIMIT 1) last_comment,
       (SELECT COALESCE(SUM(${LINE}),0) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'labor') labor_total,
       (SELECT COALESCE(SUM(${LINE}),0) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'part') parts_total
-    ${from} ORDER BY o.id DESC LIMIT ${PAGE} OFFSET ${page * PAGE}`, ...params);
+    ${from} ORDER BY ${orderSort(req.query, P)} LIMIT ${PAGE} OFFSET ${page * PAGE}`, ...params);
   const pr = !!P['orders.prices'];
   res.json({ rows: rows.map((o) => hideFor(P, o)), total: agg.n, sum: pr ? agg.s : null, sumLabor: pr ? round2(agg.sl) : null, sumParts: pr ? round2(agg.sp) : null, pageSize: PAGE });
 });
+
+/** Сортировка списка заказов / выцен: ключ колонки → выражение SQL (только из белого списка) */
+const ORDER_SORT = {
+  number: 'o.id', created: 'o.created_at', status: 'st.pos', followup: 'o.followup_at', customer: 'c.name COLLATE NOCASE',
+  car: "COALESCE(k.make,'') || ' ' || COALESCE(k.model,'') COLLATE NOCASE", planned: 'planned_at',
+  comment: '(SELECT MAX(id) FROM order_comments WHERE order_id = o.id AND COALESCE(text,\'\') <> \'\')', source: 't.name COLLATE NOCASE',
+  labor_sum: 'labor_total', parts_sum: 'parts_total', total: 'o.total', paid: 'o.paid',
+};
+const PRICE_SORT = new Set(['labor_sum', 'parts_sum', 'total', 'paid']);
+function orderSort(q, P) {
+  const key = String(q.sort || '');
+  const dir = q.dir === 'asc' ? 'ASC' : 'DESC';
+  const ex = ORDER_SORT[key];
+  if (!ex || key === 'number' || (PRICE_SORT.has(key) && !P['orders.prices'])) return `o.id ${key === 'number' ? dir : 'DESC'}`;
+  return `(${ex}) IS NULL, ${ex} ${dir}, o.id ${dir}`;
+}
 
 /** Скрываем цены и контакты, если у сотрудника нет таких прав */
 function hideFor(P, o, me) {

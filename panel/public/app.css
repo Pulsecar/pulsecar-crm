@@ -876,3 +876,11 @@ th.on { color: var(--text); }
 .add-opt .muted { font-size: 13px; }
 .add-ico { width: 46px; height: 46px; border-radius: 10px; display: grid; place-items: center; background: var(--surface3); color: var(--accent); flex: none; }
 .add-ico svg { width: 22px; height: 22px; }
+
+/* Сортировка по клику на заголовок колонки */
+.tbl th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.tbl th.sortable:hover { color: var(--text); }
+.tbl th .sort-ar { display: inline-block; margin-left: 4px; font-size: 10px; opacity: .3; }
+.tbl th.sortable:hover .sort-ar { opacity: .6; }
+.tbl th.sorted { color: var(--text); }
+.tbl th.sorted .sort-ar { opacity: 1; color: var(--accent, currentColor); }

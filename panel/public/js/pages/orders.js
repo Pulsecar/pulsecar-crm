@@ -24,6 +24,7 @@ const REASONS = ['Дорого', 'Сделает сам', 'Сделал в др�
 const FuBadge = ({ k }) => (FOLLOWUP[k] ? html`<${Badge} color=${FOLLOWUP[k][1]}>${FOLLOWUP[k][0]}</${Badge}>` : html`<span class="faint">—</span>`);
 
 // ── Список ────────────────────────────────────────────────────────────────
+const TEXT_SORT = new Set(['customer', 'car', 'source', 'status']);
 export function OrdersList({ kind, query }) {
   const app = useApp();
   const [q, setQ] = useState(query.q || '');
@@ -32,9 +33,15 @@ export function OrdersList({ kind, query }) {
   const [to, setTo] = useState('');
   const [fu, setFu] = useState(query.followup || '');
   const [page, setPage] = useState(0);
+  const [sort, setSort] = useState(() => { try { return JSON.parse(localStorage.getItem('sort.' + kind)) || { k: '', d: 'desc' }; } catch { return { k: '', d: 'desc' }; } });
+  const sortBy = (k) => {
+    const n = sort.k === k ? { k, d: sort.d === 'asc' ? 'desc' : 'asc' } : { k, d: TEXT_SORT.has(k) ? 'asc' : 'desc' };
+    setSort(n); try { localStorage.setItem('sort.' + kind, JSON.stringify(n)); } catch {}
+  };
   const dq = useDebounced(q);
-  useEffect(() => setPage(0), [dq, status, from, to, fu]);
-  const { data, loading, error, reload } = useData('orders?' + qs({ kind, q: dq, status, from, to, page, followup: kind === 'quote' ? fu : '' }));
+  useEffect(() => setPage(0), [dq, status, from, to, fu, sort.k, sort.d]);
+  const { data, loading, error, reload } = useData('orders?' + qs({ kind, q: dq, status, from, to, page, followup: kind === 'quote' ? fu : '', sort: sort.k, dir: sort.k ? sort.d : '' }));
+  const Th = ({ k, c, r, children }) => html`<th data-c=${c || k} class=${'sortable' + (r ? ' r' : '') + (sort.k === k ? ' sorted' : '')} title="Сортировать" onClick=${() => sortBy(k)}>${children}<span class="sort-ar">${sort.k === k ? (sort.d === 'asc' ? '▲' : '▼') : '↕'}</span></th>`;
   const sel = useSel();
   const P = app.perms || {};
   const [notice, setNotice] = useState(null); // { o, n } — SMS / письмо клиенту после смены статуса прямо из списка
@@ -76,7 +83,7 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="orders">
-      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="number">Номер</th><th data-c="created">Создан</th><th data-c="status">Статус</th>${kind === 'quote' && html`<th data-c="followup">Обзвон</th>`}<th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="intake">${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th data-c="source">Источник</th>${kind === 'quote' && html`<th class="r" data-c="labor_sum">Работы</th><th class="r" data-c="parts_sum">Запчасти</th>`}<th class="r" data-c="total">${kind === 'quote' ? 'Итого' : 'Сумма'}</th><th class="r" data-c="paid">Оплачено</th></tr></thead>
+      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><${Th} k="number">Номер</${Th}><${Th} k="created">Создан</${Th}><${Th} k="status">Статус</${Th}>${kind === 'quote' && html`<${Th} k="followup">Обзвон</${Th}>`}<${Th} k="customer">Клиент</${Th}><${Th} k="car">Авто</${Th}>${kind === 'quote' ? html`<${Th} k="comment" c="intake">Комментарий</${Th}>` : html`<${Th} k="planned" c="intake">Приём</${Th}>`}<${Th} k="source">Источник</${Th}>${kind === 'quote' && html`<${Th} k="labor_sum" r=${1}>Работы</${Th}><${Th} k="parts_sum" r=${1}>Запчасти</${Th}>`}<${Th} k="total" r=${1}>${kind === 'quote' ? 'Итого' : 'Сумма'}</${Th}><${Th} k="paid" r=${1}>Оплачено</${Th}></tr></thead>
       <tbody>${(data?.rows || []).map((o) => html`<tr class=${'click' + (sel.has(o.id) ? ' on' : '')} onClick=${() => go(base + '/' + o.id)}>
         <${SelCell} sel=${sel} row=${o} /><td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
