@@ -110,6 +110,7 @@ try {
   const q = ok(await req('/crm-api/orders?kind=quote'), 'quotes');
   assert.equal(q.total, 1); assert.equal(q.rows[0].total, 1497.63, 'брутто выцены как в MW (цена брутто, скидка не дважды)');
   const qd = ok(await req('/crm-api/orders/' + q.rows[0].id), 'quote');
+  { const od = ok(await req('/crm-api/orders/' + o.id), 'order'); assert.equal(od.comments.filter((x) => x.text === 'tylko oryginał').length, 1, '«Opis wewnętrzny» → комментарий, без дублей'); }
   assert.ok(qd.comments.some((x) => /piątek/.test(x.text)));
   const pr = ok(await req('/crm-api/products?q=OC 90'), 'products').rows[0];
   assert.equal(pr.stock, 4); assert.equal(pr.purchase_price, 40); assert.equal(pr.sell_price, 59.99); assert.equal(pr.manufacturer, 'KNECHT');

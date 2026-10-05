@@ -229,6 +229,9 @@ function importOrder(o, kind) {
       start_at: start, duration_min: Math.min(dur, 16 * 60), status: o.status?.finished ? 'arrived' : 'planned', source: 'motowarsztat' });
   }
   if (kind === 'quote' && o.comments && String(o.comments).trim()) upsert('order_comments', 'qc:' + o.id, { order_id: r.id, staff: 'Motowarsztat', text: s(o.comments), at: dt(o.updatedAt) || undefined });
+  // «Opis wewnętrzny» — это комментарии сотрудников в MW (колонка в списках выцен / заказов) → комментарий в CRM
+  if (s(o.internalDescription)) upsert('order_comments', 'ic:' + pre + o.id, { order_id: r.id, staff: 'Motowarsztat', text: s(o.internalDescription), at: dt(o.updatedAt) || dt(o.date || o.createdAt) || undefined });
+  else run('DELETE FROM order_comments WHERE mw_id = ?', 'ic:' + pre + o.id);
   return r;
 }
 

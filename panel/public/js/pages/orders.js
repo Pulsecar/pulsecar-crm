@@ -83,7 +83,7 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="orders">
-      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><${Th} k="number">Номер</${Th}><${Th} k="created">Создан</${Th}><${Th} k="status">Статус</${Th}>${kind === 'quote' && html`<${Th} k="followup">Обзвон</${Th}>`}<${Th} k="customer">Клиент</${Th}><${Th} k="car">Авто</${Th}>${kind === 'quote' ? html`<${Th} k="comment" c="intake">Комментарий</${Th}>` : html`<${Th} k="planned" c="intake">Приём</${Th}>`}<${Th} k="source">Источник</${Th}>${kind === 'quote' && html`<${Th} k="labor_sum" r=${1}>Работы</${Th}><${Th} k="parts_sum" r=${1}>Запчасти</${Th}>`}<${Th} k="total" r=${1}>${kind === 'quote' ? 'Итого' : 'Сумма'}</${Th}><${Th} k="paid" r=${1}>Оплачено</${Th}></tr></thead>
+      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><${Th} k="number">Номер</${Th}><${Th} k="created">Создан</${Th}><${Th} k="status">Статус</${Th}>${kind === 'quote' && html`<${Th} k="followup">Обзвон</${Th}>`}<${Th} k="customer">Клиент</${Th}><${Th} k="car">Авто</${Th}>${kind === 'quote' ? html`<${Th} k="comment" c="intake">Комментарий</${Th}>` : html`<${Th} k="planned" c="intake">Приём</${Th}><${Th} k="comment">Комментарий</${Th}>`}<${Th} k="source">Источник</${Th}>${kind === 'quote' && html`<${Th} k="labor_sum" r=${1}>Работы</${Th}><${Th} k="parts_sum" r=${1}>Запчасти</${Th}>`}<${Th} k="total" r=${1}>${kind === 'quote' ? 'Итого' : 'Сумма'}</${Th}><${Th} k="paid" r=${1}>Оплачено</${Th}></tr></thead>
       <tbody>${(data?.rows || []).map((o) => html`<tr class=${'click' + (sel.has(o.id) ? ' on' : '')} onClick=${() => go(base + '/' + o.id)}>
         <${SelCell} sel=${sel} row=${o} /><td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
@@ -97,19 +97,20 @@ export function OrdersList({ kind, query }) {
           : html`<${FuBadge} k=${o.followup} />`}${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
         <td>${o.customer_name || '—'}<div class="sub">${o.customer_phone || ''}</div></td>
         <td>${carName(o)}${o.plate ? html` <span class="plate">${o.plate}</span>` : ''}</td>
-        ${kind === 'quote' ? html`<td class="sub list-comment" style="max-width:260px" title="Комментарии и обзвон" onClick=${(e) => { e.stopPropagation(); setFuOpen(o); }}>
-            ${o.last_comment ? html`<span>${o.last_comment}</span>` : html`<span class="faint">+ комментарий</span>`}</td>` : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
+        ${kind === 'quote' ? '' : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
+        <td class="sub list-comment" style="max-width:260px" title=${kind === 'quote' ? 'Комментарии и обзвон' : 'Комментарии'} onClick=${(e) => { e.stopPropagation(); setFuOpen(o); }}>
+            ${o.last_comment ? html`<span>${o.last_comment}</span>` : html`<span class="faint">+ комментарий</span>`}</td>
         <td class="sub">${o.type_name || ''}</td>
         ${kind === 'quote' && html`<td class="r nowrap">${o.labor_total == null ? '' : zl(o.labor_total)}</td><td class="r nowrap">${o.parts_total == null ? '' : zl(o.parts_total)}</td>`}
         <td class="r nowrap"><b>${zl(o.total)}</b></td>
         <td class="r nowrap ${o.total > 0 && o.paid >= o.total - 0.01 ? 'pos' : o.paid > 0 ? '' : 'faint'}">${o.paid > 0 ? zl(o.paid) : '—'}</td>
       </tr>`)}</tbody>
-      ${data?.rows?.length ? html`<tfoot><tr><td colspan=${kind === 'quote' ? 9 : 8}>Итого по фильтру: ${num(data.total)}</td>${kind === 'quote' && html`<td class="r nowrap" data-c="labor_sum">${data.sumLabor == null ? '' : zl(data.sumLabor)}</td><td class="r nowrap" data-c="parts_sum">${data.sumParts == null ? '' : zl(data.sumParts)}</td>`}<td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
+      ${data?.rows?.length ? html`<tfoot><tr><td colspan=9>Итого по фильтру: ${num(data.total)}</td>${kind === 'quote' && html`<td class="r nowrap" data-c="labor_sum">${data.sumLabor == null ? '' : zl(data.sumLabor)}</td><td class="r nowrap" data-c="parts_sum">${data.sumParts == null ? '' : zl(data.sumParts)}</td>`}<td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
     </table></div>
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
     <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />
-    ${fuOpen && html`<${FollowUpModal} id=${fuOpen.id} number=${fuOpen.number} onClose=${() => { setFuOpen(null); reload(); }} />`}
+    ${fuOpen && html`<${FollowUpModal} id=${fuOpen.id} number=${fuOpen.number} kind=${kind} onClose=${() => { setFuOpen(null); reload(); }} />`}
     ${decline && html`<${Modal} title=${'Отказался · ' + decline.o.number} onClose=${() => setDecline(null)} foot=${html`
         <button class="btn" onClick=${() => setDecline(null)}>Отмена</button>
         <button class="btn primary" style="margin-left:auto" disabled=${!(decline.reason === 'Другое' ? decline.custom.trim() : decline.reason)} onClick=${() => quickFu(decline.o, 'declined', decline.reason === 'Другое' ? decline.custom.trim() : decline.reason)}>Сохранить</button>`}>
@@ -260,7 +261,7 @@ export function OrderPage({ id }) {
     ${o.accepted_at && html`<div class="card ok-card small" style="margin-bottom:14px">✓ Клиент подтвердил ${isQuote ? 'выцену' : 'заказ'} по электронной карте ${fdt(o.accepted_at)}${o.accepted_via === 'sms' ? ' (кодом SMS)' : ''}</div>`}
     ${notice && html`<${StatusNotice} o=${o} n=${notice} set=${setNotice} reload=${reload} />`}
     ${tab === 'items' && html`<${ItemsMW} o=${o} reload=${reload} />`}
-    ${isQuote && tab === 'items' && html`<div style="margin-top:14px"><${FollowUp} o=${o} reload=${reload} /></div>`}
+    ${tab === 'items' && html`<div style="margin-top:14px"><${FollowUp} o=${o} reload=${reload} /></div>`}
     ${tab === 'items' && isQuote && html`<div style="margin-top:14px"><${Contact} o=${o} reload=${reload} /></div>`}
     ${tab === 'main' && html`<${OrderMain} o=${o} reload=${reload} />`}
     ${tab === 'files' && html`<${Intake} o=${o} reload=${reload} />`}
@@ -476,10 +477,11 @@ function Checklists({ o }) {
 }
 
 /** «Обзвон и комментарии» выцены в окне — из списка, не открывая выцену */
-function FollowUpModal({ id, number, onClose }) {
+function FollowUpModal({ id, number, kind = 'quote', onClose }) {
   const { data: o, reload } = useData('orders/' + id, [id]);
-  return html`<${Modal} wide title=${'Обзвон и комментарии · ' + number} onClose=${onClose} foot=${html`
-      <a class="btn ghost" href=${'#/quotes/' + id} onClick=${onClose}>Открыть выцену</a><button class="btn" style="margin-left:auto" onClick=${onClose}>Закрыть</button>`}>
+  const q = kind === 'quote';
+  return html`<${Modal} wide title=${(q ? 'Обзвон и комментарии · ' : 'Комментарии · ') + number} onClose=${onClose} foot=${html`
+      <a class="btn ghost" href=${(q ? '#/quotes/' : '#/orders/') + id} onClick=${onClose}>${q ? 'Открыть выцену' : 'Открыть заказ'}</a><button class="btn" style="margin-left:auto" onClick=${onClose}>Закрыть</button>`}>
     ${o ? html`<div class="muted small">${o.customer?.name || ''}${o.customer?.phone ? html` · <a href=${'tel:' + o.customer.phone}>${o.customer.phone}</a>` : ''}${o.car ? ' · ' + carName(o.car) : ''} · ${zl(o.total)}</div>
       <${FollowUp} o=${o} reload=${reload} />` : html`<${Loading} />`}
   </${Modal}>`;
@@ -496,16 +498,17 @@ function FollowUp({ o, reload }) {
     reload();
   };
   const quick = (k) => { const d = new Date(); d.setDate(d.getDate() + (k === 'call_back' || k === 'no_answer' ? 1 : k === 'thinking' ? 3 : 0)); set({ ...f, followup: k, followup_at: ['call_back', 'no_answer', 'thinking'].includes(k) ? d.toISOString().slice(0, 10) : k === 'scheduled' || k === 'declined' || k === 'accepted' ? '' : f.followup_at }); };
+  const plain = o.kind !== 'quote'; // у заказа — только комментарии, без статусов обзвона
   return html`<div class="card fu">
-    <div class="row"><h2 class="grow" style="margin:0">Обзвон и комментарии</h2>${o.followup ? html`<${FuBadge} k=${o.followup} />` : ''}</div>
-    <div class="fu-states">${Object.entries(FOLLOWUP).map(([k, [l, c]]) => html`<button class=${'fu-st' + (f.followup === k ? ' on' : '')} style=${f.followup === k ? `background:${c}26;border-color:${c};color:${c}` : ''} onClick=${() => quick(k)}><i style=${'background:' + c}></i>${l}</button>`)}</div>
+    <div class="row"><h2 class="grow" style="margin:0">${plain ? 'Комментарии' : 'Обзвон и комментарии'}</h2>${o.followup ? html`<${FuBadge} k=${o.followup} />` : ''}</div>
+    ${!plain && html`<div class="fu-states">${Object.entries(FOLLOWUP).map(([k, [l, c]]) => html`<button class=${'fu-st' + (f.followup === k ? ' on' : '')} style=${f.followup === k ? `background:${c}26;border-color:${c};color:${c}` : ''} onClick=${() => quick(k)}><i style=${'background:' + c}></i>${l}</button>`)}</div>
     <div class="grid g3">
       ${f.followup === 'declined' ? html`<label class="f">Причина отказа<select value=${reasonPreset} onChange=${(e) => set({ ...f, reason: e.target.value === 'Другое' ? (REASONS.includes(f.reason) ? '' : f.reason) || ' ' : e.target.value })}>
           <option value="">— выберите</option>${REASONS.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
         ${reasonPreset === 'Другое' || (f.reason && !REASONS.includes(f.reason)) ? html`<label class="f">Своя причина<input value=${f.reason.trim()} onInput=${(e) => set({ ...f, reason: e.target.value })} placeholder="Почему отказался" /></label>` : html`<span></span>`}`
         : html`<label class="f">Когда связаться<input type="date" value=${f.followup_at || ''} onInput=${(e) => set({ ...f, followup_at: e.target.value })} /></label><span></span>`}
       <span></span>
-    </div>
+    </div>`}
     <label class="f">Комментарий<textarea rows="2" value=${f.text} onInput=${(e) => set({ ...f, text: e.target.value })} placeholder="О чём договорились, что сказал клиент…"></textarea></label>
     <div class="row"><span class="grow"></span><button class="btn primary" disabled=${!changed} onClick=${save}>Сохранить</button></div>
     ${(o.comments || []).length ? html`<div class="fu-log">${o.comments.map((c) => html`<div class="fu-item">

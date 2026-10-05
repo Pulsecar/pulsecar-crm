@@ -742,4 +742,12 @@ for (const t of ['customers', 'cars', 'orders', 'order_items', 'products', 'serv
   addColumn(t, 'mw_id', 'TEXT');
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${t}_mw_id ON ${t}(mw_id) WHERE mw_id IS NOT NULL`);
 }            // тип кузова для схемы повреждений (пусто — определяется по модели)
+// «Opis wewnętrzny» из Motowarsztat (их комментарии) при первом переносе попал только во внутреннее описание — добавляем его в комментарии
+if (getSetting('mw_internal_comments') === null) {
+  db.exec(`INSERT INTO order_comments (order_id, at, staff, text, mw_id)
+  SELECT o.id, COALESCE(o.created_at, datetime('now','localtime')), 'Motowarsztat', o.internal_note, 'ic:' || o.mw_id FROM orders o
+  WHERE o.mw_id IS NOT NULL AND TRIM(COALESCE(o.internal_note,'')) <> ''
+    AND NOT EXISTS (SELECT 1 FROM order_comments x WHERE x.mw_id = 'ic:' || o.mw_id)`);
+  setSetting('mw_internal_comments', '1');
+}
 }
