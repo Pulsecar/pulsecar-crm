@@ -19,7 +19,7 @@ export const UI_GROUPS = [
   ['Заказ — колонки товаров', [['parts.lp', 'Lp.'], ['parts.name', 'Товар'], ['parts.code', 'Код'], ['parts.job', 'Работа'], ['parts.qty', 'Кол-во'], ['parts.unit', 'Ед.'], ['parts.price', 'Цена'],
     ['parts.cost', 'Себестоимость'], ['parts.disc', 'Скидка %'], ['parts.vat', 'VAT'], ['parts.net', 'Сумма нетто'], ['parts.gross', 'Сумма брутто']]],
   ['Список заказов и выцен — колонки', [['orders.number', 'Номер'], ['orders.created', 'Создан'], ['orders.status', 'Статус'], ['orders.followup', 'Обзвон (выцены)'], ['orders.customer', 'Клиент'], ['orders.car', 'Авто'],
-    ['orders.intake', 'Приём / комментарий'], ['orders.source', 'Источник'], ['orders.total', 'Сумма'], ['orders.paid', 'Оплачено'], ['orders.btn.new', 'Кнопка «Новый заказ»']]],
+    ['orders.intake', 'Приём / комментарий'], ['orders.source', 'Источник'], ['orders.labor_sum', 'Работы (выцены)'], ['orders.parts_sum', 'Запчасти (выцены)'], ['orders.total', 'Сумма'], ['orders.paid', 'Оплачено'], ['orders.btn.new', 'Кнопка «Новый заказ»']]],
   ['Клиенты — колонки', [['customers.name', 'Данные клиента'], ['customers.nip', 'NIP'], ['customers.phone', 'Телефон'], ['customers.email', 'E-mail'], ['customers.address', 'Адрес'], ['customers.cars', 'Авто'],
     ['customers.orders', 'Заказов'], ['customers.app', 'Приложение'], ['customers.consent', 'Согласие']]],
   ['Автомобили — колонки', [['cars.name', 'Марка / модель'], ['cars.plate', 'Номер'], ['cars.vin', 'VIN'], ['cars.owner', 'Владелец'], ['cars.year', 'Год'], ['cars.engine', 'Объём'], ['cars.fuel', 'Топливо'], ['cars.power', 'Мощность'], ['cars.mileage', 'Пробег']]],
@@ -36,7 +36,7 @@ export const UI_PRESETS = {
   'Всё видно': [],
   'Механик — только работа': ['dash.stat.today', 'dash.stat.month', 'dash.stat.closed', 'dash.unpaid', 'dash.requests', 'dash.btn.neworder', 'top.neworder', 'top.balances',
     'order.btn.copy', 'order.btn.delete', 'order.btn.docs', 'order.tab.contact', 'order.tab.plan', 'order.tab.log', 'labor.price', 'labor.disc', 'labor.vat', 'labor.net', 'labor.gross',
-    'parts.price', 'parts.cost', 'parts.disc', 'parts.vat', 'parts.net', 'parts.gross', 'orders.total', 'orders.paid', 'orders.source'],
+    'parts.price', 'parts.cost', 'parts.disc', 'parts.vat', 'parts.net', 'parts.gross', 'orders.total', 'orders.paid', 'orders.source', 'orders.labor_sum', 'orders.parts_sum'],
   'Приёмщик без финансов': ['dash.stat.month', 'dash.stat.closed', 'parts.cost', 'stock.buy', 'menu.finance', 'menu.reports'],
 };
 

@@ -471,13 +471,19 @@ crm.get('/orders', (req, res) => {
   }
   const from = `FROM orders o LEFT JOIN customers c ON c.id = o.customer_id LEFT JOIN cars k ON k.id = o.car_id
     LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN order_types t ON t.id = o.type_id WHERE ${cond.join(' AND ')}`;
-  const agg = one(`SELECT COUNT(*) n, COALESCE(SUM(o.total),0) s ${from}`, ...params);
+  const LINE = `ROUND(i.qty * i.price * (1 - COALESCE(i.discount,0) / 100.0), 2)`;
+  const agg = one(`SELECT COUNT(*) n, COALESCE(SUM(o.total),0) s,
+      COALESCE(SUM((SELECT SUM(${LINE}) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'labor')),0) sl,
+      COALESCE(SUM((SELECT SUM(${LINE}) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'part')),0) sp ${from}`, ...params);
   const rows = all(`SELECT o.*, c.name customer_name, c.phone customer_phone, k.plate, k.make, k.model, st.name status_name, st.color status_color,
       st.is_final, t.name type_name,
       (SELECT MIN(start_at) FROM appointments WHERE order_id = o.id AND status <> 'cancelled') planned_at,
-      (SELECT text FROM order_comments WHERE order_id = o.id AND COALESCE(text,'') <> '' ORDER BY id DESC LIMIT 1) last_comment
+      (SELECT text FROM order_comments WHERE order_id = o.id AND COALESCE(text,'') <> '' ORDER BY id DESC LIMIT 1) last_comment,
+      (SELECT COALESCE(SUM(${LINE}),0) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'labor') labor_total,
+      (SELECT COALESCE(SUM(${LINE}),0) FROM order_items i WHERE i.order_id = o.id AND i.kind = 'part') parts_total
     ${from} ORDER BY o.id DESC LIMIT ${PAGE} OFFSET ${page * PAGE}`, ...params);
-  res.json({ rows: rows.map((o) => hideFor(P, o)), total: agg.n, sum: P['orders.prices'] ? agg.s : null, pageSize: PAGE });
+  const pr = !!P['orders.prices'];
+  res.json({ rows: rows.map((o) => hideFor(P, o)), total: agg.n, sum: pr ? agg.s : null, sumLabor: pr ? round2(agg.sl) : null, sumParts: pr ? round2(agg.sp) : null, pageSize: PAGE });
 });
 
 /** Скрываем цены и контакты, если у сотрудника нет таких прав */
@@ -487,7 +493,7 @@ function hideFor(P, o, me) {
     o.items = o.items.filter((i) => mine.has(i.id) || (i.kind === 'part' && mine.has(i.task_id)));
     o.only_my_jobs = true;
   }
-  if (!P['orders.prices']) for (const k of ['total', 'total_net', 'paid', 'cost']) o[k] = null;
+  if (!P['orders.prices']) for (const k of ['total', 'total_net', 'paid', 'cost', 'labor_total', 'parts_total']) o[k] = null;
   if (!P['clients.contact']) { o.customer_phone = null; if (o.customer) o.customer = { ...o.customer, phone: null, email: null }; }
   if (!P['orders.prices'] && o.items) o.items = o.items.map((i) => ({ ...i, price: null, cost: null, discount: null }));
   if (!P['orders.prices'] && o.payments) o.payments = [];

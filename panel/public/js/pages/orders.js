@@ -76,7 +76,7 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="orders">
-      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="number">Номер</th><th data-c="created">Создан</th><th data-c="status">Статус</th>${kind === 'quote' && html`<th data-c="followup">Обзвон</th>`}<th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="intake">${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th data-c="source">Источник</th><th class="r" data-c="total">Сумма</th><th class="r" data-c="paid">Оплачено</th></tr></thead>
+      <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="number">Номер</th><th data-c="created">Создан</th><th data-c="status">Статус</th>${kind === 'quote' && html`<th data-c="followup">Обзвон</th>`}<th data-c="customer">Клиент</th><th data-c="car">Авто</th><th data-c="intake">${kind === 'quote' ? 'Комментарий' : 'Приём'}</th><th data-c="source">Источник</th>${kind === 'quote' && html`<th class="r" data-c="labor_sum">Работы</th><th class="r" data-c="parts_sum">Запчасти</th>`}<th class="r" data-c="total">${kind === 'quote' ? 'Итого' : 'Сумма'}</th><th class="r" data-c="paid">Оплачено</th></tr></thead>
       <tbody>${(data?.rows || []).map((o) => html`<tr class=${'click' + (sel.has(o.id) ? ' on' : '')} onClick=${() => go(base + '/' + o.id)}>
         <${SelCell} sel=${sel} row=${o} /><td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
@@ -93,10 +93,11 @@ export function OrdersList({ kind, query }) {
         ${kind === 'quote' ? html`<td class="sub list-comment" style="max-width:260px" title="Комментарии и обзвон" onClick=${(e) => { e.stopPropagation(); setFuOpen(o); }}>
             ${o.last_comment ? html`<span>${o.last_comment}</span>` : html`<span class="faint">+ комментарий</span>`}</td>` : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
         <td class="sub">${o.type_name || ''}</td>
+        ${kind === 'quote' && html`<td class="r nowrap">${o.labor_total == null ? '' : zl(o.labor_total)}</td><td class="r nowrap">${o.parts_total == null ? '' : zl(o.parts_total)}</td>`}
         <td class="r nowrap"><b>${zl(o.total)}</b></td>
         <td class="r nowrap ${o.total > 0 && o.paid >= o.total - 0.01 ? 'pos' : o.paid > 0 ? '' : 'faint'}">${o.paid > 0 ? zl(o.paid) : '—'}</td>
       </tr>`)}</tbody>
-      ${data?.rows?.length ? html`<tfoot><tr><td colspan=${kind === 'quote' ? 9 : 8}>Итого по фильтру: ${num(data.total)}</td><td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
+      ${data?.rows?.length ? html`<tfoot><tr><td colspan=${kind === 'quote' ? 9 : 8}>Итого по фильтру: ${num(data.total)}</td>${kind === 'quote' && html`<td class="r nowrap" data-c="labor_sum">${data.sumLabor == null ? '' : zl(data.sumLabor)}</td><td class="r nowrap" data-c="parts_sum">${data.sumParts == null ? '' : zl(data.sumParts)}</td>`}<td class="r nowrap">${zl(data.sum)}</td><td></td></tr></tfoot>` : ''}
     </table></div>
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
