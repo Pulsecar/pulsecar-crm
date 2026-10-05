@@ -33,6 +33,18 @@ function laneLayout(evs) {
   if (cluster.length) flush();
   return out;
 }
+const GUT = 44; // колонка времени внутри каждого поста — как в Motowarsztat
+const hNum = (n) => String(Math.round(n * 100) / 100);
+const initials = (n) => String(n || '').trim().split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase();
+const svg = (d, fill) => html`<svg viewBox="0 0 24 24" fill=${fill ? 'currentColor' : 'none'} stroke=${fill ? 'none' : 'currentColor'} stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const IC = {
+  tools: svg(html`<path d="M3 21l6.5-6.5M14.5 9.5L21 3M7 3.5a3.5 3.5 0 0 1 4.6 4.6l9 9a1.4 1.4 0 0 1-2 2l-9-9A3.5 3.5 0 0 1 3.5 7l2.2 2.2 2-.6.6-2z" /><path d="M16 14l4.5 4.5" />`),
+  user: svg(html`<path d="M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm6 4.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2zM7.5 17.5c.7-2.2 2.4-3.3 4.5-3.3s3.8 1.1 4.5 3.3z" fill-rule="evenodd" />`, true),
+  car: svg(html`<path d="M5.6 5.4A2 2 0 0 1 7.5 4h9a2 2 0 0 1 1.9 1.4L20 10h.5a1.5 1.5 0 0 1 1.5 1.5V17a1 1 0 0 1-1 1h-1v1.5a1.5 1.5 0 0 1-3 0V18H7v1.5a1.5 1.5 0 0 1-3 0V18H3a1 1 0 0 1-1-1v-5.5A1.5 1.5 0 0 1 3.5 10H4zM7.3 6.5 6.2 10h11.6l-1.1-3.5zM6 12.5a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6zm12 0a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6z" fill-rule="evenodd" />`, true),
+  doc: svg(html`<path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M9 13h6M9 17h4" />`),
+  cal: svg(html`<rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M8 3v4M16 3v4M3.5 10h17" />`),
+  x: svg(html`<path d="M6 6l12 12M18 6L6 18" />`),
+};
 const laneCss = (L) => (L && L.n > 1 ? `left:calc(${L.i} * 100% / ${L.n} + 3px);width:calc(100% / ${L.n} - 6px);right:auto;` : '');
 
 export default function Calendar({ query }) {
@@ -113,37 +125,37 @@ export default function Calendar({ query }) {
   return html`
     <div class="page-head"><h1>Терминарз</h1></div>
     ${linkOrder && html`<div class="card" style="margin-bottom:12px;border-color:var(--accent)">Нажмите на свободное время на посту — заказ встанет в график. <a href="#/calendar">Отмена</a></div>`}
-    <div class="hg-bar">
-      <button class=${'btn' + (left ? ' on' : '')} onClick=${() => setLeft(!left)}>Неназначенные <span class="chip">${pending.length}</span><${Icon} n=${left ? 'left' : 'right'} /></button>
-      <div class="btn-group"><button class="btn" onClick=${() => shift(-1)} aria-label="Назад"><${Icon} n="left" /></button>
+    <div class="hg-bar mw-bar-top">
+      <button class="btn mw-unass" onClick=${() => setLeft(!left)}>Неназначенные <span class="mw-cnt">${pending.length}</span><${Icon} n=${left ? 'left' : 'right'} /></button>
+      <div class="btn-group mw-nav"><button class="btn" onClick=${() => shift(-1)} aria-label="Назад"><${Icon} n="left" /></button>
         <button class="btn" onClick=${() => setDate(todayStr())}>Сегодня</button>
         <button class="btn" onClick=${() => shift(1)} aria-label="Вперёд"><${Icon} n="right" /></button></div>
       <button class="btn" title="Обновить" onClick=${reload}><${Icon} n="history" /></button>
       <input type="date" class="hg-date" value=${date} onInput=${(e) => e.target.value && setDate(e.target.value)} aria-label="Дата" />
       <div class="hg-title">${title}</div>
-      <div class="btn-group">${[['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) => html`<button class=${'btn' + (view === k ? ' primary' : '')} onClick=${() => setView(k)}>${l}</button>`)}</div>
-      ${canEdit && html`<button class="btn primary" onClick=${() => setChoose({ station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="plus" />Добавить</button>`}
+      <div class="btn-group mw-views">${[['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) => html`<button class=${'btn' + (view === k ? ' on' : '')} onClick=${() => setView(k)}>${l}</button>`)}</div>
+      ${canEdit && html`<button class="btn primary mw-add" onClick=${() => setChoose({ station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="plus" />Добавить</button>`}
       <button class=${'btn' + (legend ? ' on' : '')} onClick=${() => setLegend(!legend)} title="Цвета статусов">Цвета</button>
       ${app.perms['settings.manage'] && html`<a class="btn" href="#/settings/stations" title="Посты и часы работы"><${Icon} n="gear" /></a>`}
     </div>
     ${legend && html`<${Legend} app=${app} onChanged=${() => { app.reload(); reload(); }} />`}
 
-    <div class=${'hg' + (left ? '' : ' no-left')}>
+    <div class=${'hg mw-page' + (left ? '' : ' no-left')}>
       ${left && html`<aside class=${'hg-left' + (drag?.type === 'appt' ? ' droppable' : '')} onDragOver=${(e) => drag?.type === 'appt' && e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>
-        <div class="hg-left-head"><b>Неназначенные элементы</b><span class="chip">${pending.length}</span></div>
+        <div class="hg-left-head"><b>Неназначенные элементы</b><span class="mw-cnt">${pending.length}</span></div>
         <input type="search" placeholder="Поиск: номер, клиент, авто…" value=${q} onInput=${(e) => setQ(e.target.value)} />
         ${drag?.type === 'appt' && html`<div class="hg-hint">Отпустите здесь, чтобы убрать из графика</div>`}
         <div class="hg-list">${pending.map((x) => x._t === 'order' ? html`
           <div class="hg-card" style=${x.status_color ? 'border-left:4px solid ' + x.status_color : ''} draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'order', id: x.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>
-            <div class="row"><${Icon} n="wrench" /><a href=${'#/orders/' + x.id} class="grow"><b>${x.number}</b></a>
-              <span class="small">${h1(Math.max(0, (x.hours || 0) - x.planned_min / 60) || x.hours || 0)}</span>${x.jobs?.length ? html`<span class="chip">${x.jobs.length}</span>` : ''}
-              ${canEdit && html`<button class="icon-btn sm" title="Поставить в график" onClick=${() => setCreate({ order: x, station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="cal" /></button>`}</div>
-            ${x.customer_name && html`<div class="hg-line"><${Icon} n="user" />${x.customer_name}</div>`}
-            ${(x.make || x.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(x)} ${x.plate ? html`<span class="plate">${x.plate}</span>` : ''}</div>`}
+            <div class="row"><span class="mw-ic">${IC.tools}</span><a href=${'#/orders/' + x.id} class="grow"><b>${x.number}</b></a>
+              <span class="mw-hrs">${hNum(Math.max(0, (x.hours || 0) - x.planned_min / 60) || x.hours || 0)}h</span>${x.jobs ? html`<span class="mw-cnt">${x.jobs.length ?? x.jobs}</span>` : ''}
+              ${canEdit && html`<button class="icon-btn sm mw-plan" title="Поставить в график" onClick=${() => setCreate({ order: x, station_id: stations[0]?.id || '', date, time: '' })}>${IC.cal}</button>`}</div>
+            ${x.customer_name && html`<div class="hg-line mw-line">${IC.user}<span>${x.customer_name}</span></div>`}
+            ${(x.make || x.plate) && html`<div class="hg-line mw-line">${IC.car}<span>${carName(x)}${x.plate ? ' ' + x.plate : ''}</span></div>`}
             ${x.status_name && html`<div class="hg-status"><i style=${'background:' + (x.status_color || 'var(--muted)')}></i>${x.status_name}${x.planned_min ? html` · <span class="muted">в графике ${h1(x.planned_min / 60)}</span>` : ''}</div>`}
           </div>` : html`
           <div class="hg-card req" draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: x.id })} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${() => setEdit(x)}>
-            <div class="row"><${Icon} n="cal" /><b class="grow">${x.order_number || x.title || 'Заявка'}</b><span class="small">${h1((x.duration_min || 60) / 60)}</span></div>
+            <div class="row"><span class="mw-ic">${IC.cal}</span><b class="grow">${x.order_number || x.title || 'Заявка'}</b><span class="mw-hrs">${hNum((x.duration_min || 60) / 60)}h</span></div>
             ${x.note && html`<div class="hg-note">${x.note}</div>`}
             ${(x.customer_name || x.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${x.customer_name || x.contact_name} <span class="muted">${x.customer_phone || x.contact_phone || ''}</span></div>`}
             ${(x.make || x.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(x)} ${x.plate || ''}</div>`}
@@ -156,47 +168,55 @@ export default function Calendar({ query }) {
       ${!left && drag?.type === 'appt' && html`<div class="hg-drop-strip" onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>Отпустите здесь, чтобы убрать из графика</div>`}
       <div class="hg-main">
       ${view === 'day' ? html`
-      <div class="cal" style=${`grid-template-columns:52px repeat(${stations.length}, minmax(230px,1fr))`}>
-        <div class="cal-col-head corner"></div>
+      <div class="mw-cal">
         ${stations.map((s, i) => {
           const busy = rows.filter((a) => a.station_id === s.id && a.status !== 'block').reduce((t, a) => t + a.duration_min, 0) / 60;
           const cap = Number(s.max_hours_day) || (end - start) / 60;
           const pct = Math.min(100, (busy / cap) * 100);
-          const col = pct >= 100 ? 'var(--danger)' : pct >= 70 ? 'var(--warn)' : 'var(--accent)';
-          return html`<div class="cal-col-head hg-head"><div class="row"><span class="hg-num" style=${'background:' + (s.color || 'var(--info)')}>${i + 1}</span><b class="grow hg-name" title=${s.name}>${s.name}</b>
-            <span class="hg-load" style=${`color:${col};border-color:${col}`}>${String(Math.round(busy * 10) / 10).replace('.', ',')}/${String(cap).replace('.', ',')} ч</span></div>
-            <div class="hg-bar-load"><i style=${`width:${pct}%;background:${col}`}></i></div></div>`;
+          const lvl = pct > 80 ? 'hi' : pct > 50 ? 'mid' : 'lo';
+          const sr = rows.filter((a) => a.station_id === s.id);
+          const lanes = laneLayout(sr);
+          return html`<section class="mw-col">
+            <header class="mw-head">
+              <div class="mw-head-row"><span class="mw-num">${i + 1}</span><b class="mw-name" title=${s.name}>${s.name}</b><span class=${'mw-load ' + lvl}>${hNum(busy)}/${hNum(cap)}h</span></div>
+              <div class=${'mw-prog ' + lvl}><i style=${`width:${pct}%`}></i></div>
+            </header>
+            <div class="mw-body cal-col" style=${`height:${slots.length * SLOT_PX}px`}>
+              ${slots.map((m) => {
+                const key = s.id + ':' + m;
+                return html`<div class=${'cal-slot mw-slot' + ((m + step) % 60 === 0 ? ' hour' : '') + (over === key ? ' drop' : '')} style=${`height:${SLOT_PX}px`}
+                  onClick=${() => newAt(s.id, m)}
+                  onDragOver=${(e) => { if (!drag) return; e.preventDefault(); if (over !== key) setOver(key); }}
+                  onDrop=${(e) => { e.preventDefault(); dropOn(s.id, m); }}><span class="mw-time">${hhmm(m)}</span></div>`;
+              })}
+              ${date === todayStr() && nowMin > start && nowMin < end ? html`<div class="cal-now mw-now" style=${`top:${((nowMin - start) / step) * SLOT_PX}px`}></div>` : ''}
+              ${sr.map((a) => {
+                const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX + 1;
+                const h = Math.max(SLOT_PX - 2, (a.duration_min / step) * SLOT_PX - 2);
+                const L = lanes.get(a.id);
+                const pos = L && L.n > 1 ? `left:calc(${GUT}px + ${L.i} * (100% - ${GUT + 6}px) / ${L.n});width:calc((100% - ${GUT + 6}px) / ${L.n} - 4px);` : '';
+                const col = evColor(a, app.settings);
+                if (a.status === 'block') return html`<div class="cal-ev mw-ev block" style=${`top:${top}px;height:${h}px;${pos}`} onClick=${() => setEdit(a)}>
+                  <div class="mw-t"><span class="mw-ic">${IC.x}</span><b>${a.title || 'Blokada'}</b></div>${a.note || a.title ? html`<div class="mw-sub">${a.note || a.title}</div>` : ''}
+                  ${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}</div>`;
+                const job = a.order_id && / · /.test(a.title || '') ? a.title.split(' · ').slice(1).join(' · ') : null;
+                return html`<div class=${'cal-ev mw-ev' + (a.part_total > 1 ? ' has-part' : '') + (a.status === 'request' ? ' request' : '') + (a.status === 'no_show' ? ' noshow' : '') + (drag?.id === a.id && drag.type === 'appt' ? ' dragging' : '')}
+                    draggable=${canEdit} onDragStart=${(e) => { if (e.currentTarget.classList.contains('resizing')) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${(e) => open(e, a)}
+                    style=${`top:${top}px;height:${h}px;${pos}--st:${col}`} title=${a.status_name ? 'Статус заказа: ' + a.status_name : STATUS[a.status] || ''}>
+                  ${a.part_total > 1 ? html`<span class="mw-part">${a.part_no}/${a.part_total}</span>` : ''}
+                  ${job ? html`<div class="mw-t"><b>${job}</b></div><div class="mw-line">${IC.doc}<span>${a.order_number}</span></div>`
+                    : html`<div class="mw-t"><span class="mw-ic">${a.order_id ? IC.tools : IC.cal}</span><b>${a.order_number || a.title || 'Wizyta'}</b></div>`}
+                  ${(a.customer_name || a.contact_name) && html`<div class="mw-line">${IC.user}<span>${a.customer_name || a.contact_name}</span></div>`}
+                  ${(a.make || a.plate) && html`<div class="mw-line">${IC.car}<span>${carName(a)}${a.plate ? ' ' + a.plate : ''}</span></div>`}
+                  ${!job && a.jobs?.length ? html`<div class="mw-jobs">${a.jobs.map((j) => html`<div class=${j.done ? 'done' : ''}><span class="g">${j.name}</span>${isHours(j) ? html`<span class="h">${hNum(j.qty)}h</span>` : ''}</div>`)}</div>`
+                    : !job && (a.order_complaint || a.note) ? html`<div class="mw-sub">${a.order_complaint || a.note}</div>` : ''}
+                  ${a.mechanic_name ? html`<span class="mw-ava" title=${a.mechanic_name}>${initials(a.mechanic_name)}</span>` : ''}
+                  ${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}
+                </div>`;
+              })}
+            </div>
+          </section>`;
         })}
-        <div class="cal-time">${slots.map((m) => html`<div style=${`height:${SLOT_PX}px;line-height:${SLOT_PX}px`}>${m % 60 === 0 || step >= 60 ? hhmm(m) : hhmm(m)}</div>`)}</div>
-        ${stations.map((s) => html`<div class="cal-col">
-          ${slots.map((m) => {
-            const key = s.id + ':' + m;
-            return html`<div class=${'cal-slot' + ((m + step) % 60 === 0 ? ' hour' : '') + (over === key ? ' drop' : '')} style=${`height:${SLOT_PX}px`}
-              onClick=${() => newAt(s.id, m)}
-              onDragOver=${(e) => { if (!drag) return; e.preventDefault(); if (over !== key) setOver(key); }}
-              onDrop=${(e) => { e.preventDefault(); dropOn(s.id, m); }} title=${hhmm(m)}></div>`;
-          })}
-          ${date === todayStr() && nowMin > start && nowMin < end ? html`<div class="cal-now" style=${`top:${((nowMin - start) / step) * SLOT_PX}px`}></div>` : ''}
-          ${(() => { const sr = rows.filter((a) => a.station_id === s.id); const lanes = laneLayout(sr); return sr.map((a) => {
-            const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX + 1;
-            const h = Math.max(SLOT_PX - 3, (a.duration_min / step) * SLOT_PX - 3);
-            const L = laneCss(lanes.get(a.id));
-            if (a.status === 'block') return html`<div class="cal-ev block" style=${`top:${top}px;height:${h}px;${L}`} onClick=${() => setEdit(a)}>
-              <b><${Icon} n="x" /> ${a.title || 'Занято'}</b>${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}</div>`;
-            return html`<div class=${'cal-ev' + (a.status === 'request' ? ' request' : '') + (a.status === 'arrived' ? ' arrived' : '') + (a.status === 'no_show' ? ' noshow' : '') + (drag?.id === a.id && drag.type === 'appt' ? ' dragging' : '')}
-                draggable=${canEdit} onDragStart=${(e) => { if (e.currentTarget.classList.contains('resizing')) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${(e) => open(e, a)}
-                style=${`top:${top}px;height:${h}px;${L}` + tint(evColor(a, app.settings))} title=${a.status_name ? 'Статус заказа: ' + a.status_name : STATUS[a.status] || ''}>
-              <div class="row"><${Icon} n=${a.order_id ? 'wrench' : 'cal'} /><b class="grow">${a.order_number || a.title || 'Запись'}</b>
-                ${a.part_total > 1 ? html`<span class="chip">${a.part_no}/${a.part_total}</span>` : ''}</div>
-              ${(a.customer_name || a.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${a.customer_name || a.contact_name}</div>`}
-              ${(a.make || a.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(a)} ${a.plate || ''}</div>`}
-              ${h > SLOT_PX * 1.5 ? html`<div class="hg-jobs">${(a.jobs || []).map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}
-                ${!a.jobs?.length && (a.order_complaint || a.note) ? html`<div class="muted">${a.order_complaint || a.note}</div>` : ''}</div>` : ''}
-              ${a.status_name && h > SLOT_PX * 2.5 ? html`<div class="hg-st"><i style=${'background:' + evColor(a, app.settings)}></i>${a.status_name}${a.media_done ? ' · 📷' : ''}</div>` : ''}
-              ${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}
-            </div>`;
-          }); })()}
-        </div>`)}
       </div>` : view === 'week' ? html`
       <div class="week">${[0, 1, 2, 3, 4, 5, 6].map((i) => {
         const day = addDays(range[0], i);
