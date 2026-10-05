@@ -735,5 +735,11 @@ addColumn('cars', 'body_type', 'TEXT');
 addColumn('car_recommendations', 'quote_id', 'INTEGER');
 addColumn('appointments', 'quote_id', 'INTEGER');          // запись клиента «по выцене» → заказ создаётся из позиций выцены
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS car_rec_quote ON car_recommendations(quote_id) WHERE quote_id IS NOT NULL');
-if (getSetting('servicebook_quotes') === null) setSetting('servicebook_quotes', '1');            // тип кузова для схемы повреждений (пусто — определяется по модели)
+if (getSetting('servicebook_quotes') === null) setSetting('servicebook_quotes', '1');
+// Перенос из Motowarsztat: mw_id («c:123», «ro:45»…) — повторный перенос обновляет записи без дублей
+for (const t of ['customers', 'cars', 'orders', 'order_items', 'products', 'service_catalog', 'appointments', 'sales_docs', 'receipts', 'payments',
+  'sms_log', 'stock_docs', 'staff', 'stations', 'order_statuses', 'order_types', 'cash_registers', 'order_comments']) {
+  addColumn(t, 'mw_id', 'TEXT');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${t}_mw_id ON ${t}(mw_id) WHERE mw_id IS NOT NULL`);
+}            // тип кузова для схемы повреждений (пусто — определяется по модели)
 }

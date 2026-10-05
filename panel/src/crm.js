@@ -41,6 +41,7 @@ import { sendSms, testSms, testSerwersms, testSmsplanet, testTwilio, testSmsgate
 import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from './messaging.js';
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
 import * as REC from './recommendations.js';
+import * as MW from './mw-import.js';
 /** Способы оплаты (платёж): наличные, карта, BLIK, перевод. «mixed» — только как способ в документах/настройках */
 const PAY_METHODS = ['cash', 'card', 'blik', 'transfer'];
 
@@ -1764,6 +1765,15 @@ crm.delete('/recommendations/:id', (req, res) => {
   res.json({ ok: true });
 });
 // Рекомендация → выцена: клиент увидит точный состав и цену в Моё авто и запишется «по выцене»
+// ── Перенос из Motowarsztat (только владелец) ──
+crm.post('/mw-import/token', (req, res) => { owner(req); res.json({ token: MW.newImportToken() }); });
+crm.post('/mw-import/wipe', (req, res) => {
+  const o = owner(req);
+  if (req.body?.confirm !== 'USUŃ DANE TESTOWE') throw new HttpError(400, 'Нужно подтверждение');
+  const r = MW.wipeForImport();
+  log('settings', 0, 'update', 'Перед переносом из Motowarsztat удалены тестовые данные, копия: ' + r.backup, o.name);
+  res.json(r);
+});
 crm.post('/recommendations/:id/quote', (req, res) => {
   const s = who(req, 'quotes.manage');
   res.json({ id: REC.recToQuote(Number(req.params.id), s.name, createOrder) });

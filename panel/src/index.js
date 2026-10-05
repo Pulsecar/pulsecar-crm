@@ -6,6 +6,7 @@ import { config } from './config.js';
 import './db.js';
 import { api } from './api.js';
 import { crm } from './crm.js';
+import { mwImport } from './mw-import.js';
 import { pub } from './public.js';
 import { assistant, pruneChats } from './assistant.js';
 import { icalFeed, checkPayment } from './integrations/services.js';
@@ -50,6 +51,8 @@ app.use('/api', api);
 
 // API панели (CRM)
 app.use('/crm-api', crm);
+// приём данных из Motowarsztat (скрипт во вкладке app.motowarsztat.pl, ключ импорта)
+app.use('/mw-import', mwImport);
 
 // AI-ассистент для сайта: /chat/widget.js и /chat-api/*
 app.use(assistant);
@@ -87,7 +90,7 @@ app.use(express.static(join(root, 'public'), { index: 'index.html', maxAge: '1h'
 // приложение для клиентов (веб-версия Expo): https://…/app/
 app.get(/^\/app(\/[^.]*)?$/, (_req, res) => res.sendFile(join(root, 'public/app/index.html')));
 // SPA: все остальные пути — index.html
-app.get(/^\/(?!api|crm-api|chat-api|chat\/|vendor|ical|hooks|k\/|rezerwacja).*/, (_req, res) => res.sendFile(join(root, 'public/index.html')));
+app.get(/^\/(?!api|crm-api|mw-import|chat-api|chat\/|vendor|ical|hooks|k\/|rezerwacja).*/, (_req, res) => res.sendFile(join(root, 'public/index.html')));
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
