@@ -190,7 +190,7 @@ function Shell({ app }) {
   else if (p0 === 'owner') page = html`<${Owner} manage=${route.query.manage === '1'} key=${route.query.manage || ''} />`;
   else if (p0 === 'orders' || p0 === 'quotes') {
     const kind = p0 === 'quotes' ? 'quote' : 'order';
-    page = p1 === 'new' ? html`<${NewOrder} kind=${kind} query=${route.query} />` : p1 ? html`<${OrderPage} id=${p1} key=${p1} />` : html`<${OrdersList} kind=${kind} query=${route.query} />`;
+    page = p1 === 'new' ? html`<${NewOrder} kind=${kind} key=${"new-" + kind} query=${route.query} />` : p1 ? html`<${OrderPage} id=${p1} key=${p1} />` : html`<${OrdersList} kind=${kind} key=${kind} query=${route.query} />`;
   } else if (p0 === 'calendar') page = html`<${Calendar} query=${route.query} />`;
   else if (p0 === 'customers') page = p1 === 'new' ? html`<${CustomerNew} />` : p1 ? html`<${CustomerPage} id=${p1} key=${p1 + (route.query.tab || '')} query=${route.query} />` : html`<${CustomersList} />`;
   else if (p0 === 'cars') page = p1 === 'new' ? html`<${CarNew} query=${route.query} key=${route.query.customer_id || 'new'} />` : p1 ? html`<${CarPage} id=${p1} key=${p1 + (route.query.tab || '')} query=${route.query} />` : html`<${CarsList} />`;
