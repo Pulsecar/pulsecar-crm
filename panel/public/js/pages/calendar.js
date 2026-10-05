@@ -84,7 +84,8 @@ export default function Calendar({ query }) {
     };
     addEventListener('pointermove', mv); addEventListener('pointerup', up); addEventListener('pointercancel', up);
   };
-  const open = (e, a) => { if (e.currentTarget.dataset.justResized) return; setEdit(a); };
+  // клик по заказу в графике — сразу полный заказ (время/пост меняются перетаскиванием или во вкладке «Терминарз» заказа)
+  const open = (e, a) => { if (e.currentTarget.dataset.justResized) return; if (a.order_id) return go('/orders/' + a.order_id); setEdit(a); };
   const [legend, setLegend] = useState(false);
 
   const d = new Date(date + 'T12:00:00');
@@ -192,7 +193,7 @@ export default function Calendar({ query }) {
             onDragOver=${(e) => { if (!drag) return; e.preventDefault(); setOver('w' + day); }} onDrop=${(e) => { e.preventDefault(); const s0 = stations[0]; if (s0) dropOn(drag?.type === 'appt' ? rows.find((x) => x.id === drag.id)?.station_id || s0.id : s0.id, drag?.type === 'appt' ? toMin(rows.find((x) => x.id === drag.id)?.start_at.slice(11) || hhmm(start)) : start, day); }}>
           <h4><a href="#" onClick=${(e) => { e.preventDefault(); setDate(day); setView('day'); }}>${DAYS[new Date(day + 'T12:00').getDay()]} ${fdate(day).slice(0, 5)}</a> <span class="faint">${busy ? h1(busy) : ''}</span></h4>
           ${evs.map((a) => html`<div class=${'ev' + (a.status === 'block' ? ' block' : '')} draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: a.id })} onDragEnd=${() => { setDrag(null); setOver(null); }}
-              style=${tint(evColor(a, app.settings))} onClick=${() => setEdit(a)}>
+              style=${tint(evColor(a, app.settings))} onClick=${() => (a.order_id ? go('/orders/' + a.order_id) : setEdit(a))}>
             <b>${a.start_at.slice(11)}</b> ${a.order_number || a.title || ''}<div class="muted">${a.customer_name || a.contact_name || ''}</div><div class="muted">${carName(a)} ${a.plate || ''}</div></div>`)}
         </div>`;
       })}</div>` : html`
