@@ -396,7 +396,7 @@ function ApptModal({ a, onClose, onSaved }) {
       <label class="f">Длительность<select value=${f.duration_min} onChange=${(e) => set({ ...f, duration_min: Number(e.target.value) })}>${[...new Set([30, 60, 90, 120, 180, 240, 300, 360, 480, 540, Number(f.duration_min)])].sort((x, y) => x - y).map((m) => html`<option value=${m}>${h1(m / 60)}</option>`)}</select></label>
     </div>
     ${isBlock ? html`<label class="f">Причина<input value=${f.title} onInput=${(e) => set({ ...f, title: e.target.value })} /></label>` : a.order_id ? html`
-      <div class="card" style="background:var(--surface2)"><div class="row"><b class="grow">${a.order_number}</b>${a.status_name && html`<span class="badge" style=${`border-color:${a.status_color};color:${a.status_color}`}>${a.status_name}</span>`}</div>
+      <div class="card" style="background:var(--surface2)"><div class="row"><b class="grow">${a.order_number}</b>${a.status_name && html`<span class="badge st-c" style=${a.status_color ? '--st:' + a.status_color : ''}>${a.status_name}</span>`}</div>
         <div class="muted">${a.customer_name || ''} ${a.customer_phone || ''} · ${carName(a)} ${a.plate || ''}</div>
         ${a.order_complaint && html`<div style="margin-top:6px">${a.order_complaint}</div>`}
         <${OrderItems} a=${a} onStatus=${onSaved} /></div>

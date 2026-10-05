@@ -134,7 +134,7 @@ export const Icon = ({ n }) => html`<svg viewBox="0 0 24 24" fill="none" stroke=
 // ── Компоненты ─────────────────────────────────────────────────────────────
 export function Badge({ color, children }) {
   const c = color || '#9A9CA3';
-  return html`<span class="badge" style=${`background:${c}22;color:${light(c) ? c : '#f2f2f2'};border-color:${c}55`}><span class="dot" style=${`background:${c}`}></span>${children}</span>`;
+  return html`<span class="badge st-b" style=${`--st:${c};background:${c}22;color:${light(c) ? c : '#f2f2f2'};border-color:${c}55`}><span class="dot" style=${`background:${c}`}></span>${children}</span>`;
 }
 function light(hex) {
   const h = hex.replace('#', '');

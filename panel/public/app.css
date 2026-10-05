@@ -884,3 +884,10 @@ th.on { color: var(--text); }
 .tbl th.sortable:hover .sort-ar { opacity: .6; }
 .tbl th.sorted { color: var(--text); }
 .tbl th.sorted .sort-ar { opacity: 1; color: var(--accent, currentColor); }
+
+/* Цвет статуса: в тёмной теме — сам цвет, в светлой — затемнённый, чтобы бледные цвета (жёлтый и т.п.) читались */
+.st-c { --st: var(--muted); color: var(--st); border-color: var(--st); }
+.status-select.st-c:not([style*="--st"]) { color: var(--text); border-color: var(--border2); }
+:root[data-theme="light"] .st-c { color: color-mix(in srgb, var(--st) 35%, #16181c); border-color: color-mix(in srgb, var(--st) 70%, #6b6f78); background-color: color-mix(in srgb, var(--st) 16%, #fff); }
+:root[data-theme="light"] .status-select.st-c:not([style*="--st"]) { color: var(--text); border-color: var(--border2); background-color: transparent; }
+:root[data-theme="light"] .badge.st-b { color: color-mix(in srgb, var(--st) 35%, #16181c) !important; border-color: color-mix(in srgb, var(--st) 55%, transparent) !important; }

@@ -88,11 +88,11 @@ export function OrdersList({ kind, query }) {
         <${SelCell} sel=${sel} row=${o} /><td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
         <td onClick=${(e) => e.stopPropagation()}>${P['orders.status'] && !o.locked
-          ? html`<select class="status-select list-status" title="Сменить статус" value=${o.status_id || ''} style=${`border-color:${o.status_color || 'var(--border2)'};color:${o.status_color || 'var(--text)'}`}
+          ? html`<select class="status-select list-status st-c" title="Сменить статус" value=${o.status_id || ''} style=${o.status_color ? '--st:' + o.status_color : ''}
               onChange=${(e) => quickStatus(o, e.target.value)}>${!o.status_id ? html`<option value="">—</option>` : ''}${statusOpts(o).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>`
           : html`<${Badge} color=${o.status_color}>${o.status_name || '—'}</${Badge}>`}</td>
         ${kind === 'quote' && html`<td class="nowrap" onClick=${(e) => e.stopPropagation()}>${P['quotes.manage']
-          ? html`<select class="status-select list-status" title="Статус обзвона" value=${o.followup || ''} style=${`border-color:${FOLLOWUP[o.followup]?.[1] || 'var(--border2)'};color:${FOLLOWUP[o.followup]?.[1] || 'var(--muted)'}`}
+          ? html`<select class="status-select list-status st-c" title="Статус обзвона" value=${o.followup || ''} style=${FOLLOWUP[o.followup] ? '--st:' + FOLLOWUP[o.followup][1] : ''}
               onChange=${(e) => quickFu(o, e.target.value)}><option value="">—</option>${Object.entries(FOLLOWUP).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>`
           : html`<${FuBadge} k=${o.followup} />`}${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
         <td>${o.customer_name || '—'}<div class="sub">${o.customer_phone || ''}</div></td>
@@ -229,7 +229,7 @@ export function OrderPage({ id }) {
     <div class="order-head">
       <div class="title grow">
         <h1>${o.number}
-          <select class="status-select" value=${o.status_id} onChange=${(e) => setStatus(e.target.value)} style=${`border-color:${o.status?.color};color:${o.status?.color}`}>
+          <select class="status-select st-c" value=${o.status_id} onChange=${(e) => setStatus(e.target.value)} style=${o.status?.color ? '--st:' + o.status.color : ''}>
             ${app.statuses.filter((s) => s.id === o.status_id || (s.scope || 'all') === 'all' || s.scope === (isQuote ? 'quote' : 'order')).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>${isQuote && o.followup ? html` <${FuBadge} k=${o.followup} />` : ''}</h1>
         <div class="muted">
           ${o.customer ? html`<a href=${'#/customers/' + o.customer.id}>${o.customer.name || o.customer.phone}</a> · <a href=${'tel:' + o.customer.phone}>${o.customer.phone || ''}</a>` : 'Клиент не выбран'}
@@ -359,7 +359,7 @@ function QuoteToOrder({ o }) {
       <div class="muted small" style="margin-bottom:8px">Позиции выцены (${o.items.length}) добавятся в выбранный открытый заказ, выцена станет «завершена» и будет ссылаться на заказ. Сначала — заказы этого клиента / авто.</div>
       ${!targets ? html`<${Loading} />` : !targets.length ? html`<div class="empty">Открытых заказов нет</div>` : html`<table class="tbl"><tbody>${targets.map((t) => html`<tr class="click" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/add-to-order`, { body: { order_id: t.id } }), `Добавлено в ${t.number}: ${o.items.length} поз.`); go('/orders/' + r.id); }}>
         <td><b>${t.number}</b>${t.same ? html` <span class="chip">этот клиент</span>` : ''}<div class="sub">${fdt(t.created_at)}</div></td><td>${t.customer_name || ''}<div class="sub">${[t.make, t.model].filter(Boolean).join(' ')} ${t.plate || ''}</div></td>
-        <td>${t.status_name && html`<span class="badge" style=${`border-color:${t.status_color};color:${t.status_color}`}>${t.status_name}</span>`}</td><td class="r nowrap">${zl(t.total)}</td></tr>`)}</tbody></table>`}
+        <td>${t.status_name && html`<span class="badge st-c" style=${t.status_color ? '--st:' + t.status_color : ''}>${t.status_name}</span>`}</td><td class="r nowrap">${zl(t.total)}</td></tr>`)}</tbody></table>`}
     </${Modal}>`}
   </div>`;
 }
