@@ -3,6 +3,7 @@
 import { CorrectionModal } from './sales.js';
 import { printReceipt } from '../fiscal.js';
 import { html, useState, useRef, api, act, go, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast, METHOD } from '../lib.js';
+import { carShapeSvg, detectBody, BODY_TYPES } from '../car-shapes.js';
 
 const PRINTS = [['intake', 'Протокол приёма', 'Protokół przyjęcia'], ['estimate', 'Kosztorys / выцена', 'Kosztorys'], ['spec', 'Спецификация заказа', 'Specyfikacja'],
   ['mechanic', 'Карта для механика', 'Karta dla mechanika'], ['release', 'Протокол выдачи', 'Protokół wydania']];
@@ -92,7 +93,7 @@ export const DMG = [['rysa', 'Царапина'], ['wgniecenie', 'Вмятина
 const DOCNAME = { intake: 'Протокол приёма', estimate: 'Kosztorys', quote: 'Выцена', release: 'Протокол выдачи' };
 const SIGN = { button: 'кнопка «Akceptuję»', sms: 'код SMS', drawn: 'подпись от руки', paper: 'на бумаге' };
 
-export function CarDiagram({ marks, onAdd, onPick, sel }) {
+export function CarDiagram({ marks, onAdd, onPick, sel, body = 'sedan' }) {
   const ref = useRef(null);
   const click = (e) => {
     const r = ref.current.getBoundingClientRect();
@@ -101,13 +102,7 @@ export function CarDiagram({ marks, onAdd, onPick, sel }) {
     onAdd({ x, y });
   };
   return html`<svg ref=${ref} viewBox="0 0 200 400" class="car-diagram" onClick=${click} role="img" aria-label="Схема авто: нажмите, чтобы отметить повреждение">
-    <text x="100" y="12" text-anchor="middle" font-size="10" fill="currentColor" opacity=".6">ПЕРЕД</text><text x="100" y="396" text-anchor="middle" font-size="10" fill="currentColor" opacity=".6">ЗАД</text>
-    <path d="M60 40 Q100 18 140 40 L152 90 L156 170 L156 300 L150 350 Q100 378 50 350 L44 300 L44 170 L48 90 Z" fill="var(--surface2)" stroke="currentColor" stroke-width="2"/>
-    <path d="M62 96 Q100 80 138 96 L132 132 Q100 124 68 132 Z" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".7"/>
-    <path d="M68 262 Q100 270 132 262 L138 300 Q100 312 62 300 Z" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".7"/>
-    <rect x="68" y="138" width="64" height="118" rx="10" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".6"/>
-    <rect x="30" y="70" width="14" height="44" rx="4" fill="currentColor"/><rect x="156" y="70" width="14" height="44" rx="4" fill="currentColor"/>
-    <rect x="30" y="286" width="14" height="44" rx="4" fill="currentColor"/><rect x="156" y="286" width="14" height="44" rx="4" fill="currentColor"/>
+    <g dangerouslySetInnerHTML=${{ __html: carShapeSvg(body, { theme: 'ui', labels: ['ПЕРЕД', 'ЗАД'] }) }} />
     ${marks.map((m, i) => html`<g onClick=${(e) => { e.stopPropagation(); onPick(i); }} style="cursor:pointer"><circle cx=${m.x * 2} cy=${m.y * 4} r=${sel === i ? 12 : 10} fill="#e34948" stroke="#fff" stroke-width="2" />
       <text x=${m.x * 2} y=${m.y * 4 + 4} text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${i + 1}</text></g>`)}
   </svg>`;

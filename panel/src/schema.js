@@ -702,4 +702,5 @@ db.exec(`CREATE TABLE IF NOT EXISTS chat_sessions (
 )`);
 db.exec('CREATE INDEX IF NOT EXISTS chat_sessions_updated ON chat_sessions(updated_at)');
 addColumn('staff', 'dash', 'TEXT');               // своя главная: JSON {v, widgets:[{id,type,size,…}]}
+addColumn('cars', 'body_type', 'TEXT');            // тип кузова для схемы повреждений (пусто — определяется по модели)
 }
