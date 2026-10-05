@@ -37,6 +37,14 @@ export function OrdersList({ kind, query }) {
   const { data, loading, error, reload } = useData('orders?' + qs({ kind, q: dq, status, from, to, page, followup: kind === 'quote' ? fu : '' }));
   const sel = useSel();
   const P = app.perms || {};
+  const [notice, setNotice] = useState(null); // { o, n } — SMS / письмо клиенту после смены статуса прямо из списка
+  const quickStatus = async (o, sid) => {
+    const r = await act(() => api(`orders/${o.id}/status`, { body: { status_id: Number(sid) } }), 'Статус изменён');
+    if (r.earned) toast(`Клиенту начислено ${r.earned} баллов Pulse Points`);
+    if (r.sms || r.email) setNotice({ o, n: { sms: r.sms, email: r.email, sendSms: !!r.sms, sendEmail: !!r.email } });
+    reload();
+  };
+  const statusOpts = (o) => app.statuses.filter((s) => s.id === o.status_id || (s.scope || 'all') === 'all' || s.scope === kind);
   const bulkActions = [
     P['orders.status'] && { key: 'status', label: 'Сменить статус', icon: 'arrows', input: { label: 'Новый статус', type: 'select', options: app.statuses.filter((s) => (s.scope || 'all') === 'all' || s.scope === kind).map((s) => [s.id, s.name]) }, },
     kind === 'order' && P['orders.edit'] && { key: 'mechanic', label: 'Назначить механика', icon: 'wrench', input: { label: 'Механик', type: 'select', options: [['', '— без механика'], ...app.staff.filter((s) => s.active && s.is_mechanic).map((s) => [s.id, s.name])] } },
@@ -63,7 +71,10 @@ export function OrdersList({ kind, query }) {
       <tbody>${(data?.rows || []).map((o) => html`<tr class=${'click' + (sel.has(o.id) ? ' on' : '')} onClick=${() => go(base + '/' + o.id)}>
         <${SelCell} sel=${sel} row=${o} /><td class="nowrap"><b>${o.number}</b>${o.source === 'app' ? html` <span class="chip">app</span>` : ''}</td>
         <td class="nowrap">${fdate(o.created_at)}</td>
-        <td><${Badge} color=${o.status_color}>${o.status_name || '—'}</${Badge}></td>
+        <td onClick=${(e) => e.stopPropagation()}>${P['orders.status'] && !o.locked
+          ? html`<select class="status-select list-status" title="Сменить статус" value=${o.status_id || ''} style=${`border-color:${o.status_color || 'var(--border2)'};color:${o.status_color || 'var(--text)'}`}
+              onChange=${(e) => quickStatus(o, e.target.value)}>${!o.status_id ? html`<option value="">—</option>` : ''}${statusOpts(o).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>`
+          : html`<${Badge} color=${o.status_color}>${o.status_name || '—'}</${Badge}>`}</td>
         ${kind === 'quote' && html`<td class="nowrap"><${FuBadge} k=${o.followup} />${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
         <td>${o.customer_name || '—'}<div class="sub">${o.customer_phone || ''}</div></td>
         <td>${carName(o)}${o.plate ? html` <span class="plate">${o.plate}</span>` : ''}</td>
@@ -76,7 +87,8 @@ export function OrdersList({ kind, query }) {
     </table></div>
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
-    <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />`;
+    <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />
+    ${notice && html`<${StatusNotice} o=${notice.o} n=${notice.n} set=${(n) => setNotice(n ? { ...notice, n } : null)} reload=${reload} />`}`;
 }
 
 // ── Выбор клиента и авто (используется и в новом заказе, и в карточке) ─────────
