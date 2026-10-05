@@ -48,6 +48,10 @@ const sale = { id: 628251, type: 'invoice', number: 'FS 1/01/2026', date: '2026-
   payments: [{ id: 99, date: '2026-01-06', value: '291.58', paymentMethod: 3, cashBoxId: null }] };
 const receipt = { id: 628252, type: 'receiptFiscal', number: '1234', date: '2026-01-07', paymentMethod: 1, totalGross: 50, paidTotal: 50, repairOrders: [], items: [],
   payments: [{ id: 100, date: '2026-01-07', value: '50.00', paymentMethod: 1, cashBoxId: 2475, cashBoxName: 'Основная касса', cashBoxDocumentNumber: 'KP 2/01/2026' }] };
+// корректа с возвратом: наличными через KW и «возврат» без KW (в кассе MW не проведён — не переносим)
+const corr = { id: 628253, type: 'correctionInvoice', number: 'FK 1/01/2026', date: '2026-01-09', paymentMethod: 1, totalNet: -40.65, totalGross: -50, paidTotal: -50, repairOrders: [], items: [],
+  payments: [{ id: 101, date: '2026-01-09', value: '-50.00', paymentMethod: 1, cashBoxId: 2475, cashBoxName: 'Основная касса', cashBoxDocumentNumber: 'KW 2/01/2026' },
+    { id: 102, date: '2026-01-09', value: '-50.00', paymentMethod: 1, cashBoxId: null, cashBoxDocumentNumber: null }] };
 const kp = { id: 4001, number: 'KP 2/01/2026', total: 50, date: '2026-01-07', cashBox: { id: 2475, name: 'Основная касса' }, items: [{ name: 'Płatność do dokumentu sprzedaży', saleDocumentId: 628252 }] };
 const kw = { id: 4002, number: 'KW 1/01/2026', total: 814.12, date: '2026-01-08', cashBox: { id: 2475, name: 'Основная касса' }, items: [{ name: 'Закупка в кастораме' }] };
 const sms = { id: 55, client: { id: 501 }, phoneNumber: { number: '601111222' }, content: 'Auto gotowe do odbioru', status: 'sent', sendAt: '2026-01-06 15:00:00', repairOrderId: 2000154 };
@@ -75,7 +79,7 @@ try {
 
   const run = async () => {
     for (const [e, items] of [['workers', [worker]], ['workplaces', [{ id: 153617, name: '1 Подьемник/+развал' }, { id: 172943, name: 'Klimatizacja' }]], ['clients', [client, company]], ['vehicles', [veh]], ['products', [wp]], ['job-templates', [jt]], ['repair-orders', [ro]],
-      ['quotations', [quote]], ['sale-documents', [sale, receipt]], ['cash-box-documents', [kp, kw]], ['sms-messages', [sms]], ['warehouse-documents', [wd]]]) {
+      ['quotations', [quote]], ['sale-documents', [sale, receipt, corr]], ['cash-box-documents', [kp, kw]], ['sms-messages', [sms]], ['warehouse-documents', [wd]]]) {
       const r = await send(e, items);
       assert.equal(r.status, 200, e + ' ' + JSON.stringify(r.j)); assert.equal(r.j.failed, 0, e + ' ' + JSON.stringify(r.j.errors));
     }
@@ -96,6 +100,19 @@ try {
   const o = ok(await req('/crm-api/orders/' + orders.rows[0].id), 'order');
   assert.equal(o.number, 'ZL 5/01/2026'); assert.equal(o.items.length, 3); assert.equal(o.total, 344.49);
   assert.equal(o.status.is_final, 1); assert.equal(o.faults, 'Luz na wahaczu');
+  assert.equal(o.closed_at, '2026-01-06 12:00:00', 'дата завершения — фактическая (dateFinish), не плановая dateCompletion');
+  { // режим «только даты»: правит closed_at, не трогая заказ
+    const r = await send('repair-order-dates', [{ ...ro, dateFinish: '2026-01-07 18:00:00' }, { id: 1, status: { finished: true } }]);
+    assert.equal(r.j.updated, 1); assert.equal(r.j.skipped, 1);
+    const o2 = ok(await req('/crm-api/orders/' + o.id), 'order');
+    assert.equal(o2.closed_at, '2026-01-07 18:00:00'); assert.equal(o2.items.length, 3);
+    await send('repair-order-dates', [ro]);
+  }
+  { // возврат по корректе → расход из кассы (KW), без задвоения
+    const cash = ok(await req('/crm-api/cash?from=2026-01-01&to=2026-01-31'), 'cash');
+    const refunds = cash.rows.filter((p) => /Zwrot/.test(p.note || ''));
+    assert.equal(refunds.length, 1, 'один возврат (KW), «возврат» без KW пропущен'); assert.equal(refunds[0].direction, 'out'); assert.equal(refunds[0].amount, 50);
+  }
   const diag = o.items.find((i) => i.name === 'Diagnostyka');
   assert.equal(diag.unit, 'rbh'); assert.equal(diag.qty, 1.5); assert.equal(diag.price, 123);
   const part = o.items.find((i) => i.kind === 'part');

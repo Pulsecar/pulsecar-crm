@@ -183,7 +183,7 @@ function importOrder(o, kind) {
   const clash = one('SELECT id, mw_id FROM orders WHERE number = ?', number);
   if (clash && clash.mw_id !== pre + o.id) number = `${number} (MW)`;
   const st = kind === 'order' ? statusId(o.status) : null;
-  const closed = kind === 'order' && o.status?.finished ? dt(o.dateCompletion || o.dateFinish || o.updatedAt) : null;
+  const closed = closedAt(o, kind);
   const data = {
     kind, number, customer_id: customerId, car_id: carId, status_id: st ?? undefined, type_id: typeId(o.kind) ?? undefined,
     mechanic_id: staffId(o.workerDefault) ?? undefined, mileage: o.mileage ? Math.round(num(o.mileage)) : null, fuel_level: o.fuelLevel != null ? String(o.fuelLevel) : null,
@@ -235,6 +235,18 @@ function importOrder(o, kind) {
   return r;
 }
 
+/** Дата завершения заказа: фактическая (dateFinish). dateCompletion в MW — ПЛАНОВАЯ дата готовности, её брать нельзя */
+function closedAt(o, kind = 'order') {
+  return kind === 'order' && o.status?.finished ? dt(o.dateFinish || o.updatedAt) : null;
+}
+/** Только поправить дату завершения уже перенесённого заказа (позиции, статусы и правки в CRM не трогаем) */
+function fixOrderDates(o) {
+  const id = idOf('orders', 'ro:' + o.id);
+  if (!id) return { skipped: true };
+  run('UPDATE orders SET closed_at = ? WHERE id = ?', closedAt(o), id);
+  return { id };
+}
+
 function importSale(d) {
   const orderMw = (d.repairOrders || [])[0]?.id;
   const orderId = orderMw ? idOf('orders', 'ro:' + orderMw) : null;
@@ -271,10 +283,12 @@ function importSale(d) {
 function importSalePayments(d, orderId) {
   const customerId = idOf('customers', 'c:' + (d.client?.id || ''));
   for (const p of d.payments || []) {
-    if (!(num(p.value) > 0)) continue;
+    const v = round2(num(p.value));
     const method = payMethod(p.paymentMethod);
-    upsert('payments', 'sp:' + p.id, { number: s(p.cashBoxDocumentNumber, 40), direction: 'in', method, amount: round2(num(p.value)), order_id: orderId, customer_id: customerId,
-      note: `${d.number || ''} (Motowarsztat)`.trim(), staff: 'Motowarsztat', created_at: dt(p.date) || dt(d.date) || undefined,
+    // отрицательная оплата = возврат клиенту (корректа): KW из кассы / возврат на карту. Наличный «возврат» без документа KW в кассе MW не проводился — пропускаем
+    if (!v || (v < 0 && method === 'cash' && !p.cashBoxDocumentNumber)) { run('DELETE FROM payments WHERE mw_id = ?', 'sp:' + p.id); continue; }
+    upsert('payments', 'sp:' + p.id, { number: s(p.cashBoxDocumentNumber, 40), direction: v < 0 ? 'out' : 'in', method, amount: Math.abs(v), order_id: v < 0 ? null : orderId, customer_id: customerId,
+      note: `${v < 0 ? 'Zwrot · ' : ''}${d.number || ''} (Motowarsztat)`.trim(), staff: 'Motowarsztat', created_at: dt(p.date) || dt(d.date) || undefined,
       register_id: p.cashBoxId ? registerId({ id: p.cashBoxId, name: p.cashBoxName }) : undefined });
   }
   if (orderId) recalc(orderId);
@@ -323,6 +337,7 @@ const HANDLERS = {
   products: importProduct,
   'job-templates': importCatalog,
   'repair-orders': (x) => importOrder(x, 'order'),
+  'repair-order-dates': fixOrderDates,
   quotations: (x) => importOrder(x, 'quote'),
   'sale-documents': importSale,
   'cash-box-documents': importCash,

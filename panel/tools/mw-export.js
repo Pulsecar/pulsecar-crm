@@ -4,9 +4,9 @@
 (() => {
   const CRM = 'https://panel.pulsecar.tech/mw-import/';
   const ORDER = ['workers', 'scheduler-workplaces', 'clients', 'vehicles', 'products', 'job-templates', 'repair-orders', 'quotations', 'sale-documents', 'pro-forma-documents',
-    'cash-box-documents', 'sms-messages', 'warehouse-documents'];
+    'cash-box-documents', 'sms-messages', 'warehouse-documents', 'repair-order-dates'];
   const TARGET = { 'scheduler-workplaces': 'workplaces', products: 'products', 'pro-forma-documents': 'sale-documents' };
-  const SOURCE = { products: 'warehouse-products' };
+  const SOURCE = { products: 'warehouse-products', 'repair-order-dates': 'repair-orders' };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function get(path) {
     for (let a = 0; a < 4; a++) {
@@ -32,10 +32,10 @@
     const log = (window.__mwLog = { started: new Date().toISOString(), done: false, steps: {} });
     try {
       for (const e of ORDER) {
-        if (only && !only.includes(e)) continue;
+        if (only ? !only.includes(e) : e === 'repair-order-dates') continue; // «только даты» — по отдельному запросу
         const src = SOURCE[e] || e, dst = TARGET[e] || e;
         const st = (log.steps[e] = { total: null, sent: 0, created: 0, updated: 0, skipped: 0, failed: 0, errors: [] });
-        const per = ['repair-orders', 'quotations', 'sale-documents', 'warehouse-documents'].includes(e) ? 50 : 100;
+        const per = ['repair-orders', 'repair-order-dates', 'quotations', 'sale-documents', 'warehouse-documents'].includes(e) ? 50 : 100;
         for (let page = 1; ; page++) {
           const j = await get(`${src}?page=${page}&itemsPerPage=${per}&order[id]=asc`);
           const items = j['hydra:member'] || [];
