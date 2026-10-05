@@ -119,53 +119,6 @@ label{font-size:13px;color:var(--m);display:grid;gap:4px}
 .note{white-space:pre-wrap;font-size:13px;color:var(--m)}
 footer{text-align:center;color:var(--m);font-size:12px;padding:14px 16px 30px}
 @media(max-width:720px){.top{grid-template-columns:1fr;text-align:left}.num{text-align:left}.two,.dmg{grid-template-columns:1fr}}
-/* Premium */
-@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-wght-normal.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2212}
-@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-ext-wght-normal.woff2') format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+1E00-1E9F,U+20A0-20AB,U+20AD-20C0,U+A720-A7FF}
-@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-cyrillic-wght-normal.woff2') format('woff2');unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
-@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-cyrillic-ext-wght-normal.woff2') format('woff2');unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+A640-A69F}
-:root{--acc:#0b8f47;--bg:#f4f4f2;--card:#fff;--t:#131417;--m:#6a6d74;--line:#e7e7e3;--soft:#fafaf9;--ink:#111214}
-body{font:14.5px/1.55 'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;letter-spacing:-.005em;-webkit-font-smoothing:antialiased;font-feature-settings:'cv11'}
-td,.sum,.kv b,.top .meta b{font-feature-settings:'cv11','tnum'}
-.wrap{max-width:940px;padding:20px 16px}
-.top{background:var(--ink);border-color:var(--ink);border-radius:12px;padding:22px 24px;color:#fff}
-.top img{height:40px}.co{color:#9a9da4}.co b{color:#fff;font-weight:600;letter-spacing:-.01em}
-.num h1{font-size:24px;font-weight:650;letter-spacing:-.025em;color:#fff}.num div{color:#9a9da4}.num div b{color:#fff;font-weight:600}
-.top .chip{border-color:rgba(255,255,255,.22)!important;color:#fff!important;background:rgba(255,255,255,.06)!important;border-radius:4px;font-weight:600;letter-spacing:.03em}
-.card,details.sec{border-radius:12px;border-color:var(--line);box-shadow:0 1px 2px rgba(17,18,20,.04)}
-.card{padding:20px 22px}
-h2{font-size:10.5px;font-weight:600;letter-spacing:.1em;color:var(--m);margin-bottom:12px}
-.kv{font-size:14px;gap:6px 18px}.kv b{font-weight:600}
-details.sec>summary{background:#fff;padding:16px 20px;font-weight:600;font-size:15px;letter-spacing:-.01em;border-bottom:1px solid transparent}
-details.sec[open]>summary{border-bottom-color:var(--line)}
-details.sec>summary .ico{width:30px;height:30px;border-radius:7px;background:var(--ink)}
-details.sec>summary .st{border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.03em;padding:3px 8px}
-details.sec>summary::after{width:7px;height:7px;border-width:1.5px}
-.body{padding:20px 22px}
-th{font-size:10.5px;font-weight:600;letter-spacing:.08em;border-bottom:1px solid var(--t);padding:8px}
-td{border-bottom-color:var(--line);padding:10px 8px}td.r b,td b{font-weight:600}
-.sum .big{font-size:19px;font-weight:650;letter-spacing:-.02em;border-top:1px solid var(--t);padding-top:8px;margin-top:4px}
-.btn{border-radius:8px;padding:11px 18px;font-weight:600;font-size:14px;letter-spacing:-.005em;background:var(--ink)}
-.btn::before{width:7px;height:7px}.btn.alt{border-color:#d9d9d4}.btn.alt:hover{border-color:var(--t)}
-input{border-radius:8px;border-color:#d9d9d4}input:focus{outline:none;border-color:var(--t);box-shadow:0 0 0 3px rgba(17,18,20,.08)}
-.info,.ok,.err{border-radius:8px}.pad{border-radius:8px}
-footer{font-size:11.5px;letter-spacing:.02em}
-.top{display:block;padding:0;overflow:hidden;background:var(--ink);border:0;border-radius:14px;color:#fff;position:relative}
-.top::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:linear-gradient(90deg,#1bf372,rgba(27,243,114,0) 60%)}
-.top-a{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:22px 28px 0}
-.top-a img{height:34px;display:block}
-.stc{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:500;letter-spacing:.02em;color:#e9eaec;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);border-radius:999px;padding:5px 12px 5px 10px}
-.stc i{width:7px;height:7px;border-radius:50%;display:block}
-.top-b{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:26px 28px 24px}
-.top .num{text-align:left}.top .num .lbl{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#7d8189;margin-bottom:6px}
-.top .num h1{font-size:34px;line-height:1;font-weight:600;letter-spacing:-.035em;color:#fff;margin:0}
-.top .meta{display:flex;gap:28px;text-align:right}.top .meta div{display:grid;gap:3px}
-.top .meta span{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#7d8189}
-.top .meta b{font-size:15px;font-weight:500;color:#fff;letter-spacing:-.01em}
-.top .co{border-top:1px solid rgba(255,255,255,.08);padding:13px 28px;font-size:12px;line-height:1.5;color:#8b8f97;background:rgba(255,255,255,.02)}
-.top .co b{display:inline;font-size:12px;font-weight:600;color:#d6d8db}
-.top .co a{color:#d6d8db;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.2)}.top .co a:hover{color:#fff;border-bottom-color:#fff}
-@media(max-width:720px){.top-a{padding:18px 18px 0}.top-b{padding:20px 18px 18px;align-items:flex-start;flex-direction:column}.top .meta{text-align:left;gap:20px}.top .num h1{font-size:28px}.top .co{padding:12px 18px}}
 `;
 const ICO = {
   intake: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13 7l4 4"/></svg>',
@@ -252,15 +205,11 @@ pub.get('/k/:token', (req, res) => {
   const releaseOn = !isQuote && s.card_release_on === '1' && finished;
   const tag = (ok, txt, wait) => `<span class="st ${ok ? 'ok' : wait ? 'wait' : ''}">${txt}</span>`;
 
-  const plDate = (v) => { const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}))?/); return m ? `${m[3]}.${m[2]}.${m[1]}${m[4] ? ' ' + m[4] : ''}` : ''; };
-  const telHref = (s.company_phone || '').replace(/\s/g, '');
-  const top = `<div class="top">
-    <div class="top-a">${s.doc_show_logo !== '0' ? `<img src="/logo-dark.png" alt="${esc(s.company_brand || 'Pulsecar')}">` : '<span></span>'}
-      ${s.card_show_status !== '0' && st && !isQuote ? `<span class="stc"><i style="background:${esc(st.color || '#1bf372')}"></i>${esc(st.client_label || st.name)}</span>` : ''}</div>
-    <div class="top-b"><div class="num"><div class="lbl">${isQuote ? 'Wycena' : 'Zlecenie'}</div><h1>${esc(o.number)}</h1></div>
-      <div class="meta"><div><span>${isQuote ? 'Data wyceny' : 'Data przyjęcia pojazdu'}</span><b>${esc(plDate(o.created_at))}</b></div>
-        ${o.pickup_at && !isQuote ? `<div><span>Planowany odbiór</span><b>${esc(plDate(String(o.pickup_at)))}</b></div>` : ''}</div></div>
-    ${s.card_show_company !== '0' ? `<div class="co">Administratorem danych osobowych jest <b>${esc(s.company_name || '')}</b>${[s.company_legal_address || s.company_address, s.company_nip ? 'NIP ' + s.company_nip : ''].filter(Boolean).map((x) => ' · ' + esc(x)).join('')}${s.company_phone ? ` · <a href="tel:${esc(telHref)}">${esc(s.company_phone)}</a>` : ''}</div>` : ''}</div>`;
+  const top = `<div class="top">${s.doc_show_logo !== '0' ? `<img src="/logo-dark.png" alt="${esc(s.company_brand || 'Pulsecar')}">` : '<div></div>'}
+    ${s.card_show_company !== '0' ? `<div class="co"><div class="adm">Administratorem danych osobowych jest:</div><b>${esc(s.company_name || '')}</b>${esc(s.company_legal_address || s.company_address || '')}<br>${s.company_nip ? 'NIP: ' + esc(s.company_nip) + ' · ' : ''}Telefon: <a href="tel:${esc((s.company_phone || '').replace(/\s/g, ''))}">${esc(s.company_phone || '')}</a></div>` : '<div></div>'}
+    <div class="num"><h1>${esc(o.number)}</h1><div>${isQuote ? 'Data wyceny' : 'Data przyjęcia pojazdu'}: <b>${esc((o.created_at || '').slice(0, 10))}</b></div>
+      ${o.pickup_at && !isQuote ? `<div>Planowany odbiór: <b>${esc(String(o.pickup_at).replace('T', ' ').slice(0, 16))}</b></div>` : ''}
+      ${s.card_show_status !== '0' && st && !isQuote ? `<span class="chip" style="color:${esc(st.color || '#333')};border-color:${esc(st.color || '#333')}">${esc(st.client_label || st.name)}</span>` : ''}</div></div>`;
   const people = `<div class="two"><div class="card" style="margin:0"><h2>Dane klienta</h2><div class="kv"><span>Imię i nazwisko</span><b>${esc(c.company || c.name || '—')}</b>${c.phone ? `<span>Telefon</span><b>${esc(c.phone)}</b>` : ''}${c.street || c.city ? `<span>Adres</span><b>${esc([c.street, [c.postcode, c.city].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</b>` : ''}</div></div>
     <div class="card" style="margin:0"><h2>Dane pojazdu</h2><div class="kv"><span>Marka i model</span><b>${esc([car.make, car.model].filter(Boolean).join(' ') || '—')}</b><span>Numer rejestracyjny</span><b>${esc(car.plate || '—')}</b><span>VIN</span><b>${esc(car.vin || '—')}</b>
       ${o.mileage ? `<span>Przebieg</span><b>${esc(Number(o.mileage).toLocaleString('pl-PL'))} km</b>` : ''}${!isQuote ? `<span>Poziom paliwa</span><b>${esc(DOC.fuelPl(o.fuel_level))}${pct != null ? `<span class="gauge"><i style="width:${pct}%"></i></span>` : ''}</b>` : ''}</div></div></div>`;
