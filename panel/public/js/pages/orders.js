@@ -44,6 +44,14 @@ export function OrdersList({ kind, query }) {
     if (r.sms || r.email) setNotice({ o, n: { sms: r.sms, email: r.email, sendSms: !!r.sms, sendEmail: !!r.email } });
     reload();
   };
+  const [decline, setDecline] = useState(null); // выцена, для которой выбрали «Отказался» — нужна причина
+  const quickFu = async (o, k, reason) => {
+    if (k === 'declined' && !reason) return setDecline({ o, reason: '', custom: '' });
+    const d = new Date(); d.setDate(d.getDate() + (k === 'call_back' || k === 'no_answer' ? 1 : k === 'thinking' ? 3 : 0));
+    const at = ['call_back', 'no_answer', 'thinking'].includes(k) ? d.toISOString().slice(0, 10) : ['scheduled', 'declined', 'accepted', ''].includes(k) ? null : o.followup_at || null;
+    await act(() => api(`orders/${o.id}/followup`, { body: { followup: k, followup_at: at, ...(reason ? { reason } : {}) } }), 'Сохранено');
+    setDecline(null); reload();
+  };
   const statusOpts = (o) => app.statuses.filter((s) => s.id === o.status_id || (s.scope || 'all') === 'all' || s.scope === kind);
   const bulkActions = [
     P['orders.status'] && { key: 'status', label: 'Сменить статус', icon: 'arrows', input: { label: 'Новый статус', type: 'select', options: app.statuses.filter((s) => (s.scope || 'all') === 'all' || s.scope === kind).map((s) => [s.id, s.name]) }, },
@@ -75,7 +83,10 @@ export function OrdersList({ kind, query }) {
           ? html`<select class="status-select list-status" title="Сменить статус" value=${o.status_id || ''} style=${`border-color:${o.status_color || 'var(--border2)'};color:${o.status_color || 'var(--text)'}`}
               onChange=${(e) => quickStatus(o, e.target.value)}>${!o.status_id ? html`<option value="">—</option>` : ''}${statusOpts(o).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select>`
           : html`<${Badge} color=${o.status_color}>${o.status_name || '—'}</${Badge}>`}</td>
-        ${kind === 'quote' && html`<td class="nowrap"><${FuBadge} k=${o.followup} />${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
+        ${kind === 'quote' && html`<td class="nowrap" onClick=${(e) => e.stopPropagation()}>${P['quotes.manage']
+          ? html`<select class="status-select list-status" title="Статус обзвона" value=${o.followup || ''} style=${`border-color:${FOLLOWUP[o.followup]?.[1] || 'var(--border2)'};color:${FOLLOWUP[o.followup]?.[1] || 'var(--muted)'}`}
+              onChange=${(e) => quickFu(o, e.target.value)}><option value="">—</option>${Object.entries(FOLLOWUP).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select>`
+          : html`<${FuBadge} k=${o.followup} />`}${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
         <td>${o.customer_name || '—'}<div class="sub">${o.customer_phone || ''}</div></td>
         <td>${carName(o)}${o.plate ? html` <span class="plate">${o.plate}</span>` : ''}</td>
         ${kind === 'quote' ? html`<td class="sub" style="max-width:260px">${o.last_comment || ''}</td>` : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
@@ -88,6 +99,12 @@ export function OrdersList({ kind, query }) {
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
     <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />
+    ${decline && html`<${Modal} title=${'Отказался · ' + decline.o.number} onClose=${() => setDecline(null)} foot=${html`
+        <button class="btn" onClick=${() => setDecline(null)}>Отмена</button>
+        <button class="btn primary" style="margin-left:auto" disabled=${!(decline.reason === 'Другое' ? decline.custom.trim() : decline.reason)} onClick=${() => quickFu(decline.o, 'declined', decline.reason === 'Другое' ? decline.custom.trim() : decline.reason)}>Сохранить</button>`}>
+      <label class="f">Причина отказа<select value=${decline.reason} onChange=${(e) => setDecline({ ...decline, reason: e.target.value })}><option value="">— выберите</option>${REASONS.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+      ${decline.reason === 'Другое' && html`<label class="f">Своя причина<input value=${decline.custom} onInput=${(e) => setDecline({ ...decline, custom: e.target.value })} placeholder="Почему отказался" /></label>`}
+    </${Modal}>`}
     ${notice && html`<${StatusNotice} o=${notice.o} n=${notice.n} set=${(n) => setNotice(n ? { ...notice, n } : null)} reload=${reload} />`}`;
 }
 
