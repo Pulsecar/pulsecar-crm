@@ -6,7 +6,7 @@ import {
 import { CustomerCarPicker } from './orders.js';
 import { LineName } from './sales.js';
 
-const SLOT_PX = 30;
+const SLOT_PX = 38; // высота 30-минутного слота — как в Motowarsztat, карточки читаются
 const DAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const DAYS_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -22,7 +22,18 @@ const isHours = (j) => !/szt|шт|us[lł]|kpl/i.test(j.unit || '');
 const APPT_COLOR = { request: '#F0B429', planned: '#5B8DEF', arrived: '#1BF372', no_show: '#E34948', block: '#6B6E75' };
 export const evColor = (a, S) => (a.status === 'block' ? S.cal_color_block || APPT_COLOR.block
   : a.order_id && a.status_color && a.status !== 'no_show' ? a.status_color : S['cal_color_' + a.status] || APPT_COLOR[a.status] || APPT_COLOR.planned);
-const tint = (c) => `border-left-color:${c};background:color-mix(in srgb, ${c} 22%, var(--surface3));`;
+const tint = (c) => `border-left-color:${c};`; // цвет статуса — только полоска слева, фон карточки нейтральный
+/** Пересекающиеся по времени записи на одном посту — рядом, а не друг на друге */
+function laneLayout(evs) {
+  const out = new Map();
+  const list = evs.map((a) => { const st = toMin(a.start_at.slice(11)); return { a, st, en: st + Math.max(15, a.duration_min || 0) }; }).sort((x, y) => x.st - y.st || y.en - x.en);
+  let cluster = [], end = -1;
+  const flush = () => { const ends = []; for (const e of cluster) { let i = ends.findIndex((x) => x <= e.st); if (i < 0) { i = ends.length; ends.push(0); } ends[i] = e.en; out.set(e.a.id, { i }); } for (const e of cluster) out.get(e.a.id).n = ends.length; cluster = []; };
+  for (const e of list) { if (cluster.length && e.st >= end) { flush(); end = -1; } cluster.push(e); end = Math.max(end, e.en); }
+  if (cluster.length) flush();
+  return out;
+}
+const laneCss = (L) => (L && L.n > 1 ? `left:calc(${L.i} * 100% / ${L.n} + 3px);width:calc(100% / ${L.n} - 6px);right:auto;` : '');
 
 export default function Calendar({ query }) {
   const app = useApp();
@@ -166,24 +177,25 @@ export default function Calendar({ query }) {
               onDrop=${(e) => { e.preventDefault(); dropOn(s.id, m); }} title=${hhmm(m)}></div>`;
           })}
           ${date === todayStr() && nowMin > start && nowMin < end ? html`<div class="cal-now" style=${`top:${((nowMin - start) / step) * SLOT_PX}px`}></div>` : ''}
-          ${rows.filter((a) => a.station_id === s.id).map((a) => {
-            const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX;
+          ${(() => { const sr = rows.filter((a) => a.station_id === s.id); const lanes = laneLayout(sr); return sr.map((a) => {
+            const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX + 1;
             const h = Math.max(SLOT_PX - 3, (a.duration_min / step) * SLOT_PX - 3);
-            if (a.status === 'block') return html`<div class="cal-ev block" style=${`top:${top}px;height:${h}px`} onClick=${() => setEdit(a)}>
+            const L = laneCss(lanes.get(a.id));
+            if (a.status === 'block') return html`<div class="cal-ev block" style=${`top:${top}px;height:${h}px;${L}`} onClick=${() => setEdit(a)}>
               <b><${Icon} n="x" /> ${a.title || 'Занято'}</b>${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}</div>`;
             return html`<div class=${'cal-ev' + (a.status === 'request' ? ' request' : '') + (a.status === 'arrived' ? ' arrived' : '') + (a.status === 'no_show' ? ' noshow' : '') + (drag?.id === a.id && drag.type === 'appt' ? ' dragging' : '')}
                 draggable=${canEdit} onDragStart=${(e) => { if (e.currentTarget.classList.contains('resizing')) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${(e) => open(e, a)}
-                style=${`top:${top}px;height:${h}px;` + tint(evColor(a, app.settings))} title=${a.status_name ? 'Статус заказа: ' + a.status_name : STATUS[a.status] || ''}>
+                style=${`top:${top}px;height:${h}px;${L}` + tint(evColor(a, app.settings))} title=${a.status_name ? 'Статус заказа: ' + a.status_name : STATUS[a.status] || ''}>
               <div class="row"><${Icon} n=${a.order_id ? 'wrench' : 'cal'} /><b class="grow">${a.order_number || a.title || 'Запись'}</b>
                 ${a.part_total > 1 ? html`<span class="chip">${a.part_no}/${a.part_total}</span>` : ''}</div>
               ${(a.customer_name || a.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${a.customer_name || a.contact_name}</div>`}
               ${(a.make || a.plate) && html`<div class="hg-line"><${Icon} n="car" />${carName(a)} ${a.plate || ''}</div>`}
               ${h > SLOT_PX * 1.5 ? html`<div class="hg-jobs">${(a.jobs || []).map((j) => html`<div class=${j.done ? 'done' : ''}><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}
                 ${!a.jobs?.length && (a.order_complaint || a.note) ? html`<div class="muted">${a.order_complaint || a.note}</div>` : ''}</div>` : ''}
-              ${a.status_name ? html`<div class="hg-st" style=${'color:' + evColor(a, app.settings)}>${a.status_name}${a.media_done ? ' · 📷' : ''}</div>` : ''}
+              ${a.status_name && h > SLOT_PX * 2.5 ? html`<div class="hg-st"><i style=${'background:' + evColor(a, app.settings)}></i>${a.status_name}${a.media_done ? ' · 📷' : ''}</div>` : ''}
               ${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}
             </div>`;
-          })}
+          }); })()}
         </div>`)}
       </div>` : view === 'week' ? html`
       <div class="week">${[0, 1, 2, 3, 4, 5, 6].map((i) => {
