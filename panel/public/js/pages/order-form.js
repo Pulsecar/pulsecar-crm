@@ -177,7 +177,7 @@ export function ItemsMW({ o, reload }) {
   const discL = o.customer?.discount_labor || 0, discP = o.customer?.discount_parts || 0;
   const shown = (i, mode, k = 'price') => (k === 'cost' ? (mode === 'net' ? r2(i.cost) : r2(i.cost * (1 + (i.vat ?? 23) / 100))) : mode === 'net' ? net(i.price, i.vat) : r2(i.price));
   const setPrice = (i, mode, v, k = 'price') => save(i, { [k]: k === 'cost' ? (mode === 'net' ? r2(v) : net(v, i.vat)) : mode === 'net' ? r2(v * (1 + (i.vat ?? 23) / 100)) : r2(v) });
-  const numIn = (i, k, cls, val, onSet, dis, step = '0.01') => html`<input class=${'inline-input num ' + cls} type="number" step=${step} value=${val} disabled=${dis} onChange=${(e) => onSet(Number(e.target.value))} />`;
+  const numIn = (i, k, cls, val, onSet, dis, step = '0.01') => html`<input class=${'inline-input num ' + cls} type="number" step=${step} value=${val} disabled=${dis} onFocus=${(e) => e.target.select()} onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }} onChange=${(e) => onSet(Number(e.target.value))} />`;
   const sumRow = (rows, mode, span, tail) => html`<tr class="sum-row"><td colspan=${span}></td>
     <td class="r nowrap">${zl(rows.reduce((s, i) => s + net(lineGross(i), i.vat), 0))}<div class="sub">нетто</div></td><td class="r nowrap"><b>${zl(rows.reduce((s, i) => s + lineGross(i), 0))}</b><div class="sub">брутто</div></td>${tail}</tr>`;
 

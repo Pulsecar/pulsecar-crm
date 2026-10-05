@@ -839,8 +839,11 @@ th.on { color: var(--text); }
 .empty { color: var(--faint); font-size: 13px; }
 .sticky-save { background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); border-top: 1px solid var(--border2); }
 /* Поля внутри таблиц — «тихие», рамка только при наведении/фокусе */
-:root .tbl td input:not([type=checkbox]), :root .tbl td select, :root .inline-input { background: transparent; border-color: transparent; box-shadow: none; }
-:root .tbl td input:not([type=checkbox]):hover, :root .tbl td select:hover, :root .inline-input:hover { border-color: var(--border2); }
+/* поля в таблицах всегда видны как поля (рамка + фон), иначе непонятно, куда нажимать */
+:root .tbl td input:not([type=checkbox]), :root .tbl td select, :root .inline-input { background: color-mix(in srgb, var(--text) 4%, transparent); border-color: var(--border2); box-shadow: none; cursor: text; }
+:root .tbl td select { cursor: pointer; }
+:root .tbl td input:not([type=checkbox]):hover, :root .tbl td select:hover, :root .inline-input:hover { border-color: color-mix(in srgb, var(--text) 35%, transparent); }
+:root .tbl td input:disabled, :root .tbl td select:disabled, :root .inline-input:disabled { background: transparent; border-color: transparent; cursor: default; }
 :root .tbl td input:not([type=checkbox]):focus, :root .tbl td select:focus, :root .inline-input:focus { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .tbl.items th, .tbl.items td, .mw-items th, .mw-items td { padding-left: 8px; padding-right: 8px; }
 .tbl.items th, .mw-items th { letter-spacing: .05em; }
