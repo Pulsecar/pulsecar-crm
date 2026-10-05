@@ -44,6 +44,7 @@ export function OrdersList({ kind, query }) {
     if (r.sms || r.email) setNotice({ o, n: { sms: r.sms, email: r.email, sendSms: !!r.sms, sendEmail: !!r.email } });
     reload();
   };
+  const [fuOpen, setFuOpen] = useState(null); // окно «Обзвон и комментарии» прямо из списка
   const [decline, setDecline] = useState(null); // выцена, для которой выбрали «Отказался» — нужна причина
   const quickFu = async (o, k, reason) => {
     if (k === 'declined' && !reason) return setDecline({ o, reason: '', custom: '' });
@@ -89,7 +90,8 @@ export function OrdersList({ kind, query }) {
           : html`<${FuBadge} k=${o.followup} />`}${o.followup_at && !['scheduled', 'declined', 'accepted'].includes(o.followup) ? html`<div class=${'sub ' + (o.followup_at <= new Date().toISOString().slice(0, 10) ? 'neg' : '')}>связаться ${fdate(o.followup_at)}</div>` : ''}${o.followup === 'declined' && o.followup_reason ? html`<div class="sub">${o.followup_reason}</div>` : ''}</td>`}
         <td>${o.customer_name || '—'}<div class="sub">${o.customer_phone || ''}</div></td>
         <td>${carName(o)}${o.plate ? html` <span class="plate">${o.plate}</span>` : ''}</td>
-        ${kind === 'quote' ? html`<td class="sub" style="max-width:260px">${o.last_comment || ''}</td>` : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
+        ${kind === 'quote' ? html`<td class="sub list-comment" style="max-width:260px" title="Комментарии и обзвон" onClick=${(e) => { e.stopPropagation(); setFuOpen(o); }}>
+            ${o.last_comment ? html`<span>${o.last_comment}</span>` : html`<span class="faint">+ комментарий</span>`}</td>` : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
         <td class="sub">${o.type_name || ''}</td>
         <td class="r nowrap"><b>${zl(o.total)}</b></td>
         <td class="r nowrap ${o.total > 0 && o.paid >= o.total - 0.01 ? 'pos' : o.paid > 0 ? '' : 'faint'}">${o.paid > 0 ? zl(o.paid) : '—'}</td>
@@ -99,6 +101,7 @@ export function OrdersList({ kind, query }) {
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
     <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />
+    ${fuOpen && html`<${FollowUpModal} id=${fuOpen.id} number=${fuOpen.number} onClose=${() => { setFuOpen(null); reload(); }} />`}
     ${decline && html`<${Modal} title=${'Отказался · ' + decline.o.number} onClose=${() => setDecline(null)} foot=${html`
         <button class="btn" onClick=${() => setDecline(null)}>Отмена</button>
         <button class="btn primary" style="margin-left:auto" disabled=${!(decline.reason === 'Другое' ? decline.custom.trim() : decline.reason)} onClick=${() => quickFu(decline.o, 'declined', decline.reason === 'Другое' ? decline.custom.trim() : decline.reason)}>Сохранить</button>`}>
@@ -462,6 +465,16 @@ function Checklists({ o }) {
         <td class="nowrap">${ST.map(([k, l, cls]) => html`<button class=${'btn sm ' + (r.state === k ? cls + ' on-state' : 'ghost')} style="margin-right:4px" onClick=${() => save(c, c.results.map((x, j) => (j === i ? { ...x, state: x.state === k ? '' : k } : x)))}>${l}</button>`)}</td>
         <td><input class="inline-input" placeholder="Заметка" value=${r.note} onChange=${(e) => save(c, c.results.map((x, j) => (j === i ? { ...x, note: e.target.value } : x)))} /></td></tr>`)}</tbody></table></div>`)}
   </div>`;
+}
+
+/** «Обзвон и комментарии» выцены в окне — из списка, не открывая выцену */
+function FollowUpModal({ id, number, onClose }) {
+  const { data: o, reload } = useData('orders/' + id, [id]);
+  return html`<${Modal} wide title=${'Обзвон и комментарии · ' + number} onClose=${onClose} foot=${html`
+      <a class="btn ghost" href=${'#/quotes/' + id} onClick=${onClose}>Открыть выцену</a><button class="btn" style="margin-left:auto" onClick=${onClose}>Закрыть</button>`}>
+    ${o ? html`<div class="muted small">${o.customer?.name || ''}${o.customer?.phone ? html` · <a href=${'tel:' + o.customer.phone}>${o.customer.phone}</a>` : ''}${o.car ? ' · ' + carName(o.car) : ''} · ${zl(o.total)}</div>
+      <${FollowUp} o=${o} reload=${reload} />` : html`<${Loading} />`}
+  </${Modal}>`;
 }
 
 // ── Выцена: статус обзвона, причина, когда связаться и комментарии (история разговоров) ──
