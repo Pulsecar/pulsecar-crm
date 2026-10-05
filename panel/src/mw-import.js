@@ -66,13 +66,36 @@ function statusId(st) {
   return insert('order_statuses', { name: st.name.trim(), color: st.color || '#888888', pos: 100 + (Number(st.position) || 0), is_final: st.finished ? 1 : 0,
     lock_edit: st.editBlocked ? 1 : 0, client_label: st.name.trim(), mw_id: 'st:' + st.id });
 }
+/** наш пост для поста MW: то же название, тот же номер в начале («1 Подьемник» = «1 Подъёмник / развал») или кондиционер */
+function sameStation(name, except = 0) {
+  const n = String(name || '').trim().toLowerCase();
+  const list = all('SELECT id, name, mw_id FROM stations WHERE active = 1 AND id <> ? ORDER BY pos, id', except);
+  const digit = n.match(/^\d+/)?.[0];
+  const isAc = (x) => /klim|кондиц|a\/c/i.test(x);
+  return list.find((x) => x.name.trim().toLowerCase() === n)
+    || (digit && list.find((x) => x.name.trim().match(/^\d+/)?.[0] === digit && !String(x.mw_id || '').startsWith('wp:')))
+    || (isAc(n) && list.find((x) => isAc(x.name) && !String(x.mw_id || '').startsWith('wp:'))) || null;
+}
 function stationId(w) {
   if (!w?.id) return null;
-  const by = idOf('stations', 'wp:' + w.id);
-  if (by) return by;
-  const hit = w.name && one('SELECT id FROM stations WHERE lower(name) = lower(?)', w.name.trim());
+  const mine = one('SELECT id, pos FROM stations WHERE mw_id = ?', 'wp:' + w.id);
+  // пост, созданный первым переносом как дубль, — сливаем с нашим (записи графика переносятся)
+  if (mine && mine.pos === 50) {
+    run('UPDATE stations SET mw_id = NULL WHERE id = ?', mine.id);
+    const hit = sameStation(w.name, mine.id);
+    if (hit && hit.id !== mine.id) {
+      run('UPDATE appointments SET station_id = ? WHERE station_id = ?', hit.id, mine.id);
+      run('DELETE FROM stations WHERE id = ?', mine.id);
+      run('UPDATE stations SET mw_id = ? WHERE id = ?', 'wp:' + w.id, hit.id);
+      return hit.id;
+    }
+    run('UPDATE stations SET mw_id = ?, pos = 51 WHERE id = ?', 'wp:' + w.id, mine.id);
+    return mine.id;
+  }
+  if (mine) return mine.id;
+  const hit = sameStation(w.name);
   if (hit) { run('UPDATE stations SET mw_id = ? WHERE id = ?', 'wp:' + w.id, hit.id); return hit.id; }
-  return insert('stations', { name: s(w.name, 80) || 'Stanowisko', color: w.color || null, pos: 50, active: 1, mw_id: 'wp:' + w.id });
+  return insert('stations', { name: s(w.name, 80) || 'Stanowisko', color: w.color || null, pos: 51, active: 1, mw_id: 'wp:' + w.id });
 }
 function staffId(w) {
   if (!w?.id) return null;

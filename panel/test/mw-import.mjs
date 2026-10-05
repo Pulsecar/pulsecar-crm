@@ -72,7 +72,7 @@ try {
   assert.equal(pre.status, 204); assert.equal(pre.headers.get('access-control-allow-origin'), 'https://app.motowarsztat.pl');
 
   const run = async () => {
-    for (const [e, items] of [['workers', [worker]], ['clients', [client, company]], ['vehicles', [veh]], ['products', [wp]], ['job-templates', [jt]], ['repair-orders', [ro]],
+    for (const [e, items] of [['workers', [worker]], ['workplaces', [{ id: 153617, name: '1 Подьемник/+развал' }, { id: 172943, name: 'Klimatizacja' }]], ['clients', [client, company]], ['vehicles', [veh]], ['products', [wp]], ['job-templates', [jt]], ['repair-orders', [ro]],
       ['quotations', [quote]], ['sale-documents', [sale, receipt]], ['cash-box-documents', [kp, kw]], ['sms-messages', [sms]], ['warehouse-documents', [wd]]]) {
       const r = await send(e, items);
       assert.equal(r.status, 200, e + ' ' + JSON.stringify(r.j)); assert.equal(r.j.failed, 0, e + ' ' + JSON.stringify(r.j.errors));
@@ -101,6 +101,10 @@ try {
   assert.equal(o.paid, 291.58, 'оплата из фактуры'); assert.equal(o.invoice_no, 'FS 1/01/2026');
   assert.ok(o.sales_docs.some((d) => d.number === 'FS 1/01/2026'));
   assert.ok((o.appointments || []).some((a) => a.start_at === '2026-01-06 10:00' && a.duration_min === 120), 'запись в графике');
+  const me = ok(await req('/crm-api/me'), 'me');
+  const ap = o.appointments.find((a) => a.start_at === '2026-01-06 10:00');
+  assert.match(me.stations.find((x) => x.id === ap.station_id).name, /^1/, 'пост MW сопоставлен с нашим «1 …»');
+  assert.equal(me.stations.filter((x) => /^1/.test(x.name)).length, 1, 'без дублей постов');
   const q = ok(await req('/crm-api/orders?kind=quote'), 'quotes');
   assert.equal(q.total, 1); assert.equal(q.rows[0].total, 984);
   const qd = ok(await req('/crm-api/orders/' + q.rows[0].id), 'quote');
