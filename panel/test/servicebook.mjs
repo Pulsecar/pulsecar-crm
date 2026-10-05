@@ -150,6 +150,34 @@ try {
   assert.equal((out.match(/\[SMS → \+48600222333\]/g) || []).length - before, 2, 'повторно не шлём');
   console.log('✓ SMS-напоминания о рекомендации и техосмотре, без повторов');
 
+  // онлайн-запись по рекомендации: время работы → свободные окна → запись на пост
+  const timing = ok(await req('/crm-api/recommendations', { body: { car_id: car.id, title: 'Wymiana rozrządu (test)', priority: 'soon', duration_min: 240 } }), 'rec with time');
+  let myc = ok(await req('/api/me', { token }), 'me slots').cars.find((x) => x.id === car.id);
+  const tr = myc.recommendations.find((r) => r.id === timing.id);
+  assert.equal(tr.durationMin, 240); assert.equal(tr.booked, null);
+  const sl = ok(await req(`/api/recommendations/${timing.id}/slots`, { token }), 'slots');
+  assert.equal(sl.durationMin, 240); assert.ok(sl.days.length > 0, 'есть свободные дни');
+  const d0 = sl.days[0];
+  const [lh, lm] = d0.times[d0.times.length - 1].split(':').map(Number);
+  assert.ok(lh * 60 + lm + 240 <= 18 * 60 || d0.weekday === 6, 'работа заканчивается до закрытия');
+  const startAt = `${d0.date} ${d0.times[0]}`;
+  const bk = ok(await req('/api/bookings', { token, body: { name: 'Ewa Test', phone: '600222333', rec_id: timing.id, start_at: startAt, source: 'site' } }), 'book slot');
+  assert.equal(bk.booked, true); assert.equal(bk.start_at, startAt); assert.ok(bk.station);
+  assert.equal((await req('/api/bookings', { token, body: { name: 'Ewa', phone: '600222333', rec_id: timing.id, start_at: '2020-01-01 10:00' } })).status, 409, 'прошлое время — нельзя');
+  assert.equal((await req(`/api/recommendations/99999/slots`, { token })).status, 404, 'чужая/несуществующая рекомендация');
+  myc = ok(await req('/api/me', { token }), 'me booked').cars.find((x) => x.id === car.id);
+  assert.deepEqual(myc.recommendations.find((r) => r.id === timing.id).booked, { start: startAt, status: 'planned' });
+  const cal = ok(await req(`/crm-api/appointments?from=${d0.date}&to=${d0.date}`), 'calendar');
+  const ap = cal.rows.find((a) => a.start_at === startAt && a.source === 'site');
+  assert.ok(ap && ap.station_id && ap.duration_min === 240 && ap.car_id === car.id, 'запись в терминарзе на посту');
+  // заявка без окна (рекомендация без времени) — в «Не распределено» и тоже отмечена
+  const noTime = ok(await req('/crm-api/recommendations', { body: { car_id: car.id, title: 'Geometria kół (test)' } }), 'rec no time');
+  assert.equal(ok(await req(`/api/recommendations/${noTime.id}/slots`, { token }), 'no slots').durationMin, null);
+  ok(await req('/api/bookings', { token, body: { name: 'Ewa', phone: '600222333', rec_id: noTime.id, preferred: 'wtorek', source: 'site' } }), 'request');
+  myc = ok(await req('/api/me', { token }), 'me req').cars.find((x) => x.id === car.id);
+  assert.equal(myc.recommendations.find((r) => r.id === noTime.id).booked.status, 'request');
+  console.log('✓ онлайн-запись: окна по времени работы, запись на пост, заявка без окна, отметка «записан»');
+
   // удаление
   ok(await req('/crm-api/recommendations/' + am.id, { method: 'DELETE' }), 'delete');
   console.log('\nСЕРВИСНАЯ КНИЖКА: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ');

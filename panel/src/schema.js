@@ -720,7 +720,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS car_recommendations (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
 db.exec('CREATE INDEX IF NOT EXISTS car_rec_car ON car_recommendations(car_id, status)');
-addColumn('cars', 'inspection_reminded', 'TEXT');   // за какую дату техосмотра уже ушло SMS
+addColumn('cars', 'inspection_reminded', 'TEXT');
+addColumn('car_recommendations', 'duration_min', 'INTEGER');    // сколько времени займёт работа (механик) — по нему подбираются окна онлайн-записи
+addColumn('car_recommendations', 'appointment_id', 'INTEGER');  // запись в терминарзе, сделанная клиентом с сайта   // за какую дату техосмотра уже ушло SMS
 for (const [k, v] of Object.entries({
   sms_rec_on: '1', sms_rec_days: '14',
   sms_tpl_recommendation: 'Dzien dobry! Przypominamy: [[rekomendacja.tytul]] dla [[pojazd.marka]] [[pojazd.nrRejestracyjny]] - zalecany termin [[rekomendacja.termin]]. Historia serwisowa i zapis: [[link.mojeAuto]] PulseCar',

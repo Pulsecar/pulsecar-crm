@@ -11,6 +11,7 @@ import { getSetting } from './db.js';
 import { listForCar, clientRec } from './recommendations.js';
 import { sendOrderFile } from './documents.js';
 import { invoicePdf } from './invoices.js';
+import { freeWindows, pickStation } from './booking-slots.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '50kb' }));
@@ -206,23 +207,63 @@ api.get('/me', (req, res) => {
 });
 
 // ── Заявка на визит из приложения → «Не распределено» в терминарзе CRM ─────
+// Рекомендация из сервисной книжки — только по своим авто
+function ownRec(customerId, recId) {
+  const r = one(`SELECT r.*, k.plate, k.make, k.model, k.customer_id FROM car_recommendations r JOIN cars k ON k.id = r.car_id WHERE r.id = ?`, Number(recId));
+  if (!r || r.customer_id !== customerId) throw new HttpError(404, 'Рекомендация не найдена');
+  return r;
+}
+
+// Свободные окна для записи на работу из рекомендации (длительность — из поля «Время» в CRM)
+api.get('/recommendations/:id/slots', (req, res) => {
+  const s = auth(req);
+  const r = ownRec(s.customer_id, req.params.id);
+  if (!r.duration_min) return res.json({ durationMin: null, days: [] });
+  res.json({ durationMin: r.duration_min, days: freeWindows(r.duration_min, r.title) });
+});
+
 api.post('/bookings', (req, res) => {
   limit('b:' + req.ip, 10, 3600_000);
   const b = req.body || {};
   const phone = normPhone(b.phone);
   const name = String(b.name || '').trim().slice(0, 80);
   if (!phone || !name) throw new HttpError(400, 'Имя и телефон обязательны.');
-  // если клиент вошёл в приложение — привязываем к его карточке
+  // если клиент вошёл в приложение / на сайте — привязываем к его карточке
   const t = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   const sess = t && one('SELECT customer_id FROM sessions WHERE token_hash = ? AND revoked = 0', sha256(t));
   const customer = sess ? one('SELECT * FROM customers WHERE id = ?', sess.customer_id) : one('SELECT * FROM customers WHERE phone = ?', phone);
+  const rec = sess && b.rec_id ? ownRec(sess.customer_id, b.rec_id) : null;
+  const src = b.source === 'site' ? 'site' : 'app';
+  const where = src === 'site' ? 'с сайта (Моё авто)' : 'из приложения';
   const text = [b.service, b.car, b.problem].map((x) => String(x || '').trim()).filter(Boolean).join(' · ').slice(0, 1000);
+  const carLine = rec ? [rec.make, rec.model].filter(Boolean).join(' ') + (rec.plate ? ' · ' + rec.plate : '') : '';
+
+  // запись на конкретное окно (работа из рекомендации с известной длительностью)
+  if (rec && b.start_at) {
+    const duration = rec.duration_min || 60;
+    const st = pickStation(duration, rec.title, String(b.start_at));
+    if (!st) throw new HttpError(409, 'Это время уже занято. Выберите другое окно.');
+    const id = tx(() => {
+      const aid = insert('appointments', {
+        station_id: st.id, customer_id: customer?.id ?? null, car_id: rec.car_id,
+        title: `${rec.title}${rec.plate ? ' · ' + rec.plate : ''}`.slice(0, 120),
+        note: [`Онлайн-запись ${where}`, rec.note, b.problem && String(b.problem).slice(0, 500)].filter(Boolean).join('\n'),
+        start_at: String(b.start_at), duration_min: duration, status: 'planned', source: src, contact_name: name, contact_phone: phone,
+      });
+      run('UPDATE car_recommendations SET appointment_id = ? WHERE id = ?', aid, rec.id);
+      return aid;
+    });
+    notify('booking', `📅 Онлайн-запись ${where}: ${name}, ${phone}\n🕒 ${b.start_at} (${duration} мин) · ${st.name}\n🔧 ${rec.title}\n🚗 ${carLine}${b.problem ? '\n📝 ' + String(b.problem).slice(0, 300) : ''}`, { name, phone, appointment: id });
+    return res.json({ ok: true, id, start_at: String(b.start_at), duration_min: duration, station: st.name, booked: true });
+  }
+
   const id = insert('appointments', {
-    station_id: null, customer_id: customer?.id ?? null, title: String(b.service || 'Заявка из приложения').slice(0, 120),
-    note: text, status: 'request', source: 'app', contact_name: name, contact_phone: phone,
-    preferred: String(b.preferred || '').slice(0, 120) || null, duration_min: 60,
+    station_id: null, customer_id: customer?.id ?? null, car_id: rec?.car_id ?? null, title: String(rec?.title || b.service || 'Заявка из приложения').slice(0, 120),
+    note: text, status: 'request', source: src, contact_name: name, contact_phone: phone,
+    preferred: String(b.preferred || '').slice(0, 120) || null, duration_min: rec?.duration_min || 60,
   });
-  notify('booking', `Новая заявка из приложения: ${name}, ${phone}\n${text}${b.preferred ? '\nКогда удобно: ' + b.preferred : ''}`, { name, phone, text });
+  if (rec) run('UPDATE car_recommendations SET appointment_id = ? WHERE id = ?', id, rec.id);
+  notify('booking', `Новая заявка ${where}: ${name}, ${phone}\n${text}${b.preferred ? '\nКогда удобно: ' + b.preferred : ''}`, { name, phone, text });
   res.json({ ok: true, id });
 });
 

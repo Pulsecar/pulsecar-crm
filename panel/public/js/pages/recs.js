@@ -1,13 +1,15 @@
 // Сервисная книжка: рекомендации «что пора сделать» по авто. Используется в заказе (вкладка «Рекомендации»)
 // и в карточке авто. Клиент видит открытые рекомендации на pulsecar.pl/moje-auto и в приложении.
-import { html, useState, useEffect, api, act, toast, fdate, zl, num, addDays, todayStr, Icon, ConfirmButton } from '../lib.js';
+import { html, useState, useEffect, api, act, toast, fdate, fdt, zl, num, addDays, todayStr, Icon, ConfirmButton } from '../lib.js';
 
 export const PRIO = { urgent: ['Срочно', '#E34948'], soon: ['Скоро', '#F0B429'], later: ['Планово', '#5B8DEF'] };
 const STATUS = { open: 'Открыта', done: 'Сделано', dismissed: 'Отклонена' };
 let presetsCache = null;
 
 function addMonths(n) { const d = new Date(todayStr() + 'T12:00:00'); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 10); }
-const empty = { title: '', note: '', priority: 'soon', due_date: '', due_km: '', est_price: '' };
+const empty = { title: '', note: '', priority: 'soon', due_date: '', due_km: '', est_price: '', hours: '' };
+const toMinutes = (h) => (String(h).trim() === '' ? '' : Math.round(Number(String(h).replace(',', '.')) * 60) || '');
+const hoursOf = (m) => (m ? String(Math.round((m / 60) * 100) / 100).replace('.', ',') : '');
 
 /** Список рекомендаций + форма добавления. car — авто ({id, last_mileage}), orderId — заказ, в котором выявлено (может быть пустым). */
 export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
@@ -18,10 +20,11 @@ export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
   useEffect(() => { if (!presetsCache) api('recommendations/presets').then((r) => { presetsCache = r.presets; setPresets(r.presets); }).catch(() => {}); }, []);
   if (!car?.id) return html`<div class="card muted">Сначала выберите автомобиль в заказе — рекомендации привязываются к авто.</div>`;
   const mileage = Number(car.last_mileage) || 0;
-  const usePreset = (p) => setF({ ...f, title: p.title, priority: p.priority || 'soon', due_date: p.months ? addMonths(p.months) : '', due_km: p.km && mileage ? String(mileage + p.km) : '' });
+  const usePreset = (p) => setF({ ...f, title: p.title, priority: p.priority || 'soon', due_date: p.months ? addMonths(p.months) : '', due_km: p.km && mileage ? String(mileage + p.km) : '', hours: p.hours ? String(p.hours).replace('.', ',') : '' });
   const save = async () => {
     if (!f.title.trim()) return toast('Напишите, что рекомендуется', 'error');
-    await act(() => api('recommendations', { body: { ...f, car_id: car.id, order_id: orderId || null } }), 'Рекомендация добавлена');
+    const { hours, ...rest } = f;
+    await act(() => api('recommendations', { body: { ...rest, duration_min: toMinutes(hours), car_id: car.id, order_id: orderId || null } }), 'Рекомендация добавлена');
     setF(empty); reload();
   };
   const upd = async (r, body, msg) => { await act(() => api('recommendations/' + r.id, { method: 'PUT', body }), msg); setEdit(null); reload(); };
@@ -43,6 +46,7 @@ export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
         <label class="f">Срок (дата)<input type="date" value=${f.due_date} onInput=${set('due_date')} /></label>
         <label class="f">или при пробеге, km${mileage ? html` <span class="faint">(сейчас ${num(mileage)})</span>` : ''}<input type="number" min="0" step="500" value=${f.due_km} onInput=${set('due_km')} /></label>
         <label class="f">Ориентировочная цена, zł<input inputmode="decimal" value=${f.est_price} onInput=${set('est_price')} placeholder="необязательно" /></label>
+        <label class="f" title="По этому времени клиенту на сайте подбираются свободные окна для записи">Время работы, ч<input inputmode="decimal" value=${f.hours} onInput=${set('hours')} placeholder="напр. 1,5" /></label>
       </div>
       <label class="f">Пояснение для клиента<textarea rows="2" value=${f.note} onInput=${set('note')} placeholder="напр. Klocki 3 mm, tarcze jeszcze OK. Zalecamy wymianę w ciągu 2–3 miesięcy." maxlength="1000"></textarea></label>
       <div class="row"><span class="grow"></span><button class="btn primary" onClick=${save}><${Icon} n="plus" />Добавить рекомендацию</button></div>
@@ -56,7 +60,7 @@ export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
         ${[...open, ...(showClosed ? closed : [])].map((r) => edit === r.id ? html`<tr><td colspan="4"><${EditRow} r=${r} onSave=${(b) => upd(r, b, 'Сохранено')} onCancel=${() => setEdit(null)} /></td></tr>` : html`<tr style=${r.status !== 'open' ? 'opacity:.55' : ''}>
           <td style="width:90px"><span class="chip" style=${`background:${PRIO[r.priority]?.[1]}26;color:${PRIO[r.priority]?.[1]}`}>${PRIO[r.priority]?.[0]}</span></td>
           <td><b>${r.title}</b>${r.note ? html`<div class="sub">${r.note}</div>` : ''}
-            <div class="sub">${due(r) ? html`<span class=${overdue(r) && r.status === 'open' ? 'neg' : ''}>${due(r)}</span> · ` : ''}${r.est_price ? zl(r.est_price) + ' · ' : ''}выявлено ${fdate(r.created_at)}${r.order_no ? ' в ' + r.order_no : ''}${r.staff ? ' · ' + r.staff : ''}${r.reminded_at ? ' · SMS ' + fdate(r.reminded_at) : ''}
+            <div class="sub">${due(r) ? html`<span class=${overdue(r) && r.status === 'open' ? 'neg' : ''}>${due(r)}</span> · ` : ''}${r.est_price ? zl(r.est_price) + ' · ' : ''}${r.duration_min ? '~' + hoursOf(r.duration_min) + ' ч · ' : ''}${r.appt_start && r.status === 'open' ? html`<b class="pos">записан онлайн ${fdt(r.appt_start)}</b> · ` : ''}выявлено ${fdate(r.created_at)}${r.order_no ? ' в ' + r.order_no : ''}${r.staff ? ' · ' + r.staff : ''}${r.reminded_at ? ' · SMS ' + fdate(r.reminded_at) : ''}
             ${r.status !== 'open' ? html` · <b>${STATUS[r.status]}</b>${r.closed_order_no ? ' в ' + r.closed_order_no : ''} ${fdate(r.closed_at)}` : ''}</div></td>
           <td class="nowrap r">${r.status === 'open'
             ? html`<button class="btn sm pos" title="Сделано" onClick=${() => upd(r, { status: 'done' }, 'Отмечено как сделанное')}><${Icon} n="check" /></button>
@@ -71,7 +75,7 @@ export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
 }
 
 function EditRow({ r, onSave, onCancel }) {
-  const [f, setF] = useState({ title: r.title, note: r.note || '', priority: r.priority, due_date: r.due_date || '', due_km: r.due_km ?? '', est_price: r.est_price ?? '' });
+  const [f, setF] = useState({ title: r.title, note: r.note || '', priority: r.priority, due_date: r.due_date || '', due_km: r.due_km ?? '', est_price: r.est_price ?? '', hours: hoursOf(r.duration_min) });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return html`<div class="stack">
     <div class="grid g3">
@@ -80,8 +84,9 @@ function EditRow({ r, onSave, onCancel }) {
       <label class="f">Срок<input type="date" value=${f.due_date} onInput=${set('due_date')} /></label>
       <label class="f">При пробеге, km<input type="number" value=${f.due_km} onInput=${set('due_km')} /></label>
       <label class="f">Цена, zł<input value=${f.est_price} onInput=${set('est_price')} /></label>
+      <label class="f">Время работы, ч<input inputmode="decimal" value=${f.hours} onInput=${set('hours')} /></label>
     </div>
     <label class="f">Пояснение<textarea rows="2" value=${f.note} onInput=${set('note')}></textarea></label>
-    <div class="row"><span class="grow"></span><button class="btn" onClick=${onCancel}>Отмена</button><button class="btn primary" onClick=${() => onSave(f)}>Сохранить</button></div>
+    <div class="row"><span class="grow"></span><button class="btn" onClick=${onCancel}>Отмена</button><button class="btn primary" onClick=${() => { const { hours, ...rest } = f; onSave({ ...rest, duration_min: toMinutes(hours) }); }}>Сохранить</button></div>
   </div>`;
 }

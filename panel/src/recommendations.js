@@ -8,18 +8,18 @@ export const PRIORITIES = ['urgent', 'soon', 'later'];
 
 /** Готовые рекомендации: название, через сколько месяцев и/или км (для кнопок в заказе) */
 export const PRESETS = [
-  { title: 'Wymiana oleju silnikowego i filtrów', months: 12, km: 15000, priority: 'later' },
-  { title: 'Wymiana płynu hamulcowego', months: 24, priority: 'later' },
-  { title: 'Serwis klimatyzacji', months: 12, priority: 'later' },
-  { title: 'Wymiana klocków hamulcowych', months: 3, priority: 'soon' },
-  { title: 'Wymiana tarcz i klocków hamulcowych', months: 3, priority: 'soon' },
-  { title: 'Wymiana rozrządu', km: 10000, priority: 'soon' },
-  { title: 'Wymiana świec zapłonowych', km: 10000, priority: 'later' },
-  { title: 'Wymiana filtra kabinowego', months: 12, priority: 'later' },
-  { title: 'Wymiana opon na sezonowe', months: 6, priority: 'later' },
-  { title: 'Geometria kół', months: 1, priority: 'soon' },
-  { title: 'Wymiana akumulatora', months: 2, priority: 'soon' },
-  { title: 'Naprawa zawieszenia (luzy)', months: 1, priority: 'urgent' },
+  { title: 'Wymiana oleju silnikowego i filtrów', months: 12, km: 15000, priority: 'later', hours: 1 },
+  { title: 'Wymiana płynu hamulcowego', months: 24, priority: 'later', hours: 1 },
+  { title: 'Serwis klimatyzacji', months: 12, priority: 'later', hours: 1 },
+  { title: 'Wymiana klocków hamulcowych', months: 3, priority: 'soon', hours: 1 },
+  { title: 'Wymiana tarcz i klocków hamulcowych', months: 3, priority: 'soon', hours: 1.5 },
+  { title: 'Wymiana rozrządu', km: 10000, priority: 'soon', hours: 4 },
+  { title: 'Wymiana świec zapłonowych', km: 10000, priority: 'later', hours: 1 },
+  { title: 'Wymiana filtra kabinowego', months: 12, priority: 'later', hours: 0.5 },
+  { title: 'Wymiana opon na sezonowe', months: 6, priority: 'later', hours: 1 },
+  { title: 'Geometria kół', months: 1, priority: 'soon', hours: 1 },
+  { title: 'Wymiana akumulatora', months: 2, priority: 'soon', hours: 0.5 },
+  { title: 'Naprawa zawieszenia (luzy)', months: 1, priority: 'urgent', hours: 2 },
 ];
 
 const clean = (v, max) => String(v ?? '').trim().slice(0, max);
@@ -33,13 +33,15 @@ function data(b, partial) {
   if (!partial || b.priority !== undefined) o.priority = PRIORITIES.includes(b.priority) ? b.priority : 'soon';
   if (b.due_date !== undefined) { if (b.due_date && !isDate(b.due_date)) throw new HttpError(400, 'Дата в формате ГГГГ-ММ-ДД'); o.due_date = b.due_date || null; }
   if (b.due_km !== undefined) o.due_km = b.due_km === '' || b.due_km == null ? null : Math.max(0, Math.round(Number(b.due_km) || 0)) || null;
+  if (b.duration_min !== undefined) o.duration_min = b.duration_min === '' || b.duration_min == null ? null : Math.min(16 * 60, Math.max(15, Math.round((Number(b.duration_min) || 0) / 15) * 15)) || null;
   if (b.est_price !== undefined) o.est_price = b.est_price === '' || b.est_price == null ? null : Math.max(0, Math.round(Number(String(b.est_price).replace(',', '.')) * 100) / 100) || null;
   return o;
 }
 
 export function listForCar(carId, { openOnly = false } = {}) {
-  return all(`SELECT r.*, o.number order_no, z.number closed_order_no FROM car_recommendations r
+  return all(`SELECT r.*, o.number order_no, z.number closed_order_no, a.start_at appt_start, a.status appt_status FROM car_recommendations r
     LEFT JOIN orders o ON o.id = r.order_id LEFT JOIN orders z ON z.id = r.closed_order_id
+    LEFT JOIN appointments a ON a.id = r.appointment_id
     WHERE r.car_id = ? ${openOnly ? "AND r.status = 'open'" : ''}
     ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END, CASE r.priority WHEN 'urgent' THEN 0 WHEN 'soon' THEN 1 ELSE 2 END, COALESCE(r.due_date, '9999'), r.id DESC`, carId);
 }
@@ -134,6 +136,8 @@ export function clientRec(r, mileage) {
   return {
     id: r.id, title: r.title, note: r.note || null, priority: r.priority, dueDate: r.due_date || null, dueKm: r.due_km || null,
     estPrice: r.est_price || null, foundAt: (r.created_at || '').slice(0, 10), orderNo: r.order_no || null, urgency: urgency(r, mileage),
+    durationMin: r.duration_min || null,
+    booked: r.appointment_id && ['planned', 'request', 'arrived'].includes(r.appt_status) ? { start: r.appt_start || null, status: r.appt_status } : null,
   };
 }
 
