@@ -769,7 +769,7 @@ crm.delete('/orders/:id', (req, res) => {
   const o = getOrder(Number(req.params.id));
   if (one('SELECT 1 FROM payments WHERE order_id = ?', o.id)) throw new HttpError(400, 'В заказе есть оплаты — сначала удалите их');
   if (one(`SELECT 1 FROM stock_docs WHERE order_id = ?`, o.id)) throw new HttpError(400, 'По заказу выданы запчасти со склада — сначала верните статус');
-  run('DELETE FROM orders WHERE id = ?', o.id);
+  tx(() => { run('DELETE FROM appointments WHERE order_id = ?', o.id); run('DELETE FROM orders WHERE id = ?', o.id); }); // запись заказа в графике удаляется вместе с ним
   log('order', o.id, 'delete', o.number, s.name);
   res.json({ ok: true });
 });
@@ -798,7 +798,7 @@ crm.post('/bulk/:entity', (req, res) => {
       if (one('SELECT 1 FROM payments WHERE order_id = ?', o.id)) throw new HttpError(400, 'есть оплаты — сначала удалите их');
       if (one('SELECT 1 FROM stock_docs WHERE order_id = ?', o.id)) throw new HttpError(400, 'выданы запчасти со склада');
       if (one('SELECT 1 FROM sales_docs WHERE order_id = ?', o.id)) throw new HttpError(400, 'есть фактура / документ продажи');
-      tx(() => { run('DELETE FROM orders WHERE id = ?', o.id); log('order', o.id, 'delete', o.number + ' (массово)', s.name); });
+      tx(() => { run('DELETE FROM appointments WHERE order_id = ?', o.id); run('DELETE FROM orders WHERE id = ?', o.id); log('order', o.id, 'delete', o.number + ' (массово)', s.name); });
     });
     if (A === 'status') {
       const st = one('SELECT * FROM order_statuses WHERE id = ?', Number(v));

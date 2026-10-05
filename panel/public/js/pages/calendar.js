@@ -31,6 +31,7 @@ export default function Calendar({ query }) {
   const [left, setLeft] = useState(store('pc_cal_left', '1') === '1');
   const [edit, setEdit] = useState(null);      // запись в графике
   const [create, setCreate] = useState(null);  // новый заказ в график
+  const [choose, setChoose] = useState(null);  // клик по свободному окну → выбор: записать клиента / заказ / блокировка
   const [drag, setDrag] = useState(null);      // { type: 'appt' | 'order', id }
   const [over, setOver] = useState(null);
   const [q, setQ] = useState('');
@@ -64,7 +65,7 @@ export default function Calendar({ query }) {
   const newAt = (stationId, time, day = date) => {
     if (!canEdit) return;
     if (linkOrder) return (async () => { await act(() => api('appointments', { body: { order_id: linkOrder, station_id: stationId, start_at: `${day} ${hhmm(time)}` } }), 'Заказ в графике'); go('/orders/' + linkOrder); })();
-    setCreate({ station_id: stationId, date: day, time: hhmm(time) });
+    setChoose({ station_id: stationId, date: day, time: hhmm(time) }); // как в Motowarsztat: «Что добавить?» — визит / заказ / блокировка
   };
   // растягивание карточки за нижний край — меняем длительность
   const resize = (e, a) => {
@@ -110,7 +111,7 @@ export default function Calendar({ query }) {
       <input type="date" class="hg-date" value=${date} onInput=${(e) => e.target.value && setDate(e.target.value)} aria-label="Дата" />
       <div class="hg-title">${title}</div>
       <div class="btn-group">${[['day', 'День'], ['week', 'Неделя'], ['month', 'Месяц']].map(([k, l]) => html`<button class=${'btn' + (view === k ? ' primary' : '')} onClick=${() => setView(k)}>${l}</button>`)}</div>
-      ${canEdit && html`<button class="btn primary" onClick=${() => setCreate({ station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="plus" />Добавить</button>`}
+      ${canEdit && html`<button class="btn primary" onClick=${() => setChoose({ station_id: stations[0]?.id || '', date, time: '' })}><${Icon} n="plus" />Добавить</button>`}
       <button class=${'btn' + (legend ? ' on' : '')} onClick=${() => setLegend(!legend)} title="Цвета статусов">Цвета</button>
       ${app.perms['settings.manage'] && html`<a class="btn" href="#/settings/stations" title="Посты и часы работы"><${Icon} n="gear" /></a>`}
     </div>
@@ -209,6 +210,10 @@ export default function Calendar({ query }) {
     </div>
 
     ${edit && html`<${ApptModal} a=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}
+    ${choose && html`<${Modal} title="Что добавить?" onClose=${() => setChoose(null)}>
+      <div class="add-choice">${[['visit', 'cal', 'Записать клиента', 'Запланировать визит клиента в сервис'], ['order', 'wrench', 'Создать заказ', 'Новый заказ на ремонт автомобиля'], ['block', 'x', 'Поставить блокировку', 'Заблокировать пост на выбранное время']]
+        .map(([k, ic, t, d]) => html`<button type="button" class="add-opt" onClick=${() => { setCreate({ ...choose, mode: k }); setChoose(null); }}><span class="add-ico"><${Icon} n=${ic} /></span><span><b>${t}</b><span class="muted">${d}</span></span></button>`)}</div>
+    </${Modal}>`}
     ${create && html`<${NewOrderModal} init=${create} onClose=${() => setCreate(null)} onSaved=${() => { setCreate(null); reload(); }} />`}`;
 }
 
@@ -220,7 +225,7 @@ function monthRange(s) { const days = monthDays(s); return [days[0], days[41]]; 
 // ── Новый заказ сразу в график (или блокировка: отпуск, перерыв) ─────────────
 function NewOrderModal({ init, onClose, onSaved }) {
   const app = useApp();
-  const [mode, setMode] = useState(init.order ? 'existing' : 'order');
+  const [mode, setMode] = useState(init.order ? 'existing' : init.mode || 'order');
   const [cc, setCc] = useState({ customer: null, car: null });
   const [f, setF] = useState({ station_id: init.station_id || '', date: init.date, time: init.time || app.settings.hours_start || '09:00', duration_min: init.order ? '' : 60, complaint: '', mechanic_id: '', title: '' });
   const [busy, setBusy] = useState(false);
@@ -235,7 +240,14 @@ function NewOrderModal({ init, onClose, onSaved }) {
   const save = async (openAfter = true) => {
     setBusy(true);
     try {
-      if (mode === 'block') {
+      if (mode === 'visit') {
+        if (!cc.customer && !cc.newCustomer?.name && !cc.newCustomer?.phone && !cc.car) return toast('Выберите клиента или авто', 'error');
+        const who = cc.customer?.name || cc.newCustomer?.name || '';
+        await act(() => api('appointments', { body: { ...slot, duration_min: Number(f.duration_min) || 60, status: 'planned', source: 'crm',
+          customer_id: cc.customer?.id || null, car_id: cc.car?.id || null,
+          contact_name: cc.customer ? null : cc.newCustomer?.name || null, contact_phone: cc.customer ? null : cc.newCustomer?.phone || null,
+          title: (f.complaint.trim() || [carName(cc.car || {}), who].filter((x) => x && x !== '—').join(' · ') || 'Визит').slice(0, 120), note: f.note || null } }), 'Клиент записан');
+      } else if (mode === 'block') {
         if (!f.title.trim()) return toast('Впишите причину: отпуск, перерыв…', 'error');
         await act(() => api('appointments', { body: { ...slot, duration_min: Number(f.duration_min) || 60, title: f.title, status: 'block' } }), 'Время заблокировано');
       } else if (mode === 'existing') {
@@ -252,11 +264,11 @@ function NewOrderModal({ init, onClose, onSaved }) {
       onSaved();
     } catch {} finally { setBusy(false); }
   };
-  return html`<${Modal} xl title=${mode === 'block' ? 'Блокировка времени' : mode === 'existing' ? 'Заказ ' + init.order.number + ' в график' : 'Новый заказ в терминарз'} onClose=${onClose}
+  return html`<${Modal} xl title=${mode === 'block' ? 'Блокировка времени' : mode === 'visit' ? 'Записать клиента' : mode === 'existing' ? 'Заказ ' + init.order.number + ' в график' : 'Новый заказ в терминарз'} onClose=${onClose}
     foot=${html`<button class="btn" style="margin-right:auto" onClick=${onClose}>Отмена</button>
       ${mode === 'order' && html`<button class="btn" disabled=${busy} onClick=${() => save(false)}>Только в график</button>`}
-      <button class="btn primary" disabled=${busy} onClick=${() => save(true)}>${mode === 'block' ? 'Заблокировать' : mode === 'existing' ? 'Поставить в график' : 'Создать и открыть заказ'}</button>`}>
-    ${!init.order && html`<div class="seg sel">${[['order', 'Заказ'], ['block', 'Блокировка (отпуск, перерыв)']].map(([k, l]) => html`<button type="button" class=${mode === k ? 'on' : ''} onClick=${() => setMode(k)}>${l}</button>`)}</div>`}
+      <button class="btn primary" disabled=${busy} onClick=${() => save(true)}>${mode === 'block' ? 'Заблокировать' : mode === 'visit' ? 'Записать' : mode === 'existing' ? 'Поставить в график' : 'Создать и открыть заказ'}</button>`}>
+    ${!init.order && html`<div class="seg sel">${[['visit', 'Записать клиента'], ['order', 'Заказ'], ['block', 'Блокировка (отпуск, перерыв)']].map(([k, l]) => html`<button type="button" class=${mode === k ? 'on' : ''} onClick=${() => setMode(k)}>${l}</button>`)}</div>`}
     <div class="grid g4">
       <label class="f">Пост<select value=${f.station_id} onChange=${(e) => set({ station_id: e.target.value })}><option value="">Не назначен</option>${app.stations.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
       <label class="f">Дата<input type="date" value=${f.date} onInput=${(e) => set({ date: e.target.value })} /></label>
@@ -281,6 +293,13 @@ function NewOrderModal({ init, onClose, onSaved }) {
         <div class="row" style="margin-top:8px"><button class="btn sm" onClick=${() => setLines([...lines, LINE()])}><${Icon} n="plus" />Позиция</button>
           <span class="grow"></span><span>Итого брутто: <b>${zl(total)}</b></span></div></section>
       <div class="muted small">Позиции можно не заполнять сейчас — после «Создать и открыть заказ» откроется заказ на вкладке «Работы и товары», там всё как обычно. Длительность в графике потом можно растянуть мышкой.</div>`}
+    ${mode === 'visit' && html`<div class="grid g2 mw-top">
+        <section class="mw-panel"><header>Автомобиль</header><${CustomerCarPicker} only="car" value=${cc} onChange=${setCc} /></section>
+        <section class="mw-panel"><header>Клиент</header><${CustomerCarPicker} only="customer" value=${cc} onChange=${setCc} /></section></div>
+      <div class="grid g2"><label class="f">Что делаем<input value=${f.complaint} placeholder="Замена масла, диагностика, шины…" onInput=${(e) => set({ complaint: e.target.value })} /></label>
+        <label class="f">Механик<select value=${f.mechanic_id} onChange=${(e) => set({ mechanic_id: e.target.value })}><option value="">—</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label></div>
+      <label class="f">Заметка<textarea rows="2" value=${f.note || ''} onInput=${(e) => set({ note: e.target.value })}></textarea></label>
+      <div class="muted small">Визит — запись без заказа. Когда клиент приедет, нажмите на визит в графике → «Создать заказ»: запись привяжется к заказу.</div>`}
     ${mode === 'block' && html`<label class="f">Причина<input value=${f.title} placeholder="Андрей — отпуск, обед, пост на ремонте…" onInput=${(e) => set({ title: e.target.value })} /></label>`}
     ${mode === 'existing' && html`<div class="card" style="background:var(--surface2)"><b>${init.order.number}</b> · ${init.order.customer_name || ''} · ${carName(init.order)} ${init.order.plate || ''}
       <div class="hg-jobs" style="margin-top:6px">${(init.order.jobs || []).map((j) => html`<div><span class="grow">${j.name}</span>${isHours(j) ? html`<span>${h1(j.qty)}</span>` : ''}</div>`)}</div></div>`}

@@ -867,3 +867,12 @@ th.on { color: var(--text); }
 .list-comment:hover { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
 .modal .fu { border: 0; box-shadow: none; padding: 0; background: none; }
 .modal .fu > .row:first-child { display: none; }
+
+/* «Что добавить?» в терминарзе */
+.add-choice { display: grid; gap: 10px; }
+.add-opt { display: flex; align-items: center; gap: 16px; text-align: left; padding: 16px 18px; border: 1px solid var(--border2); border-radius: var(--radius); background: var(--surface2); color: var(--text); cursor: pointer; font: inherit; }
+.add-opt:hover, .add-opt:focus-visible { border-color: var(--accent); background: var(--accent-dim); outline: none; }
+.add-opt b { display: block; font-size: 15px; margin-bottom: 2px; }
+.add-opt .muted { font-size: 13px; }
+.add-ico { width: 46px; height: 46px; border-radius: 10px; display: grid; place-items: center; background: var(--surface3); color: var(--accent); flex: none; }
+.add-ico svg { width: 22px; height: 22px; }
