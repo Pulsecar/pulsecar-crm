@@ -730,4 +730,5 @@ for (const [k, v] of Object.entries({
   sms_tpl_inspection: 'Dzien dobry! Przeglad techniczny [[pojazd.marka]] [[pojazd.nrRejestracyjny]] wazny do [[pojazd.przegladDo]]. Zapraszamy na sprawdzenie auta przed przegladem: [[link.mojeAuto]] PulseCar',
   my_car_url: 'https://pulsecar.pl/pl/moje-auto',
 })) if (getSetting(k) === null) setSetting(k, v);
+addColumn('cars', 'body_type', 'TEXT');            // тип кузова для схемы повреждений (пусто — определяется по модели)
 }

@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { KSEF_ENVS } from './integrations/ksef.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { carShapeSvg, detectBody } from '../public/js/car-shapes.js';
 
 // Печатные документы — только по-польски: имя сотрудника кириллицей (например «Администратор») пишем латиницей
 const TRL = { а: 'a', б: 'b', в: 'w', г: 'g', д: 'd', е: 'e', ё: 'io', ж: 'ż', з: 'z', и: 'i', й: 'j', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'ch', ц: 'c', ч: 'cz', ш: 'sz', щ: 'szcz', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'ju', я: 'ja', і: 'i', ї: 'ji', є: 'je', ґ: 'g' };
@@ -174,19 +175,11 @@ const flagsBlock = (f = {}) => `<div class="flags">${Object.entries(FLAG_PL).map
 
 // ── Схема повреждений (своя векторная машина, вид сверху) ─────────────────
 export const DAMAGE_TYPES = { rysa: 'Rysa', wgniecenie: 'Wgniecenie', odprysk: 'Odprysk', pekniecie: 'Pęknięcie', korozja: 'Korozja', brak: 'Brak elementu', inne: 'Inne' };
-export function carSvg(marks = [], { w = 220 } = {}) {
+export function carSvg(marks = [], { w = 220, car = null, body = null } = {}) {
   const pins = marks.map((m, i) => `<g><circle cx="${Number(m.x) * 2}" cy="${Number(m.y) * 4}" r="9" fill="#e34948" stroke="#fff" stroke-width="2"/><text x="${Number(m.x) * 2}" y="${Number(m.y) * 4 + 3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#fff" font-family="Arial">${i + 1}</text></g>`).join('');
+  // форма кузова — по авто (модель из VIN / техпаспорта) или выбранная вручную в карточке авто
   return `<svg viewBox="0 0 200 400" width="${w}" style="max-width:100%;height:auto;display:block" role="img" aria-label="Schemat pojazdu">
-  <text x="100" y="12" text-anchor="middle" font-size="10" fill="#6b7078" font-family="Arial">PRZÓD</text>
-  <text x="100" y="396" text-anchor="middle" font-size="10" fill="#6b7078" font-family="Arial">TYŁ</text>
-  <path d="M60 40 Q100 18 140 40 L152 90 L156 170 L156 300 L150 350 Q100 378 50 350 L44 300 L44 170 L48 90 Z" fill="#f4f5f7" stroke="#15171a" stroke-width="2"/>
-  <path d="M62 96 Q100 80 138 96 L132 132 Q100 124 68 132 Z" fill="#dfe2e6" stroke="#15171a" stroke-width="1.5"/>
-  <path d="M68 262 Q100 270 132 262 L138 300 Q100 312 62 300 Z" fill="#dfe2e6" stroke="#15171a" stroke-width="1.5"/>
-  <rect x="68" y="138" width="64" height="118" rx="10" fill="#fff" stroke="#15171a" stroke-width="1.2"/>
-  <path d="M44 150 L34 150 L34 170 L44 170 M156 150 L166 150 L166 170 L156 170" fill="none" stroke="#15171a" stroke-width="1.5"/>
-  <rect x="30" y="70" width="14" height="44" rx="4" fill="#15171a"/><rect x="156" y="70" width="14" height="44" rx="4" fill="#15171a"/>
-  <rect x="30" y="286" width="14" height="44" rx="4" fill="#15171a"/><rect x="156" y="286" width="14" height="44" rx="4" fill="#15171a"/>
-  <line x1="46" y1="190" x2="154" y2="190" stroke="#cfd2d6" stroke-width="1"/>
+  ${carShapeSvg(body || detectBody(car || {}), { theme: 'print' })}
   ${pins}</svg>`;
 }
 export const damageList = (marks = []) => marks.length
@@ -261,7 +254,7 @@ export function orderDoc(type, orderId, { S = settingsMap(), bar = true, back = 
     const body = `${partiesWorkshop(o, S)}
       ${o.complaint ? `<div class="sec box"><h3>Opis zlecenia / zgłoszenie klienta</h3><div class="note">${esc(o.complaint)}</div></div>` : ''}
       ${S.card_intake_tasks !== '0' && tasks.length ? `<div class="sec"><h3>Zakres prac do wykonania</h3><table><tbody>${tasks.map((i, n) => `<tr><td style="width:22px">${n + 1}</td><td>${esc(i.name)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-      <div class="sec"><h3>Stan pojazdu przy przyjęciu</h3><div class="dmg">${carSvg(damages)}<div>${damageList(damages)}</div></div></div>
+      <div class="sec"><h3>Stan pojazdu przy przyjęciu</h3><div class="dmg">${carSvg(damages, { car: o.car })}<div>${damageList(damages)}</div></div></div>
       <div class="sec box"><h3>Ustalenia</h3>${flagsBlock(o.flags)}</div>
       ${S.card_rodo ? `<div class="sec note">${esc(S.card_rodo)}</div>` : ''}
       ${S.intake_terms || S.order_terms ? `<div class="sec note">${esc(S.intake_terms || S.order_terms)}</div>` : ''}

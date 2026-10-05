@@ -4,6 +4,7 @@ import { html, useState, useEffect, useRef, api, act, go, useApp, Icon, Picker, 
 import { CustomerCarPicker } from './orders.js';
 import { SupplierParts } from './suppliers.js';
 import { CarDiagram, DMG } from './order-docs.js';
+import { detectBody, BODY_TYPES } from '../car-shapes.js';
 import { LaborBlock } from './labor.js';
 
 export const FLAGS = [['return_parts', 'Возврат деталей клиенту'], ['reg_doc', 'Техпаспорт'], ['test_drive', 'Согласие на тест-драйв'], ['fluids', 'Долить жидкости'], ['lights', 'Проверить освещение']];
@@ -125,7 +126,18 @@ export function OrderMain({ o, reload, isNew = false, onCreate, kind = 'order', 
     </section>
     ${!quote && html`<section class="mw-panel"><header>Повреждения автомобиля <span class="sub" style="margin-left:auto">видны клиенту в протоколе приёма</span></header>
       <div class="dmg-edit">
-        <${CarDiagram} marks=${f.damages} sel=${sel} onPick=${setSel} onAdd=${(p) => { if (!canEdit) return; upd({ damages: [...f.damages, { ...p, type: 'rysa', note: '' }] }); setSel(f.damages.length); }} />
+        <div class="stack" style="gap:6px">
+        ${(() => {
+          const carObj = cc.car || cc.newCar || {};
+          const auto = detectBody({ ...carObj, body_type: null });
+          const setBody = async (v) => {
+            if (cc.car?.id) { await act(() => api('cars/' + cc.car.id, { method: 'PUT', body: { body_type: v || '' } }), 'Тип кузова сохранён в карточке авто'); setCc({ ...cc, car: { ...cc.car, body_type: v || null } }); }
+            else setCc({ ...cc, newCar: { ...(cc.newCar || {}), body_type: v || null } });
+          };
+          return html`<label class="f small">Кузов<select value=${carObj.body_type || ''} disabled=${!canEdit} onChange=${(e) => setBody(e.target.value)}>
+            <option value="">Авто по модели: ${BODY_TYPES.find(([k]) => k === auto)?.[1] || auto}</option>${BODY_TYPES.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>`;
+        })()}
+        <${CarDiagram} body=${detectBody(cc.car || cc.newCar || {})} marks=${f.damages} sel=${sel} onPick=${setSel} onAdd=${(p) => { if (!canEdit) return; upd({ damages: [...f.damages, { ...p, type: 'rysa', note: '' }] }); setSel(f.damages.length); }} /></div>
         <div class="stack" style="gap:8px">
           <label class="f">Общее описание повреждений<textarea rows="2" value=${f.damages_note} onInput=${(e) => upd({ damages_note: e.target.value })}></textarea></label>
           <b class="small">Список повреждений</b>

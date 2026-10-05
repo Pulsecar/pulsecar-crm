@@ -4,6 +4,7 @@ import { html, useState, useEffect, useData, go, qs, Loading, ErrorBox, Badge, I
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ObjectHistory } from './audit.js';
 import { Recommendations } from './recs.js';
+import { detectBody, BODY_TYPES } from '../car-shapes.js';
 import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
 import { useApp } from '../lib.js';
 
@@ -38,7 +39,7 @@ export function CarsList() {
 }
 
 const KEYS = ['plate', 'vin', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'mileage_unit', 'notes', 'first_reg', 'engine_no',
-  'category', 'mass_kg', 'seats', 'reg_doc', 'inspection_until', 'insurance_until', 'key_no', 'paint_code', 'vehicle_type'];
+  'category', 'mass_kg', 'seats', 'reg_doc', 'inspection_until', 'insurance_until', 'key_no', 'paint_code', 'vehicle_type', 'body_type'];
 const normType = (v) => (v ? VEHICLE_TYPES.find(([k]) => k.toLowerCase() === String(v).toLowerCase())?.[0] || v : '');
 
 /** Форма авто как «Dane pojazdu» в Motowarsztat */
@@ -84,6 +85,8 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
       <div class="mwf-col">
         <div class="f">Код Aztec (техпаспорт)<div class="ig aztec"><span class="addon"><${Icon} n="qr" /></span>
           <${AztecButton} cls="aztec-btn" label="AZTEC — отсканировать техпаспорт" onData=${onAztec} /></div></div>
+        <label class="f">Кузов (схема повреждений)<select value=${f.body_type || ''} onChange=${(e) => set({ body_type: e.target.value })}>
+          <option value="">Авто по модели: ${BODY_TYPES.find(([b]) => b === detectBody({ ...f, body_type: null }))?.[1]}</option>${BODY_TYPES.map(([b, l]) => html`<option value=${b}>${l}</option>`)}</select></label>
         <label class="f">Тип авто<select value=${f.vehicle_type} onChange=${(e) => set({ vehicle_type: e.target.value })}>
           ${VEHICLE_TYPES.map(([v, l]) => html`<option value=${v}>${l}</option>`)}${f.vehicle_type && !VEHICLE_TYPES.some(([v]) => v === f.vehicle_type) && html`<option value=${f.vehicle_type}>${f.vehicle_type}</option>`}</select></label>
         <div class="g3">${inp('make', 'Марка')}${inp('model', 'Модель')}${inp('color', 'Цвет')}</div>

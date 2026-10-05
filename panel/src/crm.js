@@ -414,7 +414,7 @@ crm.get('/cars/:id', (req, res) => {
   });
 });
 const CAR_FIELDS = ['customer_id', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'notes', 'mileage_unit',
-  'first_reg', 'engine_no', 'category', 'mass_kg', 'seats', 'reg_doc', 'inspection_until', 'insurance_until', 'key_no', 'paint_code', 'vehicle_type'];
+  'first_reg', 'engine_no', 'category', 'mass_kg', 'seats', 'reg_doc', 'inspection_until', 'insurance_until', 'key_no', 'paint_code', 'vehicle_type', 'body_type'];
 function carData(b) {
   const o = {};
   for (const k of CAR_FIELDS) if (b[k] !== undefined) o[k] = b[k] === '' ? null : b[k];
