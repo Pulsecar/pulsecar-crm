@@ -119,6 +119,36 @@ label{font-size:13px;color:var(--m);display:grid;gap:4px}
 .note{white-space:pre-wrap;font-size:13px;color:var(--m)}
 footer{text-align:center;color:var(--m);font-size:12px;padding:14px 16px 30px}
 @media(max-width:720px){.top{grid-template-columns:1fr;text-align:left}.num{text-align:left}.two,.dmg{grid-template-columns:1fr}}
+/* Premium */
+@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-wght-normal.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2212}
+@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-ext-wght-normal.woff2') format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+1E00-1E9F,U+20A0-20AB,U+20AD-20C0,U+A720-A7FF}
+@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-cyrillic-wght-normal.woff2') format('woff2');unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
+@font-face{font-family:'Inter';font-display:swap;font-weight:100 900;src:url('/fonts/inter-cyrillic-ext-wght-normal.woff2') format('woff2');unicode-range:U+0460-052F,U+1C80-1C8A,U+20B4,U+A640-A69F}
+:root{--acc:#0b8f47;--bg:#f4f4f2;--card:#fff;--t:#131417;--m:#6a6d74;--line:#e7e7e3;--soft:#fafaf9;--ink:#111214}
+body{font:14.5px/1.55 'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;letter-spacing:-.005em;-webkit-font-smoothing:antialiased;font-feature-settings:'cv11','tnum'}
+.wrap{max-width:940px;padding:20px 16px}
+.top{background:var(--ink);border-color:var(--ink);border-radius:12px;padding:22px 24px;color:#fff}
+.top img{height:40px}.co{color:#9a9da4}.co b{color:#fff;font-weight:600;letter-spacing:-.01em}
+.num h1{font-size:24px;font-weight:650;letter-spacing:-.025em;color:#fff}.num div{color:#9a9da4}.num div b{color:#fff;font-weight:600}
+.top .chip{border-color:rgba(255,255,255,.22)!important;color:#fff!important;background:rgba(255,255,255,.06)!important;border-radius:4px;font-weight:600;letter-spacing:.03em}
+.card,details.sec{border-radius:12px;border-color:var(--line);box-shadow:0 1px 2px rgba(17,18,20,.04)}
+.card{padding:20px 22px}
+h2{font-size:10.5px;font-weight:600;letter-spacing:.1em;color:var(--m);margin-bottom:12px}
+.kv{font-size:14px;gap:6px 18px}.kv b{font-weight:600}
+details.sec>summary{background:#fff;padding:16px 20px;font-weight:600;font-size:15px;letter-spacing:-.01em;border-bottom:1px solid transparent}
+details.sec[open]>summary{border-bottom-color:var(--line)}
+details.sec>summary .ico{width:30px;height:30px;border-radius:7px;background:var(--ink)}
+details.sec>summary .st{border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.03em;padding:3px 8px}
+details.sec>summary::after{width:7px;height:7px;border-width:1.5px}
+.body{padding:20px 22px}
+th{font-size:10.5px;font-weight:600;letter-spacing:.08em;border-bottom:1px solid var(--t);padding:8px}
+td{border-bottom-color:var(--line);padding:10px 8px}td.r b,td b{font-weight:600}
+.sum .big{font-size:19px;font-weight:650;letter-spacing:-.02em;border-top:1px solid var(--t);padding-top:8px;margin-top:4px}
+.btn{border-radius:8px;padding:11px 18px;font-weight:600;font-size:14px;letter-spacing:-.005em;background:var(--ink)}
+.btn::before{width:7px;height:7px}.btn.alt{border-color:#d9d9d4}.btn.alt:hover{border-color:var(--t)}
+input{border-radius:8px;border-color:#d9d9d4}input:focus{outline:none;border-color:var(--t);box-shadow:0 0 0 3px rgba(17,18,20,.08)}
+.info,.ok,.err{border-radius:8px}.pad{border-radius:8px}
+footer{font-size:11.5px;letter-spacing:.02em}
 `;
 const ICO = {
   intake: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13 7l4 4"/></svg>',
