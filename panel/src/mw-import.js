@@ -210,7 +210,9 @@ function importOrder(o, kind) {
   }
   for (const p of o.parts || []) {
     const qty = num(p.count ?? p.quantity) || 1;
-    const gross = p.priceGross != null ? round2(num(p.priceGross)) : round2(num(p.price) * (1 + vatOf(p.vat) / 100));
+    // «price» в MW бывает и нетто, и брутто (настройка заказа) — надёжна только сумма строки: цена до скидки = сумма / кол-во / (1 − скидка)
+    const disc = num(p.discount);
+    const gross = p.totalGross != null ? round2(num(p.totalGross) / qty / ((1 - disc / 100) || 1)) : p.priceGross != null ? round2(num(p.priceGross)) : round2(num(p.price) * (1 + vatOf(p.vat) / 100));
     const prod = p.warehouseProduct?.product?.id || p.product?.id || p.warehouseProduct?.productId;
     insert('order_items', { order_id: r.id, kind: 'part', name: s(p.name, 300) || 'Część', code: s(p.code, 60), qty, unit: s(p.unit, 12) || 'szt.',
       price: gross, discount: num(p.discount), vat: vatOf(p.vat), cost: round2(num(p.costNet)), pos: ++pos, product_id: prod ? idOf('products', 'p:' + prod) : null,

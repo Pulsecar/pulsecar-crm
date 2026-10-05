@@ -39,7 +39,9 @@ const ro = {
   parts: [{ id: 11, name: 'Filtr oleju', code: 'OC 90', count: 1, price: 48.77, priceGross: 59.99, totalGross: 59.99, costNet: 40, unit: 'szt.', vat: vat23, discount: 0, warehouseProduct: { id: 7001, product: { id: 7101 } }, job: { id: 1 } }],
 };
 const quote = { id: 777, number: 'WYC 3/01/2026', date: '2026-01-04 12:00:00', client: { id: 502 }, vehicle: null, comments: 'Klient oddzwoni w piątek',
-  jobs: [{ id: 5, name: 'Wymiana sprzęgła', quantity: 1, price: 800, totalGross: 984, vat: vat23, discount: 0, unitWork: 2 }], parts: [] };
+  jobs: [{ id: 5, name: 'Wymiana sprzęgła', quantity: 1, price: 800, totalGross: 984, vat: vat23, discount: 0, unitWork: 2 }],
+  parts: [{ id: 6, name: 'Sprzęgło kpl', quantity: 2, price: 182.64, totalNet: 296.98, totalGross: 365.28, vat: vat23, discount: 0 },
+    { id: 7, name: 'Łożysko', quantity: 1, price: 164.83, priceGross: 148.35, totalGross: 148.35, vat: vat23, discount: 10 }] };
 const sale = { id: 628251, type: 'invoice', number: 'FS 1/01/2026', date: '2026-01-06', datePayment: '2026-01-20', paymentMethod: 3, totalNet: 237.06, totalGross: 291.58, paidTotal: 291.58,
   repairOrders: [{ id: 2000154 }], client: { id: 501 }, clientDetails: { name: 'Jan Nowak', postalCode: '01-001', city: 'Warszawa' },
   items: [{ name: 'Wymiana oleju i filtra oleju', count: 1, price: 81.3, totalNet: 81.3, totalGross: 100, vat: vat23, unit: 'usł.' }],
@@ -106,7 +108,7 @@ try {
   assert.match(me.stations.find((x) => x.id === ap.station_id).name, /^1/, 'пост MW сопоставлен с нашим «1 …»');
   assert.equal(me.stations.filter((x) => /^1/.test(x.name)).length, 1, 'без дублей постов');
   const q = ok(await req('/crm-api/orders?kind=quote'), 'quotes');
-  assert.equal(q.total, 1); assert.equal(q.rows[0].total, 984);
+  assert.equal(q.total, 1); assert.equal(q.rows[0].total, 1497.63, 'брутто выцены как в MW (цена брутто, скидка не дважды)');
   const qd = ok(await req('/crm-api/orders/' + q.rows[0].id), 'quote');
   assert.ok(qd.comments.some((x) => /piątek/.test(x.text)));
   const pr = ok(await req('/crm-api/products?q=OC 90'), 'products').rows[0];
