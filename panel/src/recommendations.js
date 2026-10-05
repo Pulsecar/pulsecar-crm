@@ -39,9 +39,10 @@ function data(b, partial) {
 }
 
 export function listForCar(carId, { openOnly = false } = {}) {
-  return all(`SELECT r.*, o.number order_no, z.number closed_order_no, a.start_at appt_start, a.status appt_status FROM car_recommendations r
+  syncQuotes(carId);
+  return all(`SELECT r.*, o.number order_no, z.number closed_order_no, a.start_at appt_start, a.status appt_status, q.number quote_no FROM car_recommendations r
     LEFT JOIN orders o ON o.id = r.order_id LEFT JOIN orders z ON z.id = r.closed_order_id
-    LEFT JOIN appointments a ON a.id = r.appointment_id
+    LEFT JOIN appointments a ON a.id = r.appointment_id LEFT JOIN orders q ON q.id = r.quote_id
     WHERE r.car_id = ? ${openOnly ? "AND r.status = 'open'" : ''}
     ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END, CASE r.priority WHEN 'urgent' THEN 0 WHEN 'soon' THEN 1 ELSE 2 END, COALESCE(r.due_date, '9999'), r.id DESC`, carId);
 }
@@ -57,6 +58,8 @@ export function updateRec(id, b) {
   const r = one('SELECT * FROM car_recommendations WHERE id = ?', id);
   if (!r) throw new HttpError(404, 'Рекомендация не найдена');
   const o = data(b, true);
+  // «по выцене»: состав, цену и время берём из выцены — здесь меняются только срок, важность и статус
+  if (r.quote_id) for (const k of ['title', 'note', 'est_price', 'duration_min']) delete o[k];
   if (b.status !== undefined) {
     if (!['open', 'done', 'dismissed'].includes(b.status)) throw new HttpError(400, 'Неверный статус');
     o.status = b.status;
@@ -131,12 +134,85 @@ export function urgency(r, mileage) {
   return 'later';
 }
 
+// ── Выцены в сервисной книжке ───────────────────────────────────────────────
+const LABOR_HOURS = (i) => (i.kind === 'labor' && !/szt|us/i.test(String(i.unit || '')) ? Number(i.qty) || 0 : 0);
+const fmtZl = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace('.', ',') + ' zł';
+
+/** Текст для клиента из позиций выцены: название (главные работы) и список позиций */
+function quoteSummary(q, items) {
+  const labor = items.filter((i) => i.kind === 'labor');
+  const main = (labor.length ? labor : items).map((i) => i.name);
+  let title = main.slice(0, 2).join(', ');
+  if (main.length > 2) title += ` + ${main.length - 2}`;
+  title = clean(`${title || 'Wycena'} (wycena ${q.number})`, 160);
+  const lines = items.map((i) => `• ${i.name}${Number(i.qty) !== 1 ? ` — ${String(i.qty).replace('.', ',')} ${i.unit || ''}`.trimEnd() : ''}: ${fmtZl(i.price * i.qty * (1 - (Number(i.discount) || 0) / 100))}`);
+  const hours = items.reduce((a, i) => a + LABOR_HOURS(i), 0);
+  return {
+    title, note: clean([q.complaint, lines.join('\n')].filter(Boolean).join('\n'), 1000) || null,
+    est_price: Math.round((Number(q.total) || 0) * 100) / 100 || null,
+    duration_min: hours > 0 ? Math.min(16 * 60, Math.max(30, Math.round((hours * 60) / 15) * 15)) : 60,
+  };
+}
+
+/**
+ * Выцены по авто → рекомендации «по выцене» (идемпотентно, вызывается при чтении):
+ * открытая выцена с суммой — открытая рекомендация с тем же составом и ценой;
+ * выцена стала заказом — рекомендация «сделано» (в этом заказе); отклонена / удалена — закрывается.
+ */
+export function syncQuotes(carId) {
+  if (getSetting('servicebook_quotes', '1') === '0' || !carId) return;
+  const quotes = all(`SELECT q.*, COALESCE(st.is_final, 0) is_final,
+      (SELECT z.id FROM orders z WHERE z.kind = 'order' AND (z.quote_id = q.id OR z.id = q.merged_into) ORDER BY z.id LIMIT 1) to_order
+    FROM orders q LEFT JOIN order_statuses st ON st.id = q.status_id WHERE q.kind = 'quote' AND q.car_id = ?`, carId);
+  const recs = all('SELECT * FROM car_recommendations WHERE car_id = ? AND quote_id IS NOT NULL', carId);
+  const byQuote = new Map(recs.map((r) => [r.quote_id, r]));
+  for (const q of quotes) {
+    const r = byQuote.get(q.id);
+    byQuote.delete(q.id);
+    if (q.to_order) {
+      if (r && r.status === 'open') run(`UPDATE car_recommendations SET status = 'done', closed_order_id = ?, closed_at = datetime('now') WHERE id = ?`, q.to_order, r.id);
+      continue;
+    }
+    const open = !q.is_final && Number(q.total) > 0;
+    if (!open) {
+      if (r && r.status === 'open') run(`UPDATE car_recommendations SET status = 'dismissed', closed_at = datetime('now') WHERE id = ?`, r.id);
+      continue;
+    }
+    const items = all('SELECT * FROM order_items WHERE order_id = ? ORDER BY pos, id', q.id);
+    if (!items.length) continue;
+    const d = quoteSummary(q, items);
+    if (!r) {
+      insert('car_recommendations', { car_id: carId, quote_id: q.id, priority: 'soon', staff: q.created_by || null, ...d });
+    } else if (r.status === 'open' && (r.title !== d.title || r.note !== d.note || r.est_price !== d.est_price || r.duration_min !== d.duration_min)) {
+      run('UPDATE car_recommendations SET title = ?, note = ?, est_price = ?, duration_min = ? WHERE id = ?', d.title, d.note, d.est_price, d.duration_min, r.id);
+    }
+  }
+  // выцену удалили или перенесли на другое авто
+  for (const r of byQuote.values()) if (r.status === 'open') run('DELETE FROM car_recommendations WHERE id = ?', r.id);
+}
+
+/** Рекомендация → выцена (черновик с одной работой); дальше выцену дополняют в CRM, клиент видит её в Моё авто */
+export function recToQuote(id, staffName, createOrder) {
+  const r = one('SELECT r.*, k.customer_id FROM car_recommendations r JOIN cars k ON k.id = r.car_id WHERE r.id = ?', id);
+  if (!r) throw new HttpError(404, 'Рекомендация не найдена');
+  if (r.quote_id && one('SELECT 1 FROM orders WHERE id = ?', r.quote_id)) return r.quote_id;
+  const hours = r.duration_min ? Math.round((r.duration_min / 60) * 100) / 100 : 1;
+  const qid = createOrder({
+    kind: 'quote', customer_id: r.customer_id, car_id: r.car_id, complaint: r.note ? `${r.title}. ${r.note}` : r.title,
+    items: [{ kind: 'labor', name: r.title, qty: r.est_price ? 1 : hours, unit: r.est_price ? 'usł' : 'rbh', ...(r.est_price ? { price: r.est_price } : {}) }],
+  }, staffName);
+  // эта рекомендация теперь «по выцене» (старая запись заменяется)
+  run('DELETE FROM car_recommendations WHERE quote_id = ? AND id <> ?', qid, r.id);
+  run('UPDATE car_recommendations SET quote_id = ? WHERE id = ?', qid, r.id);
+  return qid;
+}
+
 /** Как рекомендацию видит клиент (без внутренних полей) */
 export function clientRec(r, mileage) {
   return {
     id: r.id, title: r.title, note: r.note || null, priority: r.priority, dueDate: r.due_date || null, dueKm: r.due_km || null,
     estPrice: r.est_price || null, foundAt: (r.created_at || '').slice(0, 10), orderNo: r.order_no || null, urgency: urgency(r, mileage),
-    durationMin: r.duration_min || null,
+    durationMin: r.duration_min || null, quoteNo: r.quote_no || null, kind: r.quote_id ? 'quote' : 'recommendation',
     booked: r.appointment_id && ['planned', 'request', 'arrived'].includes(r.appt_status) ? { start: r.appt_start || null, status: r.appt_status } : null,
   };
 }

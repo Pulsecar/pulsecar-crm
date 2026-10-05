@@ -145,9 +145,11 @@ api.get('/me', (req, res) => {
   const lastId = orders[0]?.id;
   const safeCard = (id) => { try { return cardUrl(id); } catch { return null; } };
   // выцены, которые ждут решения клиента (не завершены и ещё не стали заказом)
+  // выцены по авто клиента показываются в его авто как рекомендации «по выцене» (с записью) — здесь только выцены без авто
+  const byCar = getSetting('servicebook_quotes', '1') !== '0';
   const quotes = all(
     `SELECT o.*, st.is_final, k.make, k.model, k.plate FROM orders o LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN cars k ON k.id = o.car_id
-     WHERE o.customer_id = ? AND o.kind = 'quote' AND COALESCE(st.is_final,0) = 0 AND o.total > 0
+     WHERE o.customer_id = ? AND o.kind = 'quote' AND COALESCE(st.is_final,0) = 0 AND o.total > 0 ${byCar ? 'AND (o.car_id IS NULL OR k.customer_id IS NOT o.customer_id)' : ''}
        AND NOT EXISTS (SELECT 1 FROM orders z WHERE z.quote_id = o.id) AND o.created_at >= datetime('now','-120 days')
      ORDER BY o.id DESC LIMIT 10`, c.id,
   );
@@ -183,7 +185,7 @@ api.get('/me', (req, res) => {
     cars: cars.map((car) => ({
       id: car.id, plate: car.plate, vin: car.vin, make: car.make, model: car.model, year: car.year == null ? null : String(car.year).replace(/\.0+$/, ''), lastMileage: car.last_mileage,
       engine: car.engine || null, fuel: car.fuel || null, inspectionUntil: car.inspection_until || null, insuranceUntil: car.insurance_until || null,
-      recommendations: listForCar(car.id, { openOnly: true }).map((r) => clientRec(r, car.last_mileage)),
+      recommendations: listForCar(car.id, { openOnly: true }).map((r) => ({ ...clientRec(r, car.last_mileage), quoteUrl: r.quote_id ? safeCard(r.quote_id) : null })),
       done: listForCar(car.id).filter((r) => r.status === 'done').slice(0, 20).map((r) => ({ title: r.title, closedAt: (r.closed_at || '').slice(0, 10), orderNo: r.closed_order_no || null })),
       visits: orders.filter((v) => v.car_id === car.id).map(visitOut),
     })),
@@ -207,6 +209,7 @@ api.get('/me', (req, res) => {
 });
 
 // ── Заявка на визит из приложения → «Не распределено» в терминарзе CRM ─────
+const quoteNo = (id) => one('SELECT number FROM orders WHERE id = ?', id)?.number || '';
 // Рекомендация из сервисной книжки — только по своим авто
 function ownRec(customerId, recId) {
   const r = one(`SELECT r.*, k.plate, k.make, k.model, k.customer_id FROM car_recommendations r JOIN cars k ON k.id = r.car_id WHERE r.id = ?`, Number(recId));
@@ -247,20 +250,20 @@ api.post('/bookings', (req, res) => {
       const aid = insert('appointments', {
         station_id: st.id, customer_id: customer?.id ?? null, car_id: rec.car_id,
         title: `${rec.title}${rec.plate ? ' · ' + rec.plate : ''}`.slice(0, 120),
-        note: [`Онлайн-запись ${where}`, rec.note, b.problem && String(b.problem).slice(0, 500)].filter(Boolean).join('\n'),
-        start_at: String(b.start_at), duration_min: duration, status: 'planned', source: src, contact_name: name, contact_phone: phone,
+        note: [`Онлайн-запись ${where}`, rec.quote_id ? `По выцене ${quoteNo(rec.quote_id)} — при создании заказа позиции берутся из выцены` : rec.note, b.problem && String(b.problem).slice(0, 500)].filter(Boolean).join('\n'),
+        start_at: String(b.start_at), duration_min: duration, status: 'planned', source: src, contact_name: name, contact_phone: phone, quote_id: rec.quote_id || null,
       });
       run('UPDATE car_recommendations SET appointment_id = ? WHERE id = ?', aid, rec.id);
       return aid;
     });
-    notify('booking', `📅 Онлайн-запись ${where}: ${name}, ${phone}\n🕒 ${b.start_at} (${duration} мин) · ${st.name}\n🔧 ${rec.title}\n🚗 ${carLine}${b.problem ? '\n📝 ' + String(b.problem).slice(0, 300) : ''}`, { name, phone, appointment: id });
+    notify('booking', `📅 Онлайн-запись ${where}: ${name}, ${phone}\n🕒 ${b.start_at} (${duration} мин) · ${st.name}\n🔧 ${rec.title}${rec.quote_id ? '\n📄 по выцене ' + quoteNo(rec.quote_id) : ''}\n🚗 ${carLine}${b.problem ? '\n📝 ' + String(b.problem).slice(0, 300) : ''}`, { name, phone, appointment: id });
     return res.json({ ok: true, id, start_at: String(b.start_at), duration_min: duration, station: st.name, booked: true });
   }
 
   const id = insert('appointments', {
     station_id: null, customer_id: customer?.id ?? null, car_id: rec?.car_id ?? null, title: String(rec?.title || b.service || 'Заявка из приложения').slice(0, 120),
-    note: text, status: 'request', source: src, contact_name: name, contact_phone: phone,
-    preferred: String(b.preferred || '').slice(0, 120) || null, duration_min: rec?.duration_min || 60,
+    note: [rec?.quote_id ? `По выцене ${quoteNo(rec.quote_id)}` : '', text].filter(Boolean).join('\n'), status: 'request', source: src, contact_name: name, contact_phone: phone,
+    preferred: String(b.preferred || '').slice(0, 120) || null, duration_min: rec?.duration_min || 60, quote_id: rec?.quote_id || null,
   });
   if (rec) run('UPDATE car_recommendations SET appointment_id = ? WHERE id = ?', id, rec.id);
   notify('booking', `Новая заявка ${where}: ${name}, ${phone}\n${text}${b.preferred ? '\nКогда удобно: ' + b.preferred : ''}`, { name, phone, text });

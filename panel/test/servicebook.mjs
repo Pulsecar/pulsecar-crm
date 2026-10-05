@@ -178,6 +178,46 @@ try {
   assert.equal(myc.recommendations.find((r) => r.id === noTime.id).booked.status, 'request');
   console.log('✓ онлайн-запись: окна по времени работы, запись на пост, заявка без окна, отметка «записан»');
 
+  // выцены в Моё авто: выцена по авто → рекомендация «по выцене» с составом и ценой → запись → заказ из выцены
+  const q1 = ok(await req('/crm-api/orders', { body: { kind: 'quote', customer_id: cust.id, car_id: car.id, complaint: 'Stuki z przodu' } }), 'quote');
+  ok(await req(`/crm-api/orders/${q1.id}/items`, { body: { kind: 'labor', name: 'Wymiana wahacza przedniego', qty: 2, unit: 'rbh', price: 150 } }), 'q labor');
+  ok(await req(`/crm-api/orders/${q1.id}/items`, { body: { kind: 'part', name: 'Wahacz przedni lewy', qty: 1, unit: 'szt.', price: 420 } }), 'q part');
+  const qn = ok(await req('/crm-api/orders/' + q1.id), 'quote get').number;
+  myc = ok(await req('/api/me', { token }), 'me quote').cars.find((x) => x.id === car.id);
+  let qr = myc.recommendations.find((r) => r.kind === 'quote');
+  assert.ok(qr, 'выцена видна в авто клиента');
+  assert.equal(qr.quoteNo, qn); assert.equal(qr.estPrice, 720); assert.equal(qr.durationMin, 120);
+  assert.match(qr.title, /Wymiana wahacza/); assert.match(qr.note, /Wahacz przedni lewy/);
+  assert.ok(!(my.quotes || []).some((x) => x.no === qn), 'не дублируется в общем списке выцен');
+  // выцена изменилась — рекомендация следом
+  ok(await req(`/crm-api/orders/${q1.id}/items`, { body: { kind: 'part', name: 'Śruba', qty: 2, unit: 'szt.', price: 10 } }), 'q part2');
+  qr = ok(await req('/api/me', { token }), 'me quote2').cars.find((x) => x.id === car.id).recommendations.find((r) => r.kind === 'quote');
+  assert.equal(qr.estPrice, 740);
+  // клиент записывается по выцене на окно
+  const qs = ok(await req(`/api/recommendations/${qr.id}/slots`, { token }), 'quote slots');
+  const qd = qs.days[qs.days.length - 1];
+  const qStart = `${qd.date} ${qd.times[qd.times.length - 1]}`;
+  ok(await req('/api/bookings', { token, body: { name: 'Ewa Test', phone: '600222333', rec_id: qr.id, start_at: qStart, source: 'site' } }), 'book quote');
+  const qcal = ok(await req(`/crm-api/appointments?from=${qd.date}&to=${qd.date}`), 'calendar q');
+  const qap = qcal.rows.find((a) => a.start_at === qStart && a.quote_id === q1.id);
+  assert.ok(qap && qap.quote_number === qn, 'запись в терминарзе знает выцену');
+  const qo = ok(await req(`/crm-api/appointments/${qap.id}/order-from-quote`, { body: {} }), 'order from quote');
+  const qof = ok(await req('/crm-api/orders/' + qo.id), 'order q');
+  assert.equal(qof.items.length, 3, 'позиции из выцены'); assert.equal(qof.total, 740);
+  assert.equal(ok(await req('/crm-api/orders/' + qo.id), 'o').quote_id, q1.id);
+  myc = ok(await req('/api/me', { token }), 'me after').cars.find((x) => x.id === car.id);
+  assert.ok(!myc.recommendations.some((r) => r.kind === 'quote'), 'выцена ушла из открытых — стала заказом');
+  const cf = ok(await req('/crm-api/cars/' + car.id), 'car q');
+  assert.equal(cf.recommendations.find((r) => r.quote_id === q1.id).status, 'done');
+  // рекомендация → выцена
+  const rq = ok(await req('/crm-api/recommendations', { body: { car_id: car.id, title: 'Wymiana sprzęgła', duration_min: 300 } }), 'rec for quote');
+  const nq = ok(await req(`/crm-api/recommendations/${rq.id}/quote`, { body: {} }), 'rec→quote');
+  const nqf = ok(await req('/crm-api/orders/' + nq.id), 'new quote');
+  assert.equal(nqf.kind, 'quote'); assert.equal(nqf.items[0].name, 'Wymiana sprzęgła'); assert.equal(nqf.items[0].qty, 5);
+  const cars2 = ok(await req('/crm-api/cars/' + car.id), 'car q2').recommendations.filter((r) => r.quote_id === nq.id);
+  assert.equal(cars2.length, 1, 'одна рекомендация на выцену, без дубля'); assert.equal(cars2[0].id, rq.id);
+  console.log('✓ выцены в Моё авто: состав и цена, запись по выцене, заказ из выцены, рекомендация → выцена');
+
   // удаление
   ok(await req('/crm-api/recommendations/' + am.id, { method: 'DELETE' }), 'delete');
   console.log('\nСЕРВИСНАЯ КНИЖКА: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ');

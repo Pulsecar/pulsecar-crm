@@ -147,6 +147,11 @@ try {
   ok(await req(`/crm-api/orders/${o2.id}/items`, { body: { kind: 'labor', name: 'ODRZUC test', qty: 1, price: 100, vat: 23 } }), 'bad item');
   const bad = ok(await req(`/crm-api/orders/${o2.id}/sales-docs`, { body: { kind: 'vat' } }), 'bad fv');
   assert.equal(bad.ksef_status, 'rejected'); assert.match(bad.warning, /450/);
+  // удаление: фактуру из KSeF — нельзя; отклонённую KSeF (не попала туда) — владелец может
+  assert.equal((await req('/crm-api/sales-docs/' + ff.id, { method: 'DELETE' })).status, 400, 'фактуру из KSeF удалить нельзя');
+  ok(await req('/crm-api/sales-docs/' + bad.id, { method: 'DELETE' }), 'delete rejected fv');
+  assert.equal((await req('/crm-api/sales-docs/' + bad.id)).status, 404);
+  console.log('✓ удаление фактуры: только не попавшую в KSeF (владелец), из KSeF — только корректа');
   const ord = ok(await req('/crm-api/orders/' + o.id), 'order docs');
   assert.ok(ord.sales_docs.every((d) => d.ksef_status === 'accepted'));
   const f = ok(await req('/crm-api/nip/701-000-00-05'), 'nip lookup');

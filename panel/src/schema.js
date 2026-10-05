@@ -730,5 +730,10 @@ for (const [k, v] of Object.entries({
   sms_tpl_inspection: 'Dzien dobry! Przeglad techniczny [[pojazd.marka]] [[pojazd.nrRejestracyjny]] wazny do [[pojazd.przegladDo]]. Zapraszamy na sprawdzenie auta przed przegladem: [[link.mojeAuto]] PulseCar',
   my_car_url: 'https://pulsecar.pl/pl/moje-auto',
 })) if (getSetting(k) === null) setSetting(k, v);
-addColumn('cars', 'body_type', 'TEXT');            // тип кузова для схемы повреждений (пусто — определяется по модели)
+addColumn('cars', 'body_type', 'TEXT');
+// Выцены в сервисной книжке: каждая открытая выцена по авто — рекомендация «по выцене» (клиент видит её в Моё авто и записывается)
+addColumn('car_recommendations', 'quote_id', 'INTEGER');
+addColumn('appointments', 'quote_id', 'INTEGER');          // запись клиента «по выцене» → заказ создаётся из позиций выцены
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS car_rec_quote ON car_recommendations(quote_id) WHERE quote_id IS NOT NULL');
+if (getSetting('servicebook_quotes') === null) setSetting('servicebook_quotes', '1');            // тип кузова для схемы повреждений (пусто — определяется по модели)
 }

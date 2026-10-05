@@ -1,6 +1,6 @@
 // Сервисная книжка: рекомендации «что пора сделать» по авто. Используется в заказе (вкладка «Рекомендации»)
 // и в карточке авто. Клиент видит открытые рекомендации на pulsecar.pl/moje-auto и в приложении.
-import { html, useState, useEffect, api, act, toast, fdate, fdt, zl, num, addDays, todayStr, Icon, ConfirmButton } from '../lib.js';
+import { html, useState, useEffect, api, act, toast, fdate, fdt, zl, num, addDays, todayStr, Icon, ConfirmButton, go } from '../lib.js';
 
 export const PRIO = { urgent: ['Срочно', '#E34948'], soon: ['Скоро', '#F0B429'], later: ['Планово', '#5B8DEF'] };
 const STATUS = { open: 'Открыта', done: 'Сделано', dismissed: 'Отклонена' };
@@ -39,6 +39,7 @@ export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
       <div class="row"><h2 class="grow" style="margin:0">Что рекомендовать клиенту</h2>
         ${fromChecklist && html`<button class="btn sm" title="Пункты чек-листа с «Внимание» и «Заменить»" onClick=${fromChecklist}><${Icon} n="list" />Из чек-листа</button>`}</div>
       <div class="muted small">Клиент увидит это в сервисной книжке на pulsecar.pl/moje-auto и в приложении, с кнопкой «Записаться». Перед сроком клиенту придёт SMS-напоминание (Настройки → SMS и шаблоны).</div>
+      <div class="muted small">Все открытые выцены по этому авто тоже попадают в «Моё авто» — с составом, ценой и записью на свободное окно. Из рекомендации можно сразу сделать выцену кнопкой <b>«Выцена»</b>: когда клиент запишется, заказ создаётся из позиций выцены.</div>
       ${presets.length > 0 && html`<div class="row" style="flex-wrap:wrap;gap:6px">${presets.map((p) => html`<button class="btn sm ghost" onClick=${() => usePreset(p)}>${p.title}</button>`)}</div>`}
       <div class="grid g3">
         <label class="f" style="grid-column:span 2">Что сделать<input value=${f.title} onInput=${set('title')} placeholder="напр. Wymiana klocków hamulcowych przód" maxlength="160" /></label>
@@ -59,15 +60,18 @@ export function Recommendations({ car, orderId, recs, reload, fromChecklist }) {
       <table class="tbl"><tbody>
         ${[...open, ...(showClosed ? closed : [])].map((r) => edit === r.id ? html`<tr><td colspan="4"><${EditRow} r=${r} onSave=${(b) => upd(r, b, 'Сохранено')} onCancel=${() => setEdit(null)} /></td></tr>` : html`<tr style=${r.status !== 'open' ? 'opacity:.55' : ''}>
           <td style="width:90px"><span class="chip" style=${`background:${PRIO[r.priority]?.[1]}26;color:${PRIO[r.priority]?.[1]}`}>${PRIO[r.priority]?.[0]}</span></td>
-          <td><b>${r.title}</b>${r.note ? html`<div class="sub">${r.note}</div>` : ''}
+          <td>${r.quote_id ? html`<a class="chip" style="margin-right:6px" href=${'#/quotes/' + r.quote_id} title="Состав и цена берутся из выцены">Выцена ${r.quote_no || ''}</a>` : ''}<b>${r.title}</b>${r.note ? html`<div class="sub" style="white-space:pre-line">${r.note}</div>` : ''}
             <div class="sub">${due(r) ? html`<span class=${overdue(r) && r.status === 'open' ? 'neg' : ''}>${due(r)}</span> · ` : ''}${r.est_price ? zl(r.est_price) + ' · ' : ''}${r.duration_min ? '~' + hoursOf(r.duration_min) + ' ч · ' : ''}${r.appt_start && r.status === 'open' ? html`<b class="pos">записан онлайн ${fdt(r.appt_start)}</b> · ` : ''}выявлено ${fdate(r.created_at)}${r.order_no ? ' в ' + r.order_no : ''}${r.staff ? ' · ' + r.staff : ''}${r.reminded_at ? ' · SMS ' + fdate(r.reminded_at) : ''}
             ${r.status !== 'open' ? html` · <b>${STATUS[r.status]}</b>${r.closed_order_no ? ' в ' + r.closed_order_no : ''} ${fdate(r.closed_at)}` : ''}</div></td>
           <td class="nowrap r">${r.status === 'open'
             ? html`<button class="btn sm pos" title="Сделано" onClick=${() => upd(r, { status: 'done' }, 'Отмечено как сделанное')}><${Icon} n="check" /></button>
-              <button class="btn sm ghost" title="Изменить" onClick=${() => setEdit(r.id)}><${Icon} n="edit" /></button>
+              ${r.quote_id
+                ? html`<a class="btn sm ghost" title="Открыть выцену" href=${'#/quotes/' + r.quote_id}><${Icon} n="file" /></a>`
+                : html`<button class="btn sm" title="Сделать выцену: клиент увидит точный состав и цену в Моё авто и запишется по ней" onClick=${async () => { const q = await act(() => api('recommendations/' + r.id + '/quote', { method: 'POST' }), 'Выцена создана — дополните позиции'); go('/quotes/' + q.id); }}><${Icon} n="file" />Выцена</button>
+                  <button class="btn sm ghost" title="Изменить" onClick=${() => setEdit(r.id)}><${Icon} n="edit" /></button>`}
               <button class="btn sm ghost" title="Клиент отказался / неактуально" onClick=${() => upd(r, { status: 'dismissed' }, 'Рекомендация закрыта')}><${Icon} n="x" /></button>`
             : html`<button class="btn sm ghost" onClick=${() => upd(r, { status: 'open' }, 'Рекомендация снова открыта')}>Открыть</button>`}
-            <${ConfirmButton} cls="btn sm ghost" onConfirm=${async () => { await act(() => api('recommendations/' + r.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}></td></tr>`)}
+            ${!r.quote_id && html`<${ConfirmButton} cls="btn sm ghost" onConfirm=${async () => { await act(() => api('recommendations/' + r.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}
       </tbody></table>
       <div class="muted small" style="padding:10px 14px">Когда заказ с такой работой завершается, рекомендация закрывается сама.</div>
     </div>

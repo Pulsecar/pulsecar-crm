@@ -355,11 +355,19 @@ function ApptModal({ a, onClose, onSaved }) {
       complaint: [f.title, f.note].filter(Boolean).join('. '), mechanic_id: f.mechanic_id || null } }), 'Заказ создан');
     onClose(); go('/orders/' + r.id);
   };
+  const fromQuote = async () => {
+    await act(() => api('appointments/' + f.id, { method: 'PUT', body: body() }));
+    const r = await act(() => api('appointments/' + f.id + '/order-from-quote', { method: 'POST' }), 'Заказ создан из выцены ' + (a.quote_number || ''));
+    onClose(); go('/orders/' + r.id);
+  };
   const isBlock = a.status === 'block';
   return html`<${Modal} wide xl=${!!a.order_id} title=${isBlock ? 'Блокировка' : a.order_number ? 'Заказ ' + a.order_number : 'Заявка / запись'} onClose=${onClose} foot=${html`
       ${canEdit && html`<${ConfirmButton} cls="btn danger" label=${a.order_id ? 'Убрать из графика?' : 'Точно?'} onConfirm=${async () => { await act(() => api('appointments/' + f.id, { method: 'DELETE' }), a.order_id ? 'Убрано из графика — заказ в «Неназначенных»' : 'Удалено'); onSaved(); }}>${a.order_id ? 'Убрать из графика' : isBlock ? 'Удалить блокировку' : 'Отменить запись'}</${ConfirmButton}>`}
       <span style="flex:1"></span>
-      ${a.order_id ? html`<a class="btn" href=${'#/orders/' + a.order_id} onClick=${onClose}>Открыть заказ</a>` : !isBlock && canEdit ? html`<button class="btn" onClick=${toOrder}>Создать заказ</button>` : ''}
+      ${a.order_id ? html`<a class="btn" href=${'#/orders/' + a.order_id} onClick=${onClose}>Открыть заказ</a>` : !isBlock && canEdit ? html`${a.quote_id && a.quote_number && html`<a class="btn ghost" href=${'#/quotes/' + a.quote_id} onClick=${onClose}>Выцена ${a.quote_number}</a>`}
+        ${a.quote_id && a.quote_number
+          ? html`<button class="btn" title="Позиции (работы и запчасти) берутся из выцены" onClick=${fromQuote}>${a.quote_order_id ? 'Открыть заказ по выцене' : 'Создать заказ из выцены'}</button>`
+          : html`<button class="btn" onClick=${toOrder}>Создать заказ</button>`}` : ''}
       ${canEdit && html`<button class="btn primary" onClick=${save}>Сохранить</button>`}`}>
     <div class="grid g4">
       <label class="f">Пост<select value=${f.station_id} onChange=${(e) => set({ ...f, station_id: e.target.value })}><option value="">Не назначен</option>${app.stations.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>

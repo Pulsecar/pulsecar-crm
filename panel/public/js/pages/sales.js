@@ -1,5 +1,8 @@
 // Продажи (как Sprzedaż в Motowarsztat): все фактуры VAT, корректы, Pro forma и чеки за период; фактура без заказа; статус KSeF
-import { html, useState, useEffect, useData, api, act, qs, go, useApp, ErrorBox, Loading, Icon, Modal, Picker, zl, fdate, toast, useDebounced, todayStr } from '../lib.js';
+import { html, useState, useEffect, useData, api, act, qs, go, useApp, ErrorBox, Loading, Icon, Modal, Picker, ConfirmButton, zl, fdate, toast, useDebounced, todayStr } from '../lib.js';
+
+/** Можно ли удалить документ: Pro forma — всегда; фактуру VAT / корректу — только владелец и только если её нет в KSeF / Fakturownia; чек — только владелец и только не пробитый на кассе */
+export const canDeleteDoc = (app, d, type = d.kind || d.type) => type === 'proforma' || (app.owner && (type === 'receipt' ? ['pending', 'error'].includes(d.receipt_status ?? d.status) : !d.ksef_number && !['sent', 'accepted'].includes(d.ksef_status) && !d.ext_url && !d.ext_id));
 import { AztecButton, PlateButton } from '../vehicle.js';
 import { useSel, SelHead, SelCell, BulkBar } from '../bulk.js';
 
@@ -57,7 +60,8 @@ export default function Sales() {
             ${r.ksef_number ? html`<div class="sub mono">${r.ksef_number}</div>` : ''}${r.ksef_error ? html`<div class="sub" style="color:var(--danger)">${r.ksef_error}</div>` : ''}</td>
           <td class="act nowrap">${link && html`<a class="btn sm" href=${link}>Открыть</a>${r.type !== 'receipt' ? html` <a class="icon-btn" title="Печать / PDF" href=${'/crm-api/print/sale/' + r.id} target="_blank" rel="noopener"><${Icon} n="print" /></a>` : ''}`}
             ${(r.type === 'vat' || r.type === 'correction') && app.features.ksef && r.ksef_status !== 'accepted' && !r.ext_url && html`<button class="btn sm" onClick=${async () => { const x = await act(() => api(`sales-docs/${r.id}/ksef`, { body: {} })); toast(x.ksef_number ? 'KSeF: ' + x.ksef_number : 'Статус: ' + (x.ksef_status || '—'), x.ksef_status === 'rejected' ? 'error' : 'ok'); reload(); }}>В KSeF</button>`}
-            ${r.ksef_number && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + r.id + '/upo'}>UPO</a>`}</td></tr>`;
+            ${r.ksef_number && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + r.id + '/upo'}>UPO</a>`}
+            ${canDeleteDoc(app, r) && (r.type !== 'receipt' || r.receipt_status !== 'manual') && html`<${ConfirmButton} cls="icon-btn" label=${r.type === 'receipt' ? 'Удалить непробитый чек?' : `Удалить ${r.number}?`} onConfirm=${async () => { await act(() => api((r.type === 'receipt' ? 'receipts/' : 'sales-docs/') + r.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`;
       })}</tbody></table></div>
       ${!data?.rows?.length ? html`<div class="empty">За период документов нет</div>` : ''}</div>`}
     <${BulkBar} sel=${sel} entity="sales" extra=${[
@@ -237,7 +241,8 @@ export function SaleDocPage({ id }) {
         ${d.kind === 'proforma' && !d.vat_id && !d.order_has_vat && html`<button class="btn primary" onClick=${async () => { const r = await act(() => api(`sales-docs/${d.id}/to-vat`, { body: {} })); toast(`${r.number} выставлена${r.ksef_number ? ' · KSeF ' + r.ksef_number : ''}`); if (r.warning) toast(r.warning, 'error'); go('/sales/' + r.id); }}><${Icon} n="file" />Выставить фактуру VAT</button>`}
         ${(d.kind === 'vat' || d.kind === 'correction') && app.features.ksef && d.ksef_status !== 'accepted' && !d.ext_url && html`<button class="btn" onClick=${async () => { const x = await act(() => api(`sales-docs/${d.id}/ksef`, { body: {} })); toast(x.ksef_number ? 'KSeF: ' + x.ksef_number : 'Статус: ' + (x.ksef_status || '—'), x.ksef_status === 'rejected' ? 'error' : 'ok'); reload(); }}>Отправить в KSeF</button>`}
         ${d.ksef_number && html`<a class="btn" href=${'/crm-api/sales-docs/' + d.id + '/upo'}>UPO</a>`}
-        <a class="btn primary" href=${d.ext_url || '/crm-api/print/sale/' + d.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать / PDF</a></div></div>
+        <a class="btn primary" href=${d.ext_url || '/crm-api/print/sale/' + d.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать / PDF</a>
+        ${canDeleteDoc(app, d) && html`<${ConfirmButton} cls="btn danger" label=${`Удалить ${d.number}?`} onConfirm=${async () => { await act(() => api('sales-docs/' + d.id, { method: 'DELETE' }), 'Удалено'); go('/sales'); }}><${Icon} n="trash" /></${ConfirmButton}>`}</div></div>
     ${d.vat_id ? html`<div class="small" style="margin:-8px 0 12px">На основании этой Pro forma выставлена <a href=${'#/sales/' + d.vat_id}>${d.vat_no}</a></div>` : ''}
     ${d.proforma_id ? html`<div class="small" style="margin:-8px 0 12px">Выставлена на основании <a href=${'#/sales/' + d.proforma_id}>${d.proforma_no}</a></div>` : ''}
     ${!d.editable && d.kind !== 'correction' && html`<div class="muted small" style="margin:-8px 0 12px">Фактура уже в KSeF${d.ext_id ? ' / Fakturownia' : ''} — изменить её можно только корректой (кнопка «Корректа» выше).</div>`}

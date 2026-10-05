@@ -879,8 +879,10 @@ crm.get('/appointments', (req, res) => {
       st.name status_name, st.color status_color, s.name mechanic_name,
       (SELECT COUNT(*) FROM appointments x WHERE x.order_id = a.order_id AND a.order_id IS NOT NULL AND x.status NOT IN ('cancelled') AND x.start_at IS NOT NULL) part_total,
       (SELECT COUNT(*) FROM appointments x WHERE x.order_id = a.order_id AND a.order_id IS NOT NULL AND x.status NOT IN ('cancelled') AND x.start_at IS NOT NULL AND (x.start_at < a.start_at OR (x.start_at = a.start_at AND x.id <= a.id))) part_no
+      , q.number quote_number, (SELECT z.id FROM orders z WHERE z.kind = 'order' AND (z.quote_id = q.id OR z.id = q.merged_into) LIMIT 1) quote_order_id
     FROM appointments a LEFT JOIN customers c ON c.id = a.customer_id LEFT JOIN cars k ON k.id = a.car_id
-    LEFT JOIN orders o ON o.id = a.order_id LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN staff s ON s.id = a.mechanic_id`;
+    LEFT JOIN orders o ON o.id = a.order_id LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN staff s ON s.id = a.mechanic_id
+    LEFT JOIN orders q ON q.id = a.quote_id AND q.kind = 'quote'`;
   const rows = all(`${base} WHERE a.start_at IS NOT NULL AND a.station_id IS NOT NULL AND substr(a.start_at,1,10) BETWEEN ? AND ? AND a.status <> 'cancelled' ORDER BY a.start_at`, from, to);
   const unassigned = all(`${base} WHERE (a.station_id IS NULL OR a.start_at IS NULL) AND a.status IN ('request','planned') ORDER BY a.id DESC LIMIT 100`);
   // «Неназначенные элементы» как в Motowarsztat: открытые заказы, которые ещё не (полностью) в графике
@@ -1761,6 +1763,25 @@ crm.delete('/recommendations/:id', (req, res) => {
   REC.deleteRec(Number(req.params.id));
   res.json({ ok: true });
 });
+// Рекомендация → выцена: клиент увидит точный состав и цену в Моё авто и запишется «по выцене»
+crm.post('/recommendations/:id/quote', (req, res) => {
+  const s = who(req, 'quotes.manage');
+  res.json({ id: REC.recToQuote(Number(req.params.id), s.name, createOrder) });
+});
+// Запись клиента «по выцене» → заказ из позиций выцены, запись в графике привязывается к заказу
+crm.post('/appointments/:id/order-from-quote', (req, res) => {
+  const s = who(req, 'orders.create');
+  const a = one('SELECT * FROM appointments WHERE id = ?', Number(req.params.id));
+  if (!a) throw new HttpError(404, 'Запись не найдена');
+  if (a.order_id) return res.json({ id: a.order_id });
+  const q = a.quote_id && one(`SELECT id FROM orders WHERE id = ? AND kind = 'quote'`, a.quote_id);
+  if (!q) throw new HttpError(400, 'У записи нет выцены');
+  const done = one(`SELECT id FROM orders WHERE kind = 'order' AND (quote_id = ? OR id = (SELECT merged_into FROM orders WHERE id = ?)) LIMIT 1`, q.id, q.id);
+  const id = done?.id || quoteToOrder(q.id, s.name);
+  run(`UPDATE appointments SET order_id = ?, customer_id = COALESCE(customer_id, (SELECT customer_id FROM orders WHERE id = ?)), car_id = COALESCE(car_id, (SELECT car_id FROM orders WHERE id = ?)),
+    status = CASE WHEN status = 'request' THEN 'planned' ELSE status END WHERE id = ?`, id, id, id, a.id);
+  res.json({ id });
+});
 crm.post('/orders/:id/recommendations/from-checklists', (req, res) => {
   const s = who(req, 'orders.view');
   res.json({ added: REC.fromChecklists(Number(req.params.id), s.name) });
@@ -2532,13 +2553,42 @@ crm.get('/sales-docs/:id/xml', (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${String(d.number).replace(/[^\w-]+/g, '-')}.xml"`);
   res.send(d.ksef_xml || KSEF.buildFa3(d));
 });
+/** Почему фактуру VAT / корректу нельзя удалить (null — можно, только владельцу) */
+function saleDocLock(d) {
+  if (d.kind === 'proforma') return null;
+  if (d.ksef_number || ['sent', 'accepted'].includes(d.ksef_status)) return 'Фактура уже в KSeF — удалить нельзя, только корректа.';
+  if (d.ext_id) return 'Фактура выставлена через Fakturownia — удалите её там.';
+  const c = one('SELECT number FROM sales_docs WHERE corrects_id = ? LIMIT 1', d.id);
+  if (c) return `К фактуре есть корректа ${c.number} — сначала удалите её.`;
+  return null;
+}
 crm.delete('/sales-docs/:id', (req, res) => {
   const s = who(req, 'invoices.create');
   const d = one('SELECT * FROM sales_docs WHERE id = ?', Number(req.params.id));
   if (!d) throw new HttpError(404, 'Документ не найден');
-  if (d.kind !== 'proforma') throw new HttpError(400, 'Фактуру VAT удалить нельзя — выставьте корректу.');
-  run('DELETE FROM sales_docs WHERE id = ?', d.id);
-  if (d.order_id) log('order', d.order_id, 'update', `Удалена ${d.number}`, s.name);
+  if (d.kind !== 'proforma') {
+    if (!ownerOf(req)) throw new HttpError(403, 'Удалять фактуры может только владелец.');
+    const why = saleDocLock(d);
+    if (why) throw new HttpError(400, why);
+  }
+  tx(() => {
+    run('UPDATE sales_docs SET proforma_id = NULL WHERE proforma_id = ?', d.id);
+    run('DELETE FROM sales_docs WHERE id = ?', d.id);
+  });
+  if (d.order_id) log('order', d.order_id, 'update', `Удалена ${d.number}${d.kind !== 'proforma' ? ` (${round2(d.total_gross)} zł, не была в KSeF)` : ''}`, s.name);
+  log('sales_doc', d.id, 'delete', { number: d.number, kind: d.kind, total: d.total_gross, order_id: d.order_id }, s.name);
+  res.json({ ok: true });
+});
+// Чек (paragon), который НЕ пробит на кассе (ждёт кассы / ошибка) — удалить может только владелец
+crm.delete('/receipts/:id', (req, res) => {
+  const s = who(req, 'orders.payments');
+  if (!ownerOf(req)) throw new HttpError(403, 'Удалять чеки может только владелец.');
+  const r = one('SELECT * FROM receipts WHERE id = ?', Number(req.params.id));
+  if (!r) throw new HttpError(404, 'Чек не найден');
+  if (!['pending', 'error'].includes(r.status)) throw new HttpError(400, 'Чек уже фискализирован (пробит на кассе) — удалить нельзя.');
+  run('DELETE FROM receipts WHERE id = ?', r.id);
+  if (r.order_id) log('order', r.order_id, 'update', `Удалён непробитый чек на ${round2(r.total)} zł`, s.name);
+  log('receipt', r.id, 'delete', { total: r.total, order_id: r.order_id, status: r.status }, s.name);
   res.json({ ok: true });
 });
 

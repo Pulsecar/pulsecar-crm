@@ -230,6 +230,7 @@ try {
   const rr = ok(await req(`/crm-api/receipts/${rc.receipt.id}/result`, { body: { ok: true, jpkid: 1279 } }), 'res ok');
   assert.equal(rr.receipt.status, 'printed'); assert.equal(rr.receipt.number, '1279');
   assert.equal((await req(`/crm-api/orders/${co.id}/receipt`, { body: {} })).status, 409);
+  assert.equal((await req(`/crm-api/receipts/${rc.receipt.id}`, { method: 'DELETE' })).status, 400, 'пробитый чек удалить нельзя');
   const sl = ok(await req('/crm-api/sales?from=2020-01-01&to=2030-12-31&type=receipt'), 'sales');
   assert.ok(sl.rows.some((r) => r.number === '1279'));
   console.log('✓ фискальная касса: чек из заказа (PTU, NIP, оплаты), номер JPKID в заказе и в «Продажах»');

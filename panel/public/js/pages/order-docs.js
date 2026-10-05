@@ -1,6 +1,6 @@
 // Документы заказа: печать (протоколы, спецификация, карта механика, kosztorys), фактуры VAT / Pro forma / корректы,
 // приём авто (схема повреждений, фото и файлы, подписи клиента)
-import { CorrectionModal } from './sales.js';
+import { CorrectionModal, canDeleteDoc } from './sales.js';
 import { printReceipt } from '../fiscal.js';
 import { html, useState, useRef, api, act, go, useApp, Icon, Modal, ConfirmButton, zl, num, fdt, toast, METHOD } from '../lib.js';
 import { carShapeSvg, detectBody, BODY_TYPES } from '../car-shapes.js';
@@ -59,10 +59,10 @@ export function SalesDocs({ o, reload }) {
         ${d.kind !== 'proforma' && html`<a class="btn sm" href=${'/crm-api/sales-docs/' + d.id + '/xml'} title="XML FA(3)">XML</a>`}
         ${d.ext_url && html`<a class="btn sm" href=${d.ext_url} target="_blank" rel="noopener">Fakturownia</a>`}
         ${d.kind === 'vat' && html`<button class="btn sm" onClick=${() => startCorr(d)}>Корректа</button>`}
-        ${d.kind === 'proforma' && html`<${ConfirmButton} cls="icon-btn" onConfirm=${async () => { await act(() => api('sales-docs/' + d.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table>`
+        ${canDeleteDoc(app, d) && html`<${ConfirmButton} cls="icon-btn" label=${`Удалить ${d.number}?`} onConfirm=${async () => { await act(() => api('sales-docs/' + d.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}</tbody></table>`
       : html`<div class="muted small" style="margin-bottom:10px">Фактур пока нет. ${app.features.ksef ? 'Фактура VAT сразу уйдёт в KSeF.' : app.features.invoices ? 'Фактура VAT уйдёт в Fakturownia и KSeF.' : html`Фактура VAT будет выставлена в CRM без KSeF — <a href="#/settings/integrations">подключить KSeF</a>.`}</div>`}
     ${(o.receipts?.length || o.receipt_no) ? html`<table class="tbl" style="margin-bottom:10px"><tbody>
-      ${(o.receipts || []).map((r) => html`<tr><td><b>Чек (paragon)</b>${r.number ? html` <b>№ ${r.number}</b>` : ''}<div class="sub">${fdt(r.printed_at || r.created_at)}${r.nip ? ' · NIP ' + r.nip : ''} · ${r.status === 'printed' ? 'напечатан на кассе' : r.status === 'manual' ? 'номер вручную' : r.status === 'error' ? 'ошибка кассы' : 'ждёт кассы'}</div></td><td class="r nowrap">${zl(r.total)}</td><td></td></tr>`)}
+      ${(o.receipts || []).map((r) => html`<tr><td><b>Чек (paragon)</b>${r.number ? html` <b>№ ${r.number}</b>` : ''}<div class="sub">${fdt(r.printed_at || r.created_at)}${r.nip ? ' · NIP ' + r.nip : ''} · ${r.status === 'printed' ? 'напечатан на кассе' : r.status === 'manual' ? 'номер вручную' : r.status === 'error' ? 'ошибка кассы' : 'ждёт кассы'}</div></td><td class="r nowrap">${zl(r.total)}</td><td class="act">${canDeleteDoc(app, r, 'receipt') && html`<${ConfirmButton} cls="icon-btn" label="Удалить непробитый чек?" onConfirm=${async () => { await act(() => api('receipts/' + r.id, { method: 'DELETE' }), 'Чек удалён'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`)}
       ${o.receipt_no && !(o.receipts || []).length ? html`<tr><td><b>Чек (paragon)</b> <b>№ ${o.receipt_no}</b><div class="sub">пробит на кассовом аппарате</div></td><td class="r nowrap">${zl(o.total)}</td><td></td></tr>` : ''}
       </tbody></table>` : ''}
     <div class="row"><button class=${'btn' + (hasVat ? '' : ' primary')} disabled=${!o.items.length} onClick=${() => setPar(true)}><${Icon} n="print" />Чек (paragon)</button>
