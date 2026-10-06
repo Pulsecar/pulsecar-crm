@@ -1,18 +1,20 @@
 // Перенос фото / файлов заказов Motowarsztat → Pulsecar CRM. Выполняется во вкладке app.motowarsztat.pl (вход выполнен).
-// Только ЧТЕНИЕ из MW. Бережно: один поток, пауза между файлами, при ответе 403/429 от MW — сразу стоп (защита MW от перегрузки).
+// Только ЧТЕНИЕ из MW. Бережно: один поток, пауза ~2,5 с между запросами к MW (у MW лимит ≈1500 запросов), при ответе 403/429 от MW — сразу стоп (защита MW от перегрузки).
 // Продолжает с места остановки: CRM сам говорит, каких файлов ещё нет (POST /mw-import/files/check).
 // Ключ: открыть https://panel.pulsecar.tech/crm-api/mw-import/handoff (владелец) — вернёт во вкладку MW с #pc-import=<ключ>.
-// Запуск: window.__mwFiles('<ключ импорта>')  → ход в window.__ph ; остановить: window.__ph.stop = true
+// Запуск: window.__mwFiles('<ключ импорта>', { ids: [номера заказов MW], pause: 2500 })  → ход в window.__ph ; остановить: window.__ph.stop = true
 (() => {
   const CRM = 'https://panel.pulsecar.tech/mw-import/';
-  const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()); // в фоновой вкладке Chrome таймеры сильно тормозит — по умолчанию без пауз, темп задаёт сама загрузка (1 файл за раз)
-  window.__mwFiles = async (T, { pause = 0 } = {}) => {
+  window.__mwFiles = async (T, { pause = 2500, ids = null } = {}) => {
+    // пауза держится сервером CRM (таймеры в фоновой вкладке Chrome тормозятся, ожидание ответа — нет)
+    const sleep = (ms) => (ms > 0 ? fetch(CRM + 'wait', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Import-Token': T }, body: JSON.stringify({ ms }) }).catch(() => {}) : Promise.resolve());
     const P = (window.__ph = { state: 'listing', total: 0, need: 0, done: 0, ok: 0, skip: 0, fail: 0, videos: 0, errs: [], stop: false });
     const guard = (r) => { if (r.status === 403 || r.status === 429) { P.stop = true; P.state = 'MW ' + r.status + ' — остановлено'; throw new Error('MW ' + r.status); } return r; };
     try {
       const H = { headers: { Accept: 'application/ld+json' } };
-      const ids = [];
-      for (const fin of ['', '1']) for (let p = 1; ; p++) {
+      // ids — номера заказов MW (можно взять из CRM: mw_id «ro:<id>»), тогда список заказов у MW не запрашиваем
+      ids = ids ? [...ids] : [];
+      if (!ids.length) for (const fin of ['', '1']) for (let p = 1; ; p++) {
         const j = await (guard(await fetch(`/api-v2/repair-order-lists?q=&page=${p}&itemsPerPage=100&showFinished=${fin}`, H))).json();
         const m = j['hydra:member'] || [];
         ids.push(...m.map((x) => x.id));

@@ -443,6 +443,11 @@ mwImport.post('/files/check', (req, res) => {
     res.json({ need });
   });
 });
+/** пауза на стороне сервера (до 5 с): в фоновой вкладке Chrome таймеры тормозятся, а ожидание ответа — нет. Нужна для бережного темпа к MW */
+mwImport.post('/wait', (req, res) => {
+  withDb(mainDb, () => checkToken(req));
+  setTimeout(() => res.json({ ok: true }), Math.min(5000, Math.max(0, Number(req.body?.ms) || 0)));
+});
 mwImport.post('/file', fileUpload.single('file'), (req, res) => {
   withDb(mainDb, () => {
     checkToken(req);
