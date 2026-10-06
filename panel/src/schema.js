@@ -702,7 +702,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS chat_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
 db.exec('CREATE INDEX IF NOT EXISTS chat_sessions_updated ON chat_sessions(updated_at)');
-addColumn('staff', 'dash', 'TEXT');               // своя главная: JSON {v, widgets:[{id,type,size,…}]}
+addColumn('staff', 'dash', 'TEXT');
+// Мобильное приложение «Pulsecar CRM» (мастера и менеджеры): устройство = свой ключ входа (pcm_…) и токен push-уведомлений Expo
+db.exec(`CREATE TABLE IF NOT EXISTS mobile_devices (
+  id INTEGER PRIMARY KEY,
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  platform TEXT, name TEXT, app_version TEXT,
+  push_token TEXT,
+  events TEXT,                                -- JSON: какие события присылать push'ем
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), last_seen TEXT
+)`);               // своя главная: JSON {v, widgets:[{id,type,size,…}]}
 // Сервисная книжка: рекомендации по авто («что пора сделать») — видит клиент на pulsecar.pl/moje-auto и в приложении
 db.exec(`CREATE TABLE IF NOT EXISTS car_recommendations (
   id INTEGER PRIMARY KEY,

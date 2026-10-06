@@ -24,7 +24,7 @@ import * as DASH from './dashboard.js';
 import * as SEXP from './sales-export.js';
 import * as SUP from './integrations/suppliers.js';
 import { polishNames, glossaryPl, hasCyr } from './pl-names.js';
-import { notify, testTelegram } from './integrations/notify.js';
+import { notify, testTelegram, pushStaff } from './integrations/notify.js';
 import { balances, setManual } from './balances.js';
 import { sendMail, testEmail, testTpay, createPayLink, checkPayment, decodeVin, ensureFeedToken } from './integrations/services.js';
 import { can, permsOf, PERM_GROUPS, PRESETS } from './perms.js';
@@ -50,11 +50,17 @@ crm.use(express.json({ limit: '1mb' }));
 
 // ── Сервис (филиал): запрос работает с базой того сервиса, куда вошёл сотрудник ──
 const sessOf = (req) => (req._sess !== undefined ? req._sess : (req._sess = readSession(parseCookies(req.headers.cookie).pcs)));
+/** Ключ в заголовке Authorization: pcx_… — расширение Chrome, pcm_… — мобильное приложение */
+const bearerOf = (req) => /^Bearer (pc[xm]_[A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '')?.[1] || null;
+const BEARER_SQL = {
+  pcx: 'SELECT s.* FROM staff s WHERE s.ext_token = ? AND s.active = 1',
+  pcm: 'SELECT s.*, d.id _device FROM mobile_devices d JOIN staff s ON s.id = d.staff_id WHERE d.token_hash = ? AND s.active = 1',
+};
 crm.use((req, _res, next) => {
-  const bearer = /^Bearer (pcx_[A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '')?.[1];
+  const bearer = bearerOf(req);
   if (bearer) {
-    const h = sha(bearer);
-    const d = allDbs().find((x) => x.prepare('SELECT 1 FROM staff WHERE ext_token = ? AND active = 1').get(h));
+    const h = sha(bearer), q = BEARER_SQL[bearer.slice(0, 3)];
+    const d = allDbs().find((x) => x.prepare(q).get(h));
     return withDb(d || mainDb, next);
   }
   const sess = sessOf(req);
@@ -90,7 +96,8 @@ if (!one('SELECT 1 FROM staff WHERE pass_hash IS NOT NULL') && config.adminPassw
 
 // ── Авторизация ────────────────────────────────────────────────────────────
 const loginHits = new Map();
-crm.post('/login', (req, res) => {
+/** Проверка логина и пароля (общая для панели и мобильного приложения): { s, code } или 401 */
+function checkLogin(req) {
   const n = (loginHits.get(req.ip) || []).filter((t) => t > Date.now() - 15 * 60_000);
   if (n.length >= 10) throw new HttpError(429, 'Слишком много попыток входа. Подождите 15 минут.');
   // логин ищем в главном сервисе, потом в филиалах (у каждого сервиса свои сотрудники)
@@ -105,9 +112,76 @@ crm.post('/login', (req, res) => {
     n.push(Date.now()); loginHits.set(req.ip, n);
     throw new HttpError(401, 'Неверный логин или пароль.');
   }
-  setSess(res, { id: s.id, b: code });
   withDb(branchDb(code), () => run("UPDATE staff SET last_login = datetime('now') WHERE id = ?", s.id));
+  return { s, code };
+}
+crm.post('/login', (req, res) => {
+  const { s, code } = checkLogin(req);
+  setSess(res, { id: s.id, b: code });
   res.json({ ok: true });
+});
+
+// ── Мобильное приложение «Pulsecar CRM» ─────────────────────────────────────
+// Вход: логин и пароль CRM → ключ устройства pcm_… (хранится в защищённом хранилище телефона; в базе — только его хеш)
+const MOBILE_EVENTS = ['booking', 'assigned', 'status', 'payment'];
+const mobileDefaultEvents = (s) => (s.role === 'mechanic' ? ['assigned'] : ['booking', 'assigned']);
+crm.post('/mobile/login', (req, res) => {
+  const { s, code } = checkLogin(req);
+  const token = 'pcm_' + crypto.randomBytes(32).toString('base64url');
+  const b = req.body || {};
+  withDb(branchDb(code), () => {
+    insert('mobile_devices', { staff_id: s.id, token_hash: sha(token), platform: String(b.platform || '').slice(0, 20) || null,
+      name: String(b.device || '').slice(0, 80) || null, app_version: String(b.app_version || '').slice(0, 20) || null, events: JSON.stringify(mobileDefaultEvents(s)) });
+    log('staff', s.id, 'mobile_login', String(b.device || b.platform || ''), s.name);
+  });
+  res.json({ token, panel: config.publicUrl, branch: { code, name: branchName(code) } });
+});
+const mobileDevice = (req) => {
+  const s = who(req);
+  if (!s._device) throw new HttpError(400, 'Только для мобильного приложения');
+  return { s, d: one('SELECT * FROM mobile_devices WHERE id = ?', s._device) };
+};
+crm.get('/mobile/device', (req, res) => {
+  const { s, d } = mobileDevice(req);
+  const P = permsOf(s);
+  const avail = MOBILE_EVENTS.filter((e) => e === 'assigned' || (e === 'booking' ? P['calendar.view'] : e === 'payment' ? P['orders.prices'] : P['orders.view']));
+  res.json({ events: JSON.parse(d.events || '[]'), available: avail, push: !!d.push_token });
+});
+crm.put('/mobile/device', (req, res) => {
+  const { d } = mobileDevice(req);
+  const b = req.body || {};
+  const up = {};
+  if (b.push_token !== undefined) {
+    const t = b.push_token ? String(b.push_token) : null;
+    if (t && !/^Expo(nent)?PushToken\[[\w-]+\]$/.test(t)) throw new HttpError(400, 'Неверный push-токен');
+    up.push_token = t;
+  }
+  if (Array.isArray(b.events)) up.events = JSON.stringify(b.events.filter((e) => MOBILE_EVENTS.includes(e)));
+  if (b.app_version) up.app_version = String(b.app_version).slice(0, 20);
+  if (Object.keys(up).length) update('mobile_devices', d.id, up);
+  res.json({ ok: true });
+});
+crm.post('/mobile/logout', (req, res) => {
+  const { d } = mobileDevice(req);
+  run('DELETE FROM mobile_devices WHERE id = ?', d.id);
+  res.json({ ok: true });
+});
+// «Полная CRM» внутри приложения: одноразовый код (60 с) → обычная сессия панели во встроенном браузере
+const webCodes = new Map();
+crm.post('/mobile/web', (req, res) => {
+  const { s } = mobileDevice(req);
+  for (const [k, v] of webCodes) if (v.exp < Date.now()) webCodes.delete(k);
+  const code = crypto.randomBytes(24).toString('base64url');
+  const to = String(req.body?.to || '').replace(/[^\w\/\-?=&.%]/g, '').slice(0, 200);
+  webCodes.set(code, { id: s.id, b: curBranch(), to, exp: Date.now() + 60_000 });
+  res.json({ url: `${config.publicUrl}/crm-api/mobile/web/${code}` });
+});
+crm.get('/mobile/web/:code', (req, res) => {
+  const v = webCodes.get(req.params.code);
+  webCodes.delete(req.params.code);
+  if (!v || v.exp < Date.now()) return res.redirect(302, '/');
+  setSess(res, { id: v.id, b: v.b });
+  res.redirect(302, '/#/' + v.to.replace(/^\/+/, ''));
 });
 crm.post('/logout', (_req, res) => { res.setHeader('Set-Cookie', `pcs=; Path=/; Max-Age=0${process.env.COOKIE_DOMAIN ? '; Domain=' + process.env.COOKIE_DOMAIN : ''}`); res.json({ ok: true }); });
 
@@ -128,15 +202,17 @@ const RANK = { mechanic: 1, staff: 2, admin: 3 };
 const PERM_LABELS = Object.fromEntries(PERM_GROUPS.flatMap(([, l]) => l));
 const permLabel = (k) => `«${PERM_LABELS[k] || k}»`;
 const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+const seenAt = new Map();
 function who(req, min = 'mechanic') {
-  const bearer = /^Bearer (pcx_[A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '')?.[1];
+  const bearer = bearerOf(req);
   const sess = bearer ? null : sessOf(req);
   if (sess?.o && !mainDb.prepare(`SELECT 1 FROM staff WHERE id = ? AND role = 'admin' AND active = 1`).get(sess.o)) throw new HttpError(401, 'Войдите в панель.');
-  const s = bearer ? one('SELECT * FROM staff WHERE ext_token = ? AND active = 1', sha(bearer)) : sess && one('SELECT * FROM staff WHERE id = ? AND active = 1', sess.id);
+  const s = bearer ? one(BEARER_SQL[bearer.slice(0, 3)], sha(bearer)) : sess && one('SELECT * FROM staff WHERE id = ? AND active = 1', sess.id);
   if (!s) throw new HttpError(401, 'Войдите в панель.');
+  if (s._device && (seenAt.get(s._device) || 0) < Date.now() - 10 * 60_000) { seenAt.set(s._device, Date.now()); run("UPDATE mobile_devices SET last_seen = datetime('now') WHERE id = ?", s._device); }
   if (min.includes('.')) { if (!can(s, min)) throw new HttpError(403, 'Недостаточно прав: ' + permLabel(min)); }
   else if ((RANK[s.role] || 0) < RANK[min]) throw new HttpError(403, 'Недостаточно прав.');
-  setActor(s, bearer ? 'extension' : 'crm');
+  setActor(s, !bearer ? 'crm' : bearer.startsWith('pcm_') ? 'mobile' : 'extension');
   return s;
 }
 
@@ -603,15 +679,22 @@ crm.put('/orders/:id', (req, res) => {
   if (d.mileage && (d.car_id || o.car_id)) run('UPDATE cars SET last_mileage = MAX(COALESCE(last_mileage,0), ?) WHERE id = ?', d.mileage, d.car_id || o.car_id);
   linkCar(d.car_id || o.car_id, d.customer_id || o.customer_id);
   log('order', o.id, 'update', Object.keys(d), s.name);
+  if (d.mechanic_id && Number(d.mechanic_id) !== o.mechanic_id && Number(d.mechanic_id) !== s.id) pushAssigned(Number(d.mechanic_id), o);
   res.json({ ok: true });
 });
+/** Push мастеру: ему назначили заказ / работу */
+function pushAssigned(staffId, o, job) {
+  const k = o.car_id ? one('SELECT make, model, plate FROM cars WHERE id = ?', o.car_id) : null;
+  const car = k ? [k.make, k.model, k.plate].filter(Boolean).join(' ') : '';
+  pushStaff(staffId, 'assigned', `${o.number}${car ? ' · ' + car : ''}${job ? '\n🔧 ' + job : ''}`, { order_id: o.id, order: o.number });
+}
 
 crm.post('/orders/:id/status', (req, res) => {
   const s = who(req, 'orders.status');
   const r = setStatus(Number(req.params.id), Number(req.body?.status_id), s.name);
   const o = getOrder(Number(req.params.id));
   const st = one('SELECT * FROM order_statuses WHERE id = ?', o.status_id);
-  notify('status', `${o.number}: ${st?.name}`, { order: o.number, status: st?.name });
+  notify('status', `${o.number}: ${st?.name}`, { order: o.number, order_id: o.id, status: st?.name });
   // автофактура для фирм (NIP), если заказ завершён и оплачен
   const fk = cfg('fakturownia');
   const c = o.customer_id ? one('SELECT nip FROM customers WHERE id = ?', o.customer_id) : null;
@@ -640,8 +723,10 @@ crm.put('/orders/:id/items/:itemId', (req, res) => {
     assertEditable(o, s);
     if (!P['orders.price_edit']) { const { price: _p, discount: _d, cost: _c, ...rest } = b; b = rest; }
   }
+  const was = one('SELECT mechanic_id, name FROM order_items WHERE id = ? AND order_id = ?', Number(req.params.itemId), o.id);
   updateItem(Number(req.params.itemId), b, s);
   recalc(o.id);
+  if (was && b.mechanic_id && Number(b.mechanic_id) !== was.mechanic_id && Number(b.mechanic_id) !== s.id) pushAssigned(Number(b.mechanic_id), o, was.name);
   res.json({ ok: true });
 });
 crm.delete('/orders/:id/items/:itemId', (req, res) => {

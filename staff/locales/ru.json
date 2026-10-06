@@ -1,0 +1,10 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "Pulsecar CRM",
+    "NSCameraUsageDescription": "Камера нужна, чтобы фотографировать авто при приёмке и в ремонте — фото добавляются в заказ в CRM.",
+    "NSPhotoLibraryUsageDescription": "Доступ к фото позволяет добавить выбранные фото авто в заказ в CRM."
+  },
+  "android": {
+    "app_name": "Pulsecar CRM"
+  }
+}

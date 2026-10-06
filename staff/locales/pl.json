@@ -1,0 +1,10 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "Pulsecar CRM",
+    "NSCameraUsageDescription": "Aparat służy do robienia zdjęć pojazdu przy przyjęciu i w trakcie naprawy — zdjęcia trafiają do zlecenia w CRM.",
+    "NSPhotoLibraryUsageDescription": "Dostęp do zdjęć pozwala dodać wybrane zdjęcia pojazdu do zlecenia w CRM."
+  },
+  "android": {
+    "app_name": "Pulsecar CRM"
+  }
+}

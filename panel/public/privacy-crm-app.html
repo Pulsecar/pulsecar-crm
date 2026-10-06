@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polityka prywatności – aplikacja Pulsecar CRM</title>
+<style>
+  :root { --bg:#f6f7f8; --card:#fff; --ink:#1b1c1f; --muted:#5f636b; --line:#e3e5e8; --accent:#0a8f45; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121315; --card:#1b1c1f; --ink:#ececee; --muted:#a3a7ae; --line:#2c2e33; --accent:#1bf372; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:780px; margin:0 auto; padding:32px 16px 64px; }
+  article { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px 24px; margin-bottom:20px; }
+  h1 { font-size:26px; margin:0 0 4px; } h2 { font-size:18px; margin:26px 0 6px; }
+  .muted { color:var(--muted); font-size:14px; } a { color:var(--accent); }
+  ul { padding-left:20px; } li { margin:4px 0; }
+  nav a { margin-right:14px; font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="#pl">Polski</a><a href="#en">English</a></nav>
+
+  <article id="pl">
+    <h1>Polityka prywatności aplikacji Pulsecar CRM</h1>
+    <div class="muted">Obowiązuje od 06.10.2026 · aplikacja mobilna „Pulsecar CRM” (Android, iOS) dla pracowników warsztatów</div>
+
+    <h2>Dla kogo jest aplikacja</h2>
+    <p>Aplikacja jest narzędziem pracy dla mechaników i kierowników warsztatów korzystających z systemu CRM Pulsecar. Konta zakłada wyłącznie administrator warsztatu – w aplikacji nie można samodzielnie utworzyć konta.</p>
+
+    <h2>Jakie dane przetwarza</h2>
+    <ul>
+      <li><b>Dane logowania</b> – login i hasło do CRM są wysyłane szyfrowanym połączeniem (HTTPS) tylko do serwera CRM warsztatu. Hasło nie jest zapisywane w telefonie; zapisywany jest jedynie klucz urządzenia, w zaszyfrowanym magazynie systemu (Keychain / Keystore).</li>
+      <li><b>Dane urządzenia</b> – system (Android/iOS), nazwa modelu, wersja aplikacji, data ostatniego użycia oraz – jeśli użytkownik zgodzi się na powiadomienia – token powiadomień push. Służą do logowania z urządzenia i wysyłania powiadomień o pracy (nowe rezerwacje, przydzielone zlecenia).</li>
+      <li><b>Zdjęcia i pliki</b> – tylko te, które użytkownik sam zrobi aparatem lub wybierze w aplikacji (np. zdjęcia z przyjęcia pojazdu). Są wysyłane do zlecenia w CRM warsztatu.</li>
+      <li><b>Dane zleceń i klientów warsztatu</b> – aplikacja wyświetla dane z CRM (zlecenia, terminarz, pojazdy, dane kontaktowe klientów) zgodnie z uprawnieniami pracownika. Administratorem tych danych jest warsztat; aplikacja przetwarza je w jego imieniu.</li>
+    </ul>
+
+    <h2>Czego aplikacja nie robi</h2>
+    <ul>
+      <li>Nie śledzi użytkownika, nie zawiera reklam ani narzędzi analitycznych firm trzecich.</li>
+      <li>Nie pobiera lokalizacji, kontaktów ani innych zdjęć niż wybrane przez użytkownika.</li>
+      <li>Nie sprzedaje i nie udostępnia danych reklamodawcom ani brokerom danych.</li>
+    </ul>
+
+    <h2>Podmioty przetwarzające</h2>
+    <p>Powiadomienia push są dostarczane przez usługę Expo Push oraz systemowe usługi Apple Push Notification Service i Firebase Cloud Messaging (Google). Treść powiadomienia zawiera numer zlecenia i krótki opis, bez numerów telefonów klientów.</p>
+
+    <h2>Uprawnienia</h2>
+    <ul>
+      <li><b>Aparat</b> – do robienia zdjęć pojazdu przy przyjęciu i w trakcie naprawy.</li>
+      <li><b>Zdjęcia</b> – do wyboru istniejących zdjęć do zlecenia (systemowy wybór zdjęć; aplikacja nie ma dostępu do całej galerii).</li>
+      <li><b>Powiadomienia</b> – opcjonalne; można je wyłączyć w aplikacji lub w ustawieniach telefonu.</li>
+    </ul>
+
+    <h2>Przechowywanie i usuwanie danych</h2>
+    <p>Wylogowanie w aplikacji usuwa klucz urządzenia i token powiadomień z telefonu i z serwera. Konto pracownika usuwa lub dezaktywuje administrator warsztatu w CRM (Ustawienia → Pracownicy). Prośbę o usunięcie konta i danych można też wysłać na adres <a href="mailto:admin@pulsecar.pl">admin@pulsecar.pl</a> – zrealizujemy ją w ciągu 30 dni. Dane zleceń przechowuje warsztat zgodnie z obowiązującymi go przepisami (np. podatkowymi).</p>
+
+    <h2>Kontakt</h2>
+    <p>Pulsecar · <a href="mailto:admin@pulsecar.pl">admin@pulsecar.pl</a> · <a href="https://pulsecar.pl">pulsecar.pl</a></p>
+  </article>
+
+  <article id="en">
+    <h1>Pulsecar CRM app privacy policy</h1>
+    <div class="muted">Effective 6 Oct 2026 · mobile app “Pulsecar CRM” (Android, iOS) for repair shop staff</div>
+
+    <h2>Who the app is for</h2>
+    <p>The app is a work tool for mechanics and managers of repair shops using the Pulsecar CRM. Accounts are created only by the shop administrator – you cannot sign up in the app.</p>
+
+    <h2>Data processed</h2>
+    <ul>
+      <li><b>Sign-in data</b> – the CRM login and password are sent over an encrypted connection (HTTPS) only to the shop's CRM server. The password is not stored on the phone; only a device key is stored, in the system's encrypted storage (Keychain / Keystore).</li>
+      <li><b>Device data</b> – OS (Android/iOS), model name, app version, last-used date and – if you allow notifications – a push token. Used to sign in from the device and to send work notifications (new bookings, assigned orders).</li>
+      <li><b>Photos and files</b> – only those you take with the camera or pick in the app (e.g. vehicle intake photos). They are uploaded to the order in the shop's CRM.</li>
+      <li><b>Shop orders and customer data</b> – the app shows CRM data (orders, schedule, vehicles, customer contact details) according to the staff member's permissions. The shop is the controller of this data; the app processes it on the shop's behalf.</li>
+    </ul>
+
+    <h2>What the app does not do</h2>
+    <ul>
+      <li>No tracking, no ads, no third-party analytics.</li>
+      <li>No access to location, contacts, or photos other than the ones you pick.</li>
+      <li>Data is not sold or shared with advertisers or data brokers.</li>
+    </ul>
+
+    <h2>Processors</h2>
+    <p>Push notifications are delivered via Expo Push and the system services Apple Push Notification Service and Firebase Cloud Messaging (Google). A notification contains the order number and a short description, without customer phone numbers.</p>
+
+    <h2>Permissions</h2>
+    <ul>
+      <li><b>Camera</b> – to take vehicle photos at intake and during repair.</li>
+      <li><b>Photos</b> – to pick existing photos for an order (system photo picker; the app has no access to the whole library).</li>
+      <li><b>Notifications</b> – optional; can be turned off in the app or in phone settings.</li>
+    </ul>
+
+    <h2>Retention and deletion</h2>
+    <p>Signing out in the app deletes the device key and push token from the phone and the server. Staff accounts are deleted or deactivated by the shop administrator in the CRM (Settings → Staff). You can also request deletion of your account and data at <a href="mailto:admin@pulsecar.pl">admin@pulsecar.pl</a> – we handle requests within 30 days. Order data is kept by the shop as required by law (e.g. tax rules).</p>
+
+    <h2>Contact</h2>
+    <p>Pulsecar · <a href="mailto:admin@pulsecar.pl">admin@pulsecar.pl</a> · <a href="https://pulsecar.pl">pulsecar.pl</a></p>
+  </article>
+</main>
+</body>
+</html>

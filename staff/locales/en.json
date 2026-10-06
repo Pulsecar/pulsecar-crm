@@ -1,0 +1,10 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "Pulsecar CRM",
+    "NSCameraUsageDescription": "The camera is used to take vehicle photos at intake and during repair — photos are added to the order in the CRM.",
+    "NSPhotoLibraryUsageDescription": "Photo access lets you add selected vehicle photos to an order in the CRM."
+  },
+  "android": {
+    "app_name": "Pulsecar CRM"
+  }
+}
