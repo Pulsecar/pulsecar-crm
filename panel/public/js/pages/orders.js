@@ -99,7 +99,7 @@ export function OrdersList({ kind, query }) {
         <td>${carName(o)}${o.plate ? html` <span class="plate">${o.plate}</span>` : ''}</td>
         ${kind === 'quote' ? '' : html`<td class="nowrap sub">${fdt(o.planned_at)}</td>`}
         <td class="sub list-comment" style="max-width:260px" title=${kind === 'quote' ? 'Комментарии и обзвон' : 'Комментарии'} onClick=${(e) => { e.stopPropagation(); setFuOpen(o); }}>
-            ${o.last_comment ? html`<span>${o.last_comment}</span>` : html`<span class="faint">+ комментарий</span>`}</td>
+            ${o.last_comment ? html`<span class="cmt">${o.last_comment}</span>` : html`<span class="faint">+ комментарий</span>`}</td>
         <td class="sub">${o.type_name || ''}</td>
         ${kind === 'quote' && html`<td class="r nowrap">${o.labor_total == null ? '' : zl(o.labor_total)}</td><td class="r nowrap">${o.parts_total == null ? '' : zl(o.parts_total)}</td>`}
         <td class="r nowrap"><b>${zl(o.total)}</b></td>
@@ -238,6 +238,7 @@ export function OrderPage({ id }) {
         </div>
       </div>
       <div class="row">
+        <span data-ui="order.btn.contact" style="display:contents"><${Contact} o=${o} reload=${reload} bar=${1} /></span>
         <button class="btn" data-ui="order.btn.card" title="Открыть электронную карту (ссылка копируется для клиента)" onClick=${async () => {
           const w = window.open('', '_blank');
           try { const r = await api(`orders/${o.id}/card`, { body: {} }); navigator.clipboard?.writeText(r.url).catch(() => {}); if (w) w.location = r.url; else location.href = r.url; toast('Ссылка на карту скопирована'); }
@@ -262,7 +263,6 @@ export function OrderPage({ id }) {
     ${notice && html`<${StatusNotice} o=${o} n=${notice} set=${setNotice} reload=${reload} />`}
     ${tab === 'items' && html`<${ItemsMW} o=${o} reload=${reload} />`}
     ${tab === 'items' && html`<div style="margin-top:14px"><${FollowUp} o=${o} reload=${reload} /></div>`}
-    ${tab === 'items' && isQuote && html`<div style="margin-top:14px"><${Contact} o=${o} reload=${reload} /></div>`}
     ${tab === 'main' && html`<${OrderMain} o=${o} reload=${reload} />`}
     ${tab === 'files' && html`<${Intake} o=${o} reload=${reload} />`}
     ${tab === 'pay' && html`<${Payments} o=${o} reload=${reload} />`}
@@ -416,7 +416,7 @@ function ContactLog({ o }) {
       <td style="white-space:pre-wrap">${m.text}${m.error ? html`<div class="sub neg">${m.error}</div>` : ''}</td><td class="nowrap sub">${m.phone}</td><td class=${'nowrap small ' + (ST[m.status]?.[1] || '')}>${ST[m.status]?.[0] || m.status}</td><td class="sub nowrap">${m.staff || ''}</td></tr>`)}</tbody></table>`
       : html`<div class="muted small">По этому заказу сообщений ещё не было.</div>`}</div>`;
 }
-function Contact({ o, reload }) {
+function Contact({ o, reload, bar }) {
   const app = useApp();
   const [sms, setSms] = useState(null);
   const [mail, setMail] = useState(null);
@@ -430,6 +430,27 @@ function Contact({ o, reload }) {
     const r = await act(() => api(`orders/${o.id}/template?kind=${isQuote ? 'mail_quote' : 'mail_order'}`));
     setMail({ to: o.customer?.email || '', subject: r.subject, message: r.text, invoice: !!o.invoice_ext_id });
   };
+  const copyLink = async () => { const u = link || await getLink(); navigator.clipboard?.writeText(u).then(() => toast('Ссылка скопирована')).catch(() => {}); };
+  const modals = html`
+    ${sms !== null && html`<${Modal} title="SMS клиенту" onClose=${() => setSms(null)} foot=${html`<button class="btn primary" disabled=${!sms.trim()} onClick=${async () => { await act(() => api(`orders/${o.id}/sms`, { body: { text: sms } }), 'SMS отправлено'); setSms(null); reload(); }}>Отправить на ${o.customer.phone}</button>`}>
+      <div class="row" style="margin-bottom:6px"><span class="muted small">Шаблон:</span>
+        ${[['card', 'Карта заказа'], ['quote', 'Выцена'], ...(o.pay_link ? [['paylink', 'Оплата']] : []), ['review', 'Отзыв']].map(([k, l]) => html`<button class="btn ghost sm" onClick=${() => smsTpl(k)}>${l}</button>`)}
+        ${app.statuses.filter((st) => st.sms_template).map((st) => html`<button class="btn ghost sm" onClick=${() => smsTpl('status:' + st.id)}>${st.name}</button>`)}</div>
+      <textarea rows="6" value=${sms} onInput=${(e) => setSms(e.target.value)}></textarea><${SmsCounter} text=${sms} /></${Modal}>`}
+    ${mail && html`<${Modal} title="E-mail клиенту" onClose=${() => setMail(null)} foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api(`orders/${o.id}/email`, { body: mail }), 'Письмо отправлено'); setMail(null); }}>Отправить</button>`}>
+      <label class="f">Кому<input type="email" value=${mail.to} onInput=${(e) => setMail({ ...mail, to: e.target.value })} /></label>
+      <label class="f">Тема<input value=${mail.subject} onInput=${(e) => setMail({ ...mail, subject: e.target.value })} /></label>
+      <label class="f">Текст<textarea rows="6" value=${mail.message} onInput=${(e) => setMail({ ...mail, message: e.target.value })}></textarea></label>
+      ${o.invoice_ext_id && html`<label class="check"><input type="checkbox" checked=${mail.invoice} onChange=${(e) => setMail({ ...mail, invoice: e.target.checked })} />Приложить фактуру ${o.invoice_no} (PDF)</label>`}
+      <div class="muted small">Ниже текста в письме — список работ и запчастей и итоговая сумма.</div></${Modal}>`}`;
+  // шапка заказа / выцены: компактные кнопки-иконки, как в Motowarsztat
+  if (bar) return html`<div class="btn-group cbar" title="Связь с клиентом">
+      <button class="btn icon" title=${isQuote ? 'Скопировать ссылку на выцену для клиента' : 'Скопировать ссылку на карту заказа для клиента'} onClick=${copyLink}><${Icon} n="external" /></button>
+      ${o.customer?.phone && html`<button class="btn icon" title=${isQuote ? 'SMS с выценой' : 'SMS с картой заказа'} onClick=${() => smsTpl(isQuote ? 'quote' : 'card')}><${Icon} n="file" /></button>`}
+      ${o.customer?.phone && html`<button class="btn icon" title="SMS клиенту" onClick=${() => setSms('')}><${Icon} n="chat" /></button>`}
+      ${f.email && html`<button class="btn icon" title="E-mail клиенту" onClick=${mailTpl}><${Icon} n="mail" /></button>`}
+      ${f.tpay && due > 0 && !isQuote && html`<button class="btn icon" title=${'Ссылка на оплату ' + zl(due)} onClick=${async () => { const r = await act(() => api(`orders/${o.id}/paylink`, { body: { sms: f.sms } }), f.sms ? 'Ссылка на оплату отправлена SMS' : 'Ссылка создана'); reload(); if (r?.url) navigator.clipboard?.writeText(r.url).catch(() => {}); }}><${Icon} n="cash" /></button>`}
+    </div>${modals}`;
   return html`<div class="card">
     <h2>Связь с клиентом</h2>
     <div class="row">
@@ -445,17 +466,7 @@ function Contact({ o, reload }) {
       : html`<div class="muted small" style="margin-top:8px">Клиент открывает карту по ссылке, видит работы и цены и нажимает «Akceptuję».</div>`}
     ${o.pay_link && html`<div class="small muted" style="margin-top:8px">Ссылка на оплату: <code style="user-select:all;word-break:break-all">${o.pay_link}</code></div>`}
     ${!f.sms && html`<div class="muted small" style="margin-top:6px">SMS-шлюз не подключён: сообщения попадут только в журнал. <a href="#/settings/integrations">Подключить</a></div>`}
-    ${sms !== null && html`<${Modal} title="SMS клиенту" onClose=${() => setSms(null)} foot=${html`<button class="btn primary" disabled=${!sms.trim()} onClick=${async () => { await act(() => api(`orders/${o.id}/sms`, { body: { text: sms } }), 'SMS отправлено'); setSms(null); reload(); }}>Отправить на ${o.customer.phone}</button>`}>
-      <div class="row" style="margin-bottom:6px"><span class="muted small">Шаблон:</span>
-        ${[['card', 'Карта заказа'], ['quote', 'Выцена'], ...(o.pay_link ? [['paylink', 'Оплата']] : []), ['review', 'Отзыв']].map(([k, l]) => html`<button class="btn ghost sm" onClick=${() => smsTpl(k)}>${l}</button>`)}
-        ${app.statuses.filter((st) => st.sms_template).map((st) => html`<button class="btn ghost sm" onClick=${() => smsTpl('status:' + st.id)}>${st.name}</button>`)}</div>
-      <textarea rows="6" value=${sms} onInput=${(e) => setSms(e.target.value)}></textarea><${SmsCounter} text=${sms} /></${Modal}>`}
-    ${mail && html`<${Modal} title="E-mail клиенту" onClose=${() => setMail(null)} foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api(`orders/${o.id}/email`, { body: mail }), 'Письмо отправлено'); setMail(null); }}>Отправить</button>`}>
-      <label class="f">Кому<input type="email" value=${mail.to} onInput=${(e) => setMail({ ...mail, to: e.target.value })} /></label>
-      <label class="f">Тема<input value=${mail.subject} onInput=${(e) => setMail({ ...mail, subject: e.target.value })} /></label>
-      <label class="f">Текст<textarea rows="6" value=${mail.message} onInput=${(e) => setMail({ ...mail, message: e.target.value })}></textarea></label>
-      ${o.invoice_ext_id && html`<label class="check"><input type="checkbox" checked=${mail.invoice} onChange=${(e) => setMail({ ...mail, invoice: e.target.checked })} />Приложить фактуру ${o.invoice_no} (PDF)</label>`}
-      <div class="muted small">Ниже текста в письме — список работ и запчастей и итоговая сумма.</div></${Modal}>`}
+    ${modals}
   </div>`;
 }
 

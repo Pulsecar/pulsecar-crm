@@ -1003,3 +1003,12 @@ th.on { color: var(--text); }
 .mw-cal .cal-ev.mw-ev.request { border-left-style: solid !important; opacity: .92; }
 .mw-cal .cal-ev .hg-st { display: none; }
 .mw-bar-top .hg-title { white-space: nowrap; font-size: 18px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* связь с клиентом в шапке заказа / выцены — кнопки-иконки как в Motowarsztat */
+.cbar .btn.icon { width: 36px; padding: 0; justify-content: center; }
+.cbar .btn.icon svg { width: 17px; height: 17px; margin: 0; }
+/* комментарии в списке выцен / заказов — заметнее: тёмный полужирный текст на «стикере» */
+.list-comment .cmt { display: inline-block; color: var(--text); font-size: 13.5px; font-weight: 500; line-height: 1.4; background: #fff6d6; border-left: 3px solid #f2b705; border-radius: 4px; padding: 4px 8px; }
+:root:not([data-theme="light"]) .list-comment .cmt { background: rgba(242,183,5,.14); color: #f4f1e6; }
+.list-comment:hover .cmt { filter: brightness(.97); }
+.fu-item .fu-text { color: var(--text); font-size: 14px; font-weight: 500; }
+td.list-comment { min-width: 220px; }
