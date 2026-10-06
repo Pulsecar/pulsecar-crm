@@ -29,8 +29,8 @@ export const getOrder = (id) => {
 export function createOrder(data, staffName) {
   const kind = data.kind === 'quote' ? 'quote' : 'order';
   const firstStatus = one(kind === 'quote'
-    ? `SELECT id FROM order_statuses WHERE name LIKE 'Ожидает оценки%' ORDER BY pos LIMIT 1`
-    : 'SELECT id FROM order_statuses ORDER BY pos LIMIT 1');
+    ? `SELECT id FROM order_statuses WHERE scope IN ('quote','all') AND is_final = 0 ORDER BY (name LIKE 'Ожидает оценки%') DESC, pos LIMIT 1`
+    : `SELECT id FROM order_statuses WHERE scope IN ('order','all') AND is_final = 0 ORDER BY pos LIMIT 1`);
   return tx(() => {
     const id = insert('orders', {
       kind,

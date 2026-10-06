@@ -1840,7 +1840,7 @@ const dict = {
   price_groups: { table: 'price_groups', fields: ['name', 'markup_pct', 'pos'] },
   checklists: { table: 'checklists', fields: ['name', 'items', 'active', 'pos'], json: ['items'] },
   templates: { table: 'order_templates', fields: ['name', 'icon', 'items', 'active', 'pos'], json: ['items'] },
-  statuses: { table: 'order_statuses', fields: ['name', 'color', 'pos', 'is_final', 'lock_edit', 'notify_client', 'client_label', 'sms_mode', 'sms_template', 'email_mode', 'email_template'] },
+  statuses: { table: 'order_statuses', fields: ['name', 'color', 'pos', 'is_final', 'lock_edit', 'notify_client', 'client_label', 'sms_mode', 'sms_template', 'email_mode', 'email_template', 'scope'] },
   types: { table: 'order_types', fields: ['name', 'pos'] },
   stations: { table: 'stations', fields: ['name', 'color', 'pos', 'active', 'slot_min', 'max_hours_day'] },
 };

@@ -62,11 +62,11 @@ function statusId(st) {
   const by = idOf('order_statuses', 'st:' + st.id);
   if (by) return by;
   const n = st.name.trim().toLowerCase();
-  const ours = all('SELECT id, name, client_label FROM order_statuses');
+  const ours = all("SELECT id, name, client_label FROM order_statuses WHERE scope IN ('order','all')");
   const hit = ours.find((x) => (x.client_label || '').trim().toLowerCase() === n || x.name.trim().toLowerCase() === n || (STATUS_DICT[n] && x.name === STATUS_DICT[n]));
   if (hit) { run('UPDATE order_statuses SET mw_id = COALESCE(mw_id, ?) WHERE id = ?', 'st:' + st.id, hit.id); return hit.id; }
   return insert('order_statuses', { name: st.name.trim(), color: st.color || '#888888', pos: 100 + (Number(st.position) || 0), is_final: st.finished ? 1 : 0,
-    lock_edit: st.editBlocked ? 1 : 0, client_label: st.name.trim(), mw_id: 'st:' + st.id });
+    lock_edit: st.editBlocked ? 1 : 0, client_label: st.name.trim(), mw_id: 'st:' + st.id, scope: 'order' });
 }
 /** наш пост для поста MW: то же название, тот же номер в начале («1 Подьемник» = «1 Подъёмник / развал») или кондиционер */
 function sameStation(name, except = 0) {
@@ -196,7 +196,7 @@ function importOrder(o, kind) {
     created_at: dt(o.date || o.createdAt) || undefined, closed_at: closed,
     flags: kind === 'order' ? JSON.stringify({ return_parts: !!o.recoverPartsToClient, reg_doc: !!o.vehicleRegistrationLeft, test_drive: !!o.testDrive, fluids: !!o.operatingFluids, lights: !!o.improveLighting }) : undefined,
   };
-  if (kind === 'quote' && !idOf('orders', pre + o.id)) data.status_id = one(`SELECT id FROM order_statuses WHERE name LIKE 'Ожидает оценки%' ORDER BY pos LIMIT 1`)?.id ?? null;
+  if (kind === 'quote' && !idOf('orders', pre + o.id)) data.status_id = one(`SELECT id FROM order_statuses WHERE scope IN ('quote','all') AND is_final = 0 ORDER BY (name LIKE 'Ожидает оценки%') DESC, pos LIMIT 1`)?.id ?? null;
   const r = upsert('orders', pre + o.id, data);
   // позиции: пересобираем целиком (MW — источник правды)
   run('DELETE FROM order_items WHERE order_id = ?', r.id);

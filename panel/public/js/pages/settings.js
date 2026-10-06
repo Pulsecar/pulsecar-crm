@@ -3,7 +3,7 @@ import Integrations from './integrations.js';
 import Messaging, { TplField } from './messaging.js';
 import { Params, Numbering, StaffAccess, CatalogFull, Templates, ChecklistsSettings, Lists } from './settings2.js';
 
-const TABS = [['integrations', 'Интеграции'], ['staff', 'Сотрудники и доступы'], ['params', 'Параметры'], ['messages', 'SMS и шаблоны'], ['company', 'Фирма'], ['numbering', 'Нумерация'], ['statuses', 'Статусы заказов'], ['catalog', 'Прайс работ'], ['templates', 'Шаблоны заказов'], ['checklists', 'Чек-листы'], ['types', 'Источники'], ['stations', 'Посты'], ['lists', 'Справочники'], ['import', 'Импорт данных']];
+const TABS = [['integrations', 'Интеграции'], ['staff', 'Сотрудники и доступы'], ['params', 'Параметры'], ['messages', 'SMS и шаблоны'], ['company', 'Фирма'], ['numbering', 'Нумерация'], ['statuses', 'Статусы заказов'], ['qstatuses', 'Статусы выцен'], ['catalog', 'Прайс работ'], ['templates', 'Шаблоны заказов'], ['checklists', 'Чек-листы'], ['types', 'Источники'], ['stations', 'Посты'], ['lists', 'Справочники'], ['import', 'Импорт данных']];
 
 export default function Settings({ sub }) {
   const tab = TABS.some(([k]) => k === sub) ? sub : 'integrations';
@@ -12,7 +12,8 @@ export default function Settings({ sub }) {
     ${tab === 'integrations' && html`<${Integrations} />`}
     ${tab === 'messages' && html`<${Messaging} />`}
     ${tab === 'company' && html`<${Company} />`}
-    ${tab === 'statuses' && html`<${Dict} name="statuses" />`}
+    ${tab === 'statuses' && html`<${Dict} name="statuses" scope="order" key="so" />`}
+    ${tab === 'qstatuses' && html`<${Dict} name="statuses" scope="quote" key="sq" />`}
     ${tab === 'types' && html`<${Dict} name="types" />`}
     ${tab === 'stations' && html`<${Dict} name="stations" />`}
     ${tab === 'staff' && html`<${StaffAccess} />`}
@@ -85,15 +86,17 @@ function StatusMessages({ edit, setEdit }) {
   </div>`;
 }
 
-function Dict({ name }) {
+function Dict({ name, scope }) {
   const app = useApp();
-  const cfg = DICT[name];
-  const rows = name === 'statuses' ? app.statuses : name === 'types' ? app.types : app.stations;
+  const cfg = name === 'statuses' && scope === 'quote' ? { ...DICT.statuses, title: 'Статус выцены', cols: DICT.statuses.cols.map((c) => (c[0] === 'is_final' ? ['is_final', 'Завершает выцену', 'bool'] : c)) } : DICT[name];
+  // статусы заказов и выцен — раздельно (scope order / quote); «общие» (старые) видны в обоих
+  const rows = name === 'statuses' ? app.statuses.filter((s) => !scope || (s.scope || 'all') === 'all' || s.scope === scope) : name === 'types' ? app.types : app.stations;
   const [edit, setEdit] = useState(null);
   const save = async () => { await act(() => api('dict/' + name, { body: edit }), 'Сохранено'); setEdit(null); app.reload(); };
   const del = async (r) => { await act(() => api(`dict/${name}/${r.id}`, { method: 'DELETE' }), 'Удалено'); app.reload(); };
   return html`<div class="card tight">
-    <div class="row" style="padding:12px 14px"><button class="btn primary sm" style="margin-left:auto" onClick=${() => setEdit({ pos: rows.length + 1, active: 1 })}><${Icon} n="plus" />Добавить</button></div>
+    <div class="row" style="padding:12px 14px"><button class="btn primary sm" style="margin-left:auto" onClick=${() => setEdit({ pos: rows.length + 1, active: 1, ...(scope ? { scope } : {}) })}><${Icon} n="plus" />Добавить</button></div>
+    ${name === 'statuses' && html`<div class="muted small" style="padding:0 14px 10px">${scope === 'quote' ? 'Эти статусы видны только в выценах.' : 'Эти статусы видны только в заказах.'}</div>`}
     <table class="tbl"><thead><tr>${cfg.cols.map(([, l]) => html`<th>${l}</th>`)}<th></th></tr></thead>
       <tbody>${rows.map((r) => html`<tr class="click" onClick=${() => setEdit({ ...r })}>${cfg.cols.map(([k, , t]) => html`<td>${t === 'bool' ? (r[k] ? '✓' : '') : t === 'sms' ? (SMS_MODE[r[k]] || '') + (r.email_mode && r.email_mode !== 'off' ? ' + e-mail' : '') : t === 'color' ? html`<${Badge} color=${r[k]}>${r[k] || ''}</${Badge}>` : r[k]}</td>`)}
         <td class="act" onClick=${(e) => e.stopPropagation()}><${ConfirmButton} cls="icon-btn" onConfirm=${() => del(r)}><${Icon} n="trash" /></${ConfirmButton}></td></tr>`)}</tbody></table>

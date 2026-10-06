@@ -743,6 +743,20 @@ for (const t of ['customers', 'cars', 'orders', 'order_items', 'products', 'serv
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${t}_mw_id ON ${t}(mw_id) WHERE mw_id IS NOT NULL`);
 }            // тип кузова для схемы повреждений (пусто — определяется по модели)
 // «Opis wewnętrzny» из Motowarsztat (их комментарии) при первом переносе попал только во внутреннее описание — добавляем его в комментарии
+// Статусы заказов и выцен — раздельно: «общий» статус, который используют и заказы, и выцены (или никто), копируется для выцен; выцены переходят на копию
+if (getSetting('status_split') === null) {
+  const cols = all('PRAGMA table_info(order_statuses)').map((c) => c.name).filter((c) => !['id', 'mw_id', 'scope'].includes(c));
+  for (const st of all("SELECT * FROM order_statuses WHERE COALESCE(scope,'all') = 'all'")) {
+    const q = one("SELECT COUNT(*) n FROM orders WHERE kind = 'quote' AND status_id = ?", st.id).n;
+    const o = one("SELECT COUNT(*) n FROM orders WHERE kind <> 'quote' AND status_id = ?", st.id).n;
+    if ((q && o) || (!q && !o)) {
+      const copy = insert('order_statuses', { ...Object.fromEntries(cols.map((c) => [c, st[c]])), scope: 'quote' });
+      run("UPDATE orders SET status_id = ? WHERE kind = 'quote' AND status_id = ?", copy, st.id);
+      run("UPDATE order_statuses SET scope = 'order' WHERE id = ?", st.id);
+    } else run('UPDATE order_statuses SET scope = ? WHERE id = ?', q ? 'quote' : 'order', st.id);
+  }
+  setSetting('status_split', '1');
+}
 if (getSetting('mw_internal_comments') === null) {
   db.exec(`INSERT INTO order_comments (order_id, at, staff, text, mw_id)
   SELECT o.id, COALESCE(o.created_at, datetime('now','localtime')), 'Motowarsztat', o.internal_note, 'ic:' || o.mw_id FROM orders o

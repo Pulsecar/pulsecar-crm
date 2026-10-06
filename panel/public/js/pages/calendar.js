@@ -472,7 +472,7 @@ function OrderItems({ a, onStatus }) {
   const money = (n) => (Number(n) || 0).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' zł';
   return html`<div class="appt-order">
     ${app.perms['orders.status'] && html`<label class="f" style="max-width:320px">Статус заказа<select value=${o.status_id} onChange=${(e) => setStatus(e.target.value)} style=${`border-color:${o.status?.color || ''}`}>
-      ${app.statuses.map((st) => html`<option value=${st.id}>${st.name}</option>`)}</select></label>`}
+      ${app.statuses.filter((st) => st.scope !== 'quote').map((st) => html`<option value=${st.id}>${st.name}</option>`)}</select></label>`}
     <div class="grid g2" style="margin-top:8px">
       <div><h4 class="appt-h">Работы <span class="faint">${labor.length}</span></h4>
         ${labor.length ? html`<div class="appt-list">${labor.map((j) => html`<label class=${'appt-row' + (j.done ? ' done' : '')}>
@@ -498,7 +498,7 @@ function Legend({ app, onChanged }) {
   const sw = (color, onPick) => can ? html`<input type="color" class="sw" value=${color} onChange=${(e) => onPick(e.target.value)} title="Изменить цвет" />` : html`<i class="sw" style=${'background:' + color}></i>`;
   return html`<div class="card hg-legend">
     <div class="row wrap"><b class="small">Заказ по статусу:</b>
-      ${app.statuses.map((st) => html`<span class="lg">${sw(st.color || '#5B8DEF', (c) => setOrder(st, c))}${st.name}</span>`)}</div>
+      ${app.statuses.filter((st) => st.scope !== 'quote').map((st) => html`<span class="lg">${sw(st.color || '#5B8DEF', (c) => setOrder(st, c))}${st.name}</span>`)}</div>
     <div class="row wrap"><b class="small">Записи без заказа:</b>
       ${['request', 'planned', 'arrived', 'no_show', 'block'].map((k) => html`<span class="lg">${sw(S['cal_color_' + k] || APPT_COLOR[k], (c) => setAppt(k, c))}${STATUS[k]}</span>`)}</div>
     <div class="muted small">${can ? 'Нажмите на цвет, чтобы поменять. ' : ''}Карточка в графике окрашивается по статусу заказа — поменяли статус, поменялся цвет.</div>

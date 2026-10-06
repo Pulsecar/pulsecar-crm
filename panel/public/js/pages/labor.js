@@ -204,7 +204,7 @@ export function LaborBlock({ o, reload, c }) {
           ${!mech && app.features?.tecrmi && o.car_id ? html`<button class="icon-btn norm-btn" title="Норма времени TecRMI для этого авто" onClick=${() => setNormFor({ id: it.id, name: it.name })}><${Icon} n="history" /></button>` : ''}</td>
         ${!quote && html`<td class="mech"><select class="inline-input" value=${it.mechanic_id || ''} disabled=${mech} onChange=${(e) => save(it, { mechanic_id: e.target.value ? Number(e.target.value) : null })}><option value="">— выбрать</option>${app.staff.filter((s) => s.active).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></td>`}
         <td><select class="inline-input" style="width:74px" value=${it.unit || ''} disabled=${mech} onChange=${(e) => save(it, { unit: e.target.value })}>${[...new Set([...units, it.unit].filter(Boolean))].map((u) => html`<option value=${u}>${u}</option>`)}</select></td>
-        <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '0.1')}</td>
+        <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '1')}</td>
         ${seePrice && html`<td class="r">${numIn(it, 'price', 'price', shown(it, modeL), (v) => setPrice(it, modeL, v), !editPrice)}</td>
           ${showDisc && html`<td class="r">${numIn(it, 'discount', 'disc', it.discount, (v) => save(it, { discount: v }), !editPrice, '1')}</td>`}<td>${vatSel(it)}</td>
           <td class="r nowrap">${zl(net(lineGross(it), it.vat))}</td><td class="r nowrap"><b>${zl(lineGross(it))}</b></td>`}

@@ -79,7 +79,7 @@ export default function Reports({ query }) {
           </div>
           <div class="row end wrap" style="margin-top:8px">
             ${has('basis') && html`<label class="f" style="width:210px">Брать заказы по дате<select value=${p.basis} onChange=${set('basis')}><option value="closed">завершения заказа</option><option value="created">создания заказа</option></select></label>`}
-            ${has('status') && html`<label class="f" style="width:170px">Статус<select value=${p.status} onChange=${set('status')}><option value="">Все</option>${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>`}
+            ${has('status') && html`<label class="f" style="width:170px">Статус<select value=${p.status} onChange=${set('status')}><option value="">Все</option>${app.statuses.filter((s) => s.scope !== 'quote').map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>`}
             ${has('type') && html`<label class="f" style="width:170px">Вид заказа<select value=${p.type} onChange=${set('type')}><option value="">Все</option>${app.types.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>`}
             ${has('staff') && html`<label class="f" style="width:180px">Сотрудник<select value=${p.staff} onChange=${set('staff')}><option value="">Все</option>${app.staff.map((s) => html`<option value=${s.id}>${s.name}${s.active ? '' : ' (неактивен)'}</option>`)}</select></label>`}
             ${has('prices') && html`<label class="f" style="width:130px">Суммы<select value=${p.prices} onChange=${set('prices')}><option value="net">НЕТТО</option><option value="gross">БРУТТО</option></select></label>`}

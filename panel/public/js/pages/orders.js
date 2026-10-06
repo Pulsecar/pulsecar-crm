@@ -76,7 +76,7 @@ export function OrdersList({ kind, query }) {
       <label class="f grow">Поиск<input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, клиент, телефон, авто, VIN" /></label>
       <label class="f" style="width:220px">Статус<select value=${status} onChange=${(e) => setStatus(e.target.value)}>
         <option value="">Все</option>${kind === 'order' && html`<option value="open">Все открытые</option>`}
-        ${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+        ${app.statuses.filter((s) => (s.scope || 'all') === 'all' || s.scope === kind).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
       ${kind === 'quote' && html`<label class="f" style="width:190px">Обзвон<select value=${fu} onChange=${(e) => setFu(e.target.value)}><option value="">Все</option><option value="due">Пора связаться (сегодня)</option><option value="none">Без статуса</option>
         ${Object.entries(FOLLOWUP).map(([k, [l]]) => html`<option value=${k}>${l}</option>`)}</select></label>`}
       <label class="f" style="width:150px">С<input type="date" value=${from} onInput=${(e) => setFrom(e.target.value)} /></label>
@@ -435,7 +435,7 @@ function Contact({ o, reload, bar }) {
     ${sms !== null && html`<${Modal} title="SMS клиенту" onClose=${() => setSms(null)} foot=${html`<button class="btn primary" disabled=${!sms.trim()} onClick=${async () => { await act(() => api(`orders/${o.id}/sms`, { body: { text: sms } }), 'SMS отправлено'); setSms(null); reload(); }}>Отправить на ${o.customer.phone}</button>`}>
       <div class="row" style="margin-bottom:6px"><span class="muted small">Шаблон:</span>
         ${[['card', 'Карта заказа'], ['quote', 'Выцена'], ...(o.pay_link ? [['paylink', 'Оплата']] : []), ['review', 'Отзыв']].map(([k, l]) => html`<button class="btn ghost sm" onClick=${() => smsTpl(k)}>${l}</button>`)}
-        ${app.statuses.filter((st) => st.sms_template).map((st) => html`<button class="btn ghost sm" onClick=${() => smsTpl('status:' + st.id)}>${st.name}</button>`)}</div>
+        ${app.statuses.filter((st) => st.sms_template && ((st.scope || 'all') === 'all' || st.scope === o.kind)).map((st) => html`<button class="btn ghost sm" onClick=${() => smsTpl('status:' + st.id)}>${st.name}</button>`)}</div>
       <textarea rows="6" value=${sms} onInput=${(e) => setSms(e.target.value)}></textarea><${SmsCounter} text=${sms} /></${Modal}>`}
     ${mail && html`<${Modal} title="E-mail клиенту" onClose=${() => setMail(null)} foot=${html`<button class="btn primary" onClick=${async () => { await act(() => api(`orders/${o.id}/email`, { body: mail }), 'Письмо отправлено'); setMail(null); }}>Отправить</button>`}>
       <label class="f">Кому<input type="email" value=${mail.to} onInput=${(e) => setMail({ ...mail, to: e.target.value })} /></label>

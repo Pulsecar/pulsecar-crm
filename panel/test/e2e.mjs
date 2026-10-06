@@ -39,7 +39,7 @@ const upload = (name, content) => { const fd = new FormData(); fd.append('file',
 try {
   ok(await req('/crm-api/login', { body: { login: 'admin', password: 'test-pass-123' } }), 'admin login');
   const me = ok(await req('/crm-api/me'), 'me');
-  assert.equal(me.statuses.length, 10); assert.ok(me.statuses.some((s) => s.name === 'Создан заказ' && s.scope === 'quote')); assert.equal(me.stations.length, 5);
+  assert.equal(me.statuses.filter((s) => s.scope === 'order').length, 9); assert.equal(me.statuses.filter((s) => s.scope === 'quote').length, 10, 'статусы выцен — свои'); assert.equal(me.statuses.filter((s) => s.scope === 'all').length, 0); assert.ok(me.statuses.some((s) => s.name === 'Создан заказ' && s.scope === 'quote')); assert.equal(me.stations.length, 5);
   const done = me.statuses.find((s) => s.is_final && s.lock_edit);
   const inRepair = me.statuses.find((s) => s.name === 'В ремонте');
   console.log('✓ вход в панель, справочники: 9 статусов, 5 постов,', me.staff.length, 'сотрудников');
@@ -437,10 +437,11 @@ try {
   console.log('✓ удаление аккаунта');
   // массовые действия
   const bo1 = ok(await req('/crm-api/orders', { body: { kind: 'quote' } }), 'bq1'), bo2 = ok(await req('/crm-api/orders', { body: { kind: 'quote' } }), 'bq2');
-  const st0 = ok(await req('/crm-api/me'), 'me st').statuses.find((x) => (x.scope || 'all') === 'all' && !x.is_final);
+  const st0 = ok(await req('/crm-api/me'), 'me st').statuses.find((x) => x.scope === 'quote' && !x.is_final);
   let br = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id, bo2.id], action: 'followup', value: 'thinking' } }), 'bulk fu');
   assert.equal(br.done, 2);
   br = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id, bo2.id], action: 'status', value: st0.id } }), 'bulk st');
+  { const ost = ok(await req('/crm-api/me'), 'me st2').statuses.find((x) => x.scope === 'order' && !x.is_final); const b2 = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id], action: 'status', value: ost.id } }), 'bulk st order'); assert.equal(b2.done, 0, 'статус заказа нельзя поставить выцене'); }
   br = ok(await req('/crm-api/bulk/orders', { body: { ids: [bo1.id, bo2.id], action: 'delete' } }), 'bulk del');
   assert.equal(br.done, 2); assert.equal((await req('/crm-api/orders/' + bo1.id)).status, 404);
   const bp = ok(await req('/crm-api/products', { body: { name: 'Bulk test', code: 'BLK-1', sell_price: 100 } }), 'bp');

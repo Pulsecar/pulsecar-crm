@@ -104,7 +104,7 @@ export function OrderMain({ o, reload, isNew = false, onCreate, kind = 'order', 
     <section class="mw-panel"><header>${quote ? 'Выцена' : 'Заказ'}</header>
       <div class="grid g3">
         <div class="stack" style="gap:10px">
-          ${isNew && !quote && html`<label class="f">Статус<select value=${f.status_id} onChange=${(e) => upd({ status_id: e.target.value })}><option value="">${app.statuses[0]?.name || '—'}</option>${app.statuses.slice(1).map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>`}
+          ${isNew && !quote && html`<label class="f">Статус<select value=${f.status_id} onChange=${(e) => upd({ status_id: e.target.value })}>${(() => { const os = app.statuses.filter((s) => s.scope !== 'quote' && !s.is_final); return html`<option value="">${os[0]?.name || '—'}</option>${os.slice(1).map((s) => html`<option value=${s.id}>${s.name}</option>`)}`; })()}</select></label>`}
           ${on('order_type_on') && html`<label class="f">Вид заказа (источник)<select value=${f.type_id} onChange=${(e) => upd({ type_id: e.target.value })}><option value="">—</option>${app.types.map((t) => html`<option value=${t.id}>${t.name}</option>`)}</select></label>`}
           ${!quote && html`<label class="f">Срок выдачи${S.pickup_format === 'date'
             ? html`<input type="date" value=${(f.pickup_at || '').slice(0, 10)} onInput=${(e) => upd({ pickup_at: e.target.value })} />`
@@ -199,7 +199,7 @@ export function ItemsMW({ o, reload }) {
             ${it.product_id && it.product_stock !== null && it.product_stock < it.qty ? html`<div class="stock-warn">на складе ${num(it.product_stock, 2)} — нужно заказать</div>` : ''}${!it.product_id ? html`<div class="sub">без склада</div>` : ''}</td>
           <td><input class="inline-input" style="width:120px" value=${it.code || ''} disabled=${mech} onChange=${(e) => save(it, { code: e.target.value })} /></td>
           ${!quote && html`<td><select class="inline-input" style="max-width:170px" value=${it.task_id || ''} disabled=${mech} onChange=${(e) => save(it, { task_id: e.target.value ? Number(e.target.value) : null })}><option value="">—</option>${labor.map((l) => html`<option value=${l.id}>${l.name}</option>`)}</select></td>`}
-          <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '0.1')}</td><td class="sub">${it.unit || 'szt.'}</td>
+          <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '1')}</td><td class="sub">${it.unit || 'szt.'}</td>
           ${seePrice && html`<td class="r">${numIn(it, 'price', 'price', shown(it, modeP), (v) => setPrice(it, modeP, v), !editPrice)}</td>
             ${showCost && html`<td class="r">${numIn(it, 'cost', 'price cost', shown(it, modeP, 'cost'), (v) => setPrice(it, modeP, v, 'cost'), !editPrice)}${it.cost > 0 ? html`<div class="sub">маржа ${zl(net(lineGross(it), it.vat) - it.qty * it.cost)}</div>` : ''}</td>`}
             ${showDisc && html`<td class="r">${numIn(it, 'discount', 'disc', it.discount, (v) => save(it, { discount: v }), !editPrice, '1')}</td>`}<td>${vatSel(it)}</td>

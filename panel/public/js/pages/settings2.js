@@ -19,7 +19,7 @@ export function Params() {
     const val = vals[f.k] ?? '';
     if (f.type === 'bool') return html`<label class="check"><input type="checkbox" checked=${val === '1'} onChange=${(e) => set(f.k, e.target.checked ? '1' : '0')} />${f.label}${f.hint ? html` <span class="muted small">— ${f.hint}</span>` : ''}</label>`;
     if (f.type === 'select') return html`<label class="f">${f.label}<select value=${val} onChange=${(e) => set(f.k, e.target.value)}>${f.options.map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select></label>`;
-    if (f.type === 'status') return html`<label class="f">${f.label}<select value=${val} onChange=${(e) => set(f.k, e.target.value)}><option value="">— не менять —</option>${app.statuses.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>`;
+    if (f.type === 'status') return html`<label class="f">${f.label}<select value=${val} onChange=${(e) => set(f.k, e.target.value)}><option value="">— не менять —</option>${app.statuses.filter((s) => s.scope !== 'quote').map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>`;
     if (f.type === 'hours') {
       let h = {};
       try { h = JSON.parse(val || '{}'); } catch {}
