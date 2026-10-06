@@ -57,6 +57,24 @@ export default function Calendar({ query }) {
   const [choose, setChoose] = useState(null);  // клик по свободному окну → выбор: записать клиента / заказ / блокировка
   const [drag, setDrag] = useState(null);      // { type: 'appt' | 'order', id }
   const [over, setOver] = useState(null);
+  const [moveDay, setMoveDay] = useState(null);
+  // предпросмотр заказа при наведении на карточку (как в Motowarsztat)
+  const [pv, setPv] = useState(null); // { id, x, y, o }
+  const pvT = useRef(null), pvCache = useRef(new Map());
+  const pvShow = (e, a) => {
+    if (!a.order_id || drag) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    clearTimeout(pvT.current);
+    pvT.current = setTimeout(async () => {
+      const c = pvCache.current.get(a.order_id); // кэш на 30 с, чтобы предпросмотр не отставал от правок
+      let o = c && Date.now() - c.t < 30000 ? c.o : null;
+      if (!o) { try { o = await api('orders/' + a.order_id); pvCache.current.set(a.order_id, { o, t: Date.now() }); } catch { return; } }
+      const W = 560, right = r.right + 8 + W < innerWidth;
+      setPv({ id: a.order_id, o, x: right ? r.right + 8 : Math.max(8, r.left - W - 8), y: Math.max(8, Math.min(r.top, innerHeight - 420)) });
+    }, 450);
+  };
+  const pvHide = () => { clearTimeout(pvT.current); pvT.current = setTimeout(() => setPv(null), 220); };
+  const pvKeep = () => clearTimeout(pvT.current);
   const [q, setQ] = useState('');
   const linkOrder = query.order ? Number(query.order) : null;
   const range = view === 'day' ? [date, date] : view === 'week' ? [weekStart(date), addDays(weekStart(date), 6)] : monthRange(date);
@@ -144,9 +162,12 @@ export default function Calendar({ query }) {
       ${left && html`<aside class=${'hg-left' + (drag?.type === 'appt' ? ' droppable' : '')} onDragOver=${(e) => drag?.type === 'appt' && e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>
         <div class="hg-left-head"><b>Неназначенные элементы</b><span class="mw-cnt">${pending.length}</span></div>
         <input type="search" placeholder="Поиск: номер, клиент, авто…" value=${q} onInput=${(e) => setQ(e.target.value)} />
-        ${drag?.type === 'appt' && html`<div class="hg-hint">Отпустите здесь, чтобы убрать из графика</div>`}
+        ${drag?.from === 'cal' && html`<div class="mw-zones">
+          <div class=${'mw-zone un' + (over === 'z:un' ? ' on' : '')} onDragOver=${(e) => { e.preventDefault(); e.stopPropagation(); if (over !== 'z:un') setOver('z:un'); }} onDrop=${(e) => { e.preventDefault(); e.stopPropagation(); unschedule(); }}><span>‹</span> <span>Убрать в нераспределённые</span></div>
+          <div class=${'mw-zone day' + (over === 'z:day' ? ' on' : '')} onDragOver=${(e) => { e.preventDefault(); e.stopPropagation(); if (over !== 'z:day') setOver('z:day'); }} onDrop=${(e) => { e.preventDefault(); e.stopPropagation(); const a = rows.find((x) => x.id === drag.id); setDrag(null); setOver(null); if (a) setMoveDay({ a, date: addDays(date, 1) }); }}>${IC.cal} <span>Перенести на другой день</span></div>
+        </div>`}
         <div class="hg-list">${pending.map((x) => x._t === 'order' ? html`
-          <div class="hg-card" style=${x.status_color ? 'border-left:4px solid ' + x.status_color : ''} draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'order', id: x.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>
+          <div class="hg-card" style=${x.status_color ? 'border-left:4px solid ' + x.status_color : ''} draggable=${canEdit} onDragStart=${(e) => { e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'order', id: x.id, off: 12, dur: Math.max(30, Math.round((Math.max(0, (x.hours || 0) - x.planned_min / 60) || x.hours || 1) * 60)), label: x.number, sub: x.customer_name || '' }); }} onDragEnd=${() => { setDrag(null); setOver(null); }}>
             <div class="row"><span class="mw-ic">${IC.tools}</span><a href=${'#/orders/' + x.id} class="grow"><b>${x.number}</b></a>
               <span class="mw-hrs">${hNum(Math.max(0, (x.hours || 0) - x.planned_min / 60) || x.hours || 0)}h</span>${x.jobs ? html`<span class="mw-cnt">${x.jobs.length ?? x.jobs}</span>` : ''}
               ${canEdit && html`<button class="icon-btn sm mw-plan" title="Поставить в график" onClick=${() => setCreate({ order: x, station_id: stations[0]?.id || '', date, time: '' })}>${IC.cal}</button>`}</div>
@@ -154,7 +175,7 @@ export default function Calendar({ query }) {
             ${(x.make || x.plate) && html`<div class="hg-line mw-line">${IC.car}<span>${carName(x)}${x.plate ? ' ' + x.plate : ''}</span></div>`}
             ${x.status_name && html`<div class="hg-status"><i style=${'background:' + (x.status_color || 'var(--muted)')}></i>${x.status_name}${x.planned_min ? html` · <span class="muted">в графике ${h1(x.planned_min / 60)}</span>` : ''}</div>`}
           </div>` : html`
-          <div class="hg-card req" draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: x.id })} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${() => setEdit(x)}>
+          <div class="hg-card req" draggable=${canEdit} onDragStart=${() => setDrag({ type: 'appt', id: x.id, off: 12, dur: x.duration_min || 60, label: x.order_number || x.title || 'Wizyta', sub: x.customer_name || x.contact_name || '' })} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${() => setEdit(x)}>
             <div class="row"><span class="mw-ic">${IC.cal}</span><b class="grow">${x.order_number || x.title || 'Заявка'}</b><span class="mw-hrs">${hNum((x.duration_min || 60) / 60)}h</span></div>
             ${x.note && html`<div class="hg-note">${x.note}</div>`}
             ${(x.customer_name || x.contact_name) && html`<div class="hg-line"><${Icon} n="user" />${x.customer_name || x.contact_name} <span class="muted">${x.customer_phone || x.contact_phone || ''}</span></div>`}
@@ -165,7 +186,14 @@ export default function Calendar({ query }) {
           ${!pending.length ? html`<div class="empty small">${"Всё распределено"}</div>` : null}</div>
       </aside>`}
 
-      ${!left && drag?.type === 'appt' && html`<div class="hg-drop-strip" onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); unschedule(); }}>Отпустите здесь, чтобы убрать из графика</div>`}
+      ${!left && drag?.from === 'cal' && html`<div class="mw-zones floating">
+          <div class=${'mw-zone un' + (over === 'z:un' ? ' on' : '')} onDragOver=${(e) => { e.preventDefault(); if (over !== 'z:un') setOver('z:un'); }} onDrop=${(e) => { e.preventDefault(); unschedule(); }}><span>‹</span> <span>Убрать в нераспределённые</span></div>
+          <div class=${'mw-zone day' + (over === 'z:day' ? ' on' : '')} onDragOver=${(e) => { e.preventDefault(); if (over !== 'z:day') setOver('z:day'); }} onDrop=${(e) => { e.preventDefault(); const a = rows.find((x) => x.id === drag.id); setDrag(null); setOver(null); if (a) setMoveDay({ a, date: addDays(date, 1) }); }}>${IC.cal} <span>Перенести на другой день</span></div>
+        </div>`}
+      ${pv && html`<${OrderPreview} pv=${pv} onEnter=${pvKeep} onLeave=${pvHide} prices=${!!app.perms['orders.prices']} />`}
+      ${moveDay && html`<${Modal} title=${'Перенести на другой день · ' + (moveDay.a.order_number || moveDay.a.title || '')} onClose=${() => setMoveDay(null)} foot=${html`<button class="btn primary" onClick=${async () => { await put(moveDay.a.id, { start_at: moveDay.date + ' ' + moveDay.a.start_at.slice(11, 16) }, 'Перенесено на ' + fdate(moveDay.date)); setMoveDay(null); }}>Перенести</button>`}>
+        <label class="f">Дата<input type="date" value=${moveDay.date} onInput=${(e) => setMoveDay({ ...moveDay, date: e.target.value })} /></label>
+        <div class="muted small">Время (${moveDay.a.start_at.slice(11, 16)}) и пост останутся теми же — потом можно передвинуть в графике.</div></${Modal}>`}
       <div class="hg-main">
       ${view === 'day' ? html`
       <div class="mw-cal">
@@ -181,14 +209,18 @@ export default function Calendar({ query }) {
               <div class="mw-head-row"><span class="mw-num">${i + 1}</span><b class="mw-name" title=${s.name}>${s.name}</b><span class=${'mw-load ' + lvl}>${hNum(busy)}/${hNum(cap)}h</span></div>
               <div class=${'mw-prog ' + lvl}><i style=${`width:${pct}%`}></i></div>
             </header>
-            <div class="mw-body cal-col" style=${`height:${slots.length * SLOT_PX}px`}>
+            <div class=${'mw-body cal-col' + (drag && String(over || '').startsWith(s.id + ':') ? ' drop-col' : '')} style=${`height:${slots.length * SLOT_PX}px`}
+              onDragOver=${(e) => { if (!drag) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); const i = Math.max(0, Math.min(slots.length - 1, Math.round((e.clientY - r.top - (drag.off || 0)) / SLOT_PX))); const key = s.id + ':' + slots[i]; if (over !== key) setOver(key); }}
+              onDragLeave=${(e) => { if (!e.currentTarget.contains(e.relatedTarget) && String(over || '').startsWith(s.id + ':')) setOver(null); }}
+              onDrop=${(e) => { e.preventDefault(); const m = Number(String(over || '').split(':')[1]); if (String(over || '').startsWith(s.id + ':') && !Number.isNaN(m)) dropOn(s.id, m); else { setDrag(null); setOver(null); } }}>
               ${slots.map((m) => {
                 const key = s.id + ':' + m;
                 return html`<div class=${'cal-slot mw-slot' + ((m + step) % 60 === 0 ? ' hour' : '') + (over === key ? ' drop' : '')} style=${`height:${SLOT_PX}px`}
-                  onClick=${() => newAt(s.id, m)}
-                  onDragOver=${(e) => { if (!drag) return; e.preventDefault(); if (over !== key) setOver(key); }}
-                  onDrop=${(e) => { e.preventDefault(); dropOn(s.id, m); }}><span class="mw-time">${hhmm(m)}</span></div>`;
+                  onClick=${() => newAt(s.id, m)}><span class="mw-time">${hhmm(m)}</span></div>`;
               })}
+              ${drag && String(over || '').startsWith(s.id + ':') && (() => { const m = Number(String(over).split(':')[1]); return html`<div class="mw-ghost" style=${`top:${((m - start) / step) * SLOT_PX + 1}px;height:${Math.max(SLOT_PX - 2, ((drag.dur || 60) / step) * SLOT_PX - 2)}px`}>
+                <div class="mw-t"><span class="mw-ic">${IC.tools}</span><b>${drag.label || ''}</b></div>${drag.sub ? html`<div class="mw-line">${IC.user}<span>${drag.sub}</span></div>` : ''}
+                <div class="mw-ghost-time">${hhmm(m)}–${hhmm(m + (drag.dur || 60))}</div></div>`; })()}
               ${date === todayStr() && nowMin > start && nowMin < end ? html`<div class="cal-now mw-now" style=${`top:${((nowMin - start) / step) * SLOT_PX}px`}></div>` : ''}
               ${sr.map((a) => {
                 const top = ((toMin(a.start_at.slice(11)) - start) / step) * SLOT_PX + 1;
@@ -201,7 +233,7 @@ export default function Calendar({ query }) {
                   ${canEdit && html`<i class="hg-resize" title="Потяните вниз или вверх, чтобы изменить время" onPointerDown=${(e) => resize(e, a)} onClick=${(e) => e.stopPropagation()}></i>`}</div>`;
                 const job = a.order_id && / · /.test(a.title || '') ? a.title.split(' · ').slice(1).join(' · ') : null;
                 return html`<div class=${'cal-ev mw-ev' + (a.part_total > 1 ? ' has-part' : '') + (a.status === 'request' ? ' request' : '') + (a.status === 'no_show' ? ' noshow' : '') + (drag?.id === a.id && drag.type === 'appt' ? ' dragging' : '')}
-                    draggable=${canEdit} onDragStart=${(e) => { if (e.currentTarget.classList.contains('resizing')) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; setDrag({ type: 'appt', id: a.id }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${(e) => open(e, a)}
+                    draggable=${canEdit} onDragStart=${(e) => { if (e.currentTarget.classList.contains('resizing')) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = 'move'; const rc = e.currentTarget.getBoundingClientRect(); setDrag({ type: 'appt', id: a.id, from: 'cal', off: e.clientY - rc.top, dur: a.duration_min || 60, label: a.order_number || a.title || 'Wizyta', sub: a.customer_name || a.contact_name || '' }); }} onDragEnd=${() => { setDrag(null); setOver(null); }} onClick=${(e) => open(e, a)} onMouseEnter=${(e) => pvShow(e, a)} onMouseLeave=${pvHide} onDragStartCapture=${() => { clearTimeout(pvT.current); setPv(null); }}
                     style=${`top:${top}px;height:${h}px;${pos}--st:${col}`} title=${a.status_name ? 'Статус заказа: ' + a.status_name : STATUS[a.status] || ''}>
                   ${a.part_total > 1 ? html`<span class="mw-part">${a.part_no}/${a.part_total}</span>` : ''}
                   ${job ? html`<div class="mw-t"><b>${job}</b></div><div class="mw-line">${IC.doc}<span>${a.order_number}</span></div>`
@@ -502,5 +534,29 @@ function Legend({ app, onChanged }) {
     <div class="row wrap"><b class="small">Записи без заказа:</b>
       ${['request', 'planned', 'arrived', 'no_show', 'block'].map((k) => html`<span class="lg">${sw(S['cal_color_' + k] || APPT_COLOR[k], (c) => setAppt(k, c))}${STATUS[k]}</span>`)}</div>
     <div class="muted small">${can ? 'Нажмите на цвет, чтобы поменять. ' : ''}Карточка в графике окрашивается по статусу заказа — поменяли статус, поменялся цвет.</div>
+  </div>`;
+}
+
+/** Предпросмотр заказа в терминарзе: авто, клиент, контакт, суммы, работы и запчасти */
+function OrderPreview({ pv, onEnter, onLeave, prices }) {
+  const o = pv.o;
+  const LINE = (i) => Math.round(i.qty * i.price * (1 - (i.discount || 0) / 100) * 100) / 100;
+  const labor = (o.items || []).filter((i) => i.kind === 'labor'), parts = (o.items || []).filter((i) => i.kind === 'part');
+  const sum = (l) => l.reduce((t, i) => t + LINE(i), 0);
+  const phone = o.contact_phone || o.customer?.phone;
+  const tbl = (title, list) => list.length ? html`<table class="pv-tbl"><thead><tr><th>${title}</th>${prices ? html`<th class="r">Стоимость</th>` : ''}</tr></thead>
+    <tbody>${list.map((i) => html`<tr class=${i.done ? 'done' : ''}><td>${i.name}${!prices || i.kind === 'part' ? '' : ''}</td>${prices ? html`<td class="r nowrap">${zl(LINE(i))}</td>` : ''}</tr>`)}</tbody></table>` : '';
+  return html`<div class="pv-pop" style=${`left:${pv.x}px;top:${pv.y}px`} onMouseEnter=${onEnter} onMouseLeave=${onLeave}>
+    <div class="pv-head"><a href=${'#/orders/' + o.id}><b>${o.number}</b> <span class="pv-ext">↗</span></a>${o.status?.name ? html`<span class="pv-st" style=${'--st:' + (o.status.color || '#888')}>${o.status.name}</span>` : ''}</div>
+    <div class="pv-top">
+      <div class="pv-who">
+        ${o.car && html`<div class="mw-line">${IC.car}<span>${carName(o.car)}${o.car.plate ? ' ' + o.car.plate : ''}</span></div>`}
+        ${o.customer && html`<div class="mw-line">${IC.user}<span>${o.customer.name || o.customer.company || ''}</span></div>`}
+        ${phone && html`<div class="pv-kv"><span>Контакт</span><a href=${'tel:' + phone}>${phone}</a></div>`}
+      </div>
+      ${prices && html`<div class="pv-sums"><div><span>Работы</span><b>${zl(sum(labor))}</b></div><div><span>Запчасти</span><b>${zl(sum(parts))}</b></div><div class="t"><span>Итого брутто</span><b>${zl(o.total)}</b></div></div>`}
+    </div>
+    ${tbl('Работы', labor)}${tbl('Запчасти', parts)}
+    ${!labor.length && !parts.length ? html`<div class="muted small" style="padding:6px 2px">${o.complaint || 'Позиций пока нет'}</div>` : ''}
   </div>`;
 }
