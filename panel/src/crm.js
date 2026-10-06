@@ -1789,6 +1789,8 @@ crm.delete('/recommendations/:id', (req, res) => {
 // Рекомендация → выцена: клиент увидит точный состав и цену в Моё авто и запишется «по выцене»
 // ── Перенос из Motowarsztat (только владелец) ──
 crm.post('/mw-import/token', (req, res) => { owner(req); res.json({ token: MW.newImportToken() }); });
+// Ключ переноса прямо во вкладку Motowarsztat: адрес назначения жёстко задан (только app.motowarsztat.pl), ключ — в #фрагменте, на сервер MW не уходит
+crm.get('/mw-import/handoff', (req, res) => { owner(req); res.redirect(302, 'https://app.motowarsztat.pl/warsztat/zlecenie#pc-import=' + encodeURIComponent(MW.newImportToken())); });
 crm.post('/mw-import/wipe', (req, res) => {
   const o = owner(req);
   if (req.body?.confirm !== 'USUŃ DANE TESTOWE') throw new HttpError(400, 'Нужно подтверждение');

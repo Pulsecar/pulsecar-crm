@@ -1,11 +1,12 @@
 // Перенос фото / файлов заказов Motowarsztat → Pulsecar CRM. Выполняется во вкладке app.motowarsztat.pl (вход выполнен).
 // Только ЧТЕНИЕ из MW. Бережно: один поток, пауза между файлами, при ответе 403/429 от MW — сразу стоп (защита MW от перегрузки).
 // Продолжает с места остановки: CRM сам говорит, каких файлов ещё нет (POST /mw-import/files/check).
+// Ключ: открыть https://panel.pulsecar.tech/crm-api/mw-import/handoff (владелец) — вернёт во вкладку MW с #pc-import=<ключ>.
 // Запуск: window.__mwFiles('<ключ импорта>')  → ход в window.__ph ; остановить: window.__ph.stop = true
 (() => {
   const CRM = 'https://panel.pulsecar.tech/mw-import/';
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  window.__mwFiles = async (T, { pause = 700 } = {}) => {
+  const sleep = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()); // в фоновой вкладке Chrome таймеры сильно тормозит — по умолчанию без пауз, темп задаёт сама загрузка (1 файл за раз)
+  window.__mwFiles = async (T, { pause = 0 } = {}) => {
     const P = (window.__ph = { state: 'listing', total: 0, need: 0, done: 0, ok: 0, skip: 0, fail: 0, videos: 0, errs: [], stop: false });
     const guard = (r) => { if (r.status === 403 || r.status === 429) { P.stop = true; P.state = 'MW ' + r.status + ' — остановлено'; throw new Error('MW ' + r.status); } return r; };
     try {
@@ -16,14 +17,14 @@
         const m = j['hydra:member'] || [];
         ids.push(...m.map((x) => x.id));
         if (m.length < 100) break;
-        await sleep(300);
+        await sleep(pause);
       }
       const all = [];
       for (const id of [...new Set(ids)]) {
         if (P.stop) return P;
         const j = await (guard(await fetch(`/api/repair-orders/${id}/files?positionSort=asc`, { headers: { Accept: 'application/json' } }))).json();
         for (const f of j.files || []) all.push({ ...f, o: id });
-        await sleep(250);
+        await sleep(pause);
       }
       P.total = all.length; P.state = 'check';
       const need = new Set();
