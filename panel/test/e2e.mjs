@@ -87,6 +87,14 @@ try {
   ok(await req('/crm-api/appointments', { body: { station_id: 1, start_at: '2026-10-01 12:00', duration_min: 60, title: 'после' } }), 'no clash');
   cal = ok(await req('/crm-api/appointments?from=2026-10-01&to=2026-10-01'), 'day');
   assert.equal(cal.rows.length, 2); assert.equal(cal.rows[0].status, 'planned');
+  { // пост на 2 заказа одновременно: второй — можно, третий — нет
+    const st = ok(await req('/crm-api/me'), 'me par').stations.find((x) => x.id === 2);
+    ok(await req('/crm-api/dict/stations', { body: { ...st, parallel: 2 } }), 'parallel 2');
+    ok(await req('/crm-api/appointments', { body: { station_id: 2, start_at: '2026-10-02 10:00', duration_min: 120, title: 'A' } }), 'p1');
+    ok(await req('/crm-api/appointments', { body: { station_id: 2, start_at: '2026-10-02 10:30', duration_min: 60, title: 'B' } }), 'p2 одновременно');
+    assert.equal((await req('/crm-api/appointments', { body: { station_id: 2, start_at: '2026-10-02 11:00', duration_min: 30, title: 'C' } })).status, 409, 'третий — нет');
+    ok(await req('/crm-api/dict/stations', { body: { ...st, parallel: 1 } }), 'parallel back');
+  }
   console.log('✓ заявка из приложения распределена на пост; пересечение по времени отклонено');
 
   // 5. заказ: работы + деталь со склада → оплата баллами → завершение

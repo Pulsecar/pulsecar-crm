@@ -69,7 +69,7 @@ function Company() {
 const DICT = {
   statuses: { title: 'Статус', cols: [['name', 'Название'], ['color', 'Цвет', 'color'], ['client_label', 'Как видит клиент в приложении'], ['is_final', 'Завершает заказ', 'bool'], ['lock_edit', 'Блокирует изменения', 'bool'], ['sms_mode', 'SMS клиенту', 'sms'], ['pos', 'Порядок', 'number']] },
   types: { title: 'Источник', cols: [['name', 'Название'], ['pos', 'Порядок', 'number']] },
-  stations: { title: 'Пост', cols: [['name', 'Название'], ['color', 'Цвет', 'color'], ['max_hours_day', 'Макс. часов в день', 'number'], ['pos', 'Порядок', 'number'], ['active', 'Активен', 'bool']] },
+  stations: { title: 'Пост', cols: [['name', 'Название'], ['color', 'Цвет', 'color'], ['max_hours_day', 'Макс. часов в день', 'number'], ['parallel', 'Заказов одновременно', 'number'], ['pos', 'Порядок', 'number'], ['active', 'Активен', 'bool']] },
 };
 const SMS_MODE = { off: '', ask: 'SMS (спросить)', auto: 'SMS (сразу)' };
 /** SMS и e-mail клиенту при смене на этот статус — как «SMS do klienta» в Motowarsztat */

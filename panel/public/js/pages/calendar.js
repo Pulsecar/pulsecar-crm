@@ -171,7 +171,7 @@ export default function Calendar({ query }) {
       <div class="mw-cal">
         ${stations.map((s, i) => {
           const busy = rows.filter((a) => a.station_id === s.id && a.status !== 'block').reduce((t, a) => t + a.duration_min, 0) / 60;
-          const cap = Number(s.max_hours_day) || (end - start) / 60;
+          const cap = Number(s.max_hours_day) || ((end - start) / 60) * (Number(s.parallel) || 1); // пост на несколько заказов одновременно — больше часов
           const pct = Math.min(100, (busy / cap) * 100);
           const lvl = pct > 80 ? 'hi' : pct > 50 ? 'mid' : 'lo';
           const sr = rows.filter((a) => a.station_id === s.id);

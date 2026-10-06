@@ -937,11 +937,14 @@ function apptData(b) {
 function checkOverlap(a, ignoreId) {
   if (!a.station_id || !a.start_at) return;
   const end = `datetime(?, '+' || ? || ' minutes')`;
-  const clash = one(
+  const over = all(
     `SELECT a.id, a.title, a.start_at FROM appointments a WHERE a.station_id = ? AND a.status NOT IN ('cancelled','no_show') AND a.id <> ?
-     AND a.start_at IS NOT NULL AND datetime(a.start_at) < ${end} AND datetime(a.start_at, '+' || a.duration_min || ' minutes') > datetime(?)`,
+     AND a.start_at IS NOT NULL AND datetime(a.start_at) < ${end} AND datetime(a.start_at, '+' || a.duration_min || ' minutes') > datetime(?) ORDER BY a.start_at`,
     a.station_id, ignoreId || 0, a.start_at, a.duration_min || 60, a.start_at,
   );
+  // пост может принимать несколько заказов одновременно (настройка поста «Заказов одновременно»)
+  const cap = Math.max(1, Number(one('SELECT parallel FROM stations WHERE id = ?', a.station_id)?.parallel) || 1);
+  const clash = over.length >= cap ? over[0] : null;
   if (clash) throw new HttpError(409, `На этом посту уже занято: ${clash.title || 'запись'} в ${clash.start_at.slice(11)}`);
 }
 crm.post('/appointments', (req, res) => {
@@ -1842,7 +1845,7 @@ const dict = {
   templates: { table: 'order_templates', fields: ['name', 'icon', 'items', 'active', 'pos'], json: ['items'] },
   statuses: { table: 'order_statuses', fields: ['name', 'color', 'pos', 'is_final', 'lock_edit', 'notify_client', 'client_label', 'sms_mode', 'sms_template', 'email_mode', 'email_template', 'scope'] },
   types: { table: 'order_types', fields: ['name', 'pos'] },
-  stations: { table: 'stations', fields: ['name', 'color', 'pos', 'active', 'slot_min', 'max_hours_day'] },
+  stations: { table: 'stations', fields: ['name', 'color', 'pos', 'active', 'slot_min', 'max_hours_day', 'parallel'] },
 };
 crm.post('/dict/:name', (req, res) => {
   who(req, 'settings.manage');

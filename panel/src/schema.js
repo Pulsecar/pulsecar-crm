@@ -478,6 +478,7 @@ addColumn('products', 'price_group_id', 'INTEGER');
 addColumn('products', 'gtu', 'TEXT');
 addColumn('stations', 'slot_min', 'INTEGER');
 addColumn('stations', 'max_hours_day', 'REAL');
+addColumn('stations', 'parallel', 'INTEGER NOT NULL DEFAULT 1'); // сколько заказов пост принимает одновременно
 
 db.exec('CREATE INDEX IF NOT EXISTS products_sku ON products(supplier_sku)');
 db.exec('CREATE INDEX IF NOT EXISTS products_ean ON products(ean)');
