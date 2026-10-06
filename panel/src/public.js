@@ -214,10 +214,16 @@ pub.get('/k/:token', (req, res) => {
     <div class="card" style="margin:0"><h2>Dane pojazdu</h2><div class="kv"><span>Marka i model</span><b>${esc([car.make, car.model].filter(Boolean).join(' ') || '—')}</b><span>Numer rejestracyjny</span><b>${esc(car.plate || '—')}</b><span>VIN</span><b>${esc(car.vin || '—')}</b>
       ${o.mileage ? `<span>Przebieg</span><b>${esc(Number(o.mileage).toLocaleString('pl-PL'))} km</b>` : ''}${!isQuote ? `<span>Poziom paliwa</span><b>${esc(DOC.fuelPl(o.fuel_level))}${pct != null ? `<span class="gauge"><i style="width:${pct}%"></i></span>` : ''}</b>` : ''}</div></div></div>`;
 
+  // фото и видео с приёмки — прямо в протоколе приёмки (под схемой повреждений); в «Zdjęcia i pliki» остаётся остальное (PDF)
+  const isMedia = (f) => /^(image|video)\//.test(f.mime || '');
+  const media = intakeOn ? files.filter(isMedia) : [];
+  const restFiles = intakeOn ? files.filter((f) => !isMedia(f)) : files;
+  const fileGrid = (list) => `<div class="files">${list.map((f) => `<a href="/k/${t}/file/${f.id}" target="_blank" rel="noopener">${/^image\//.test(f.mime) ? `<img src="/k/${t}/file/${f.id}" alt="" loading="lazy">` : /^video\//.test(f.mime) ? `<video src="/k/${t}/file/${f.id}" preload="metadata" muted></video>` : '<div style="height:120px;display:grid;place-items:center;background:var(--soft);font-weight:700">PDF</div>'}<span>${esc(f.name)}</span></a>`).join('')}</div>`;
   const intake = intakeOn ? `<details class="sec" ${!intakeSigned ? 'open' : ''} id="intake"><summary><span class="ico">${ICO.intake}</span><span class="tt">Protokół przyjęcia</span>${methodsFor(s, 'intake').length ? tag(intakeSigned, intakeSigned ? 'Podpisany' : 'Do podpisu', !intakeSigned) : ''}</summary><div class="body">
     ${s.card_intake_desc !== '0' && o.complaint ? `<h2>Opis zlecenia</h2><div class="note" style="margin-bottom:12px">${esc(o.complaint)}</div>` : ''}
     ${s.card_intake_tasks !== '0' && items.some((i) => i.kind === 'labor') ? `<h2>Lista zadań</h2><ol style="margin:0 0 12px;padding-left:20px">${items.filter((i) => i.kind === 'labor').map((i) => `<li>${esc(i.name)}</li>`).join('')}</ol>` : ''}
     ${s.card_intake_damage !== '0' ? `<h2>Opis uszkodzeń</h2><div class="dmg">${DOC.carSvg(damages, { w: 200, car })}<div>${damages.length ? `<table><tbody>${damages.map((m, i) => `<tr><td style="width:28px"><b>${i + 1}</b></td><td>${esc(DOC.DAMAGE_TYPES[m.type] || m.type)}${m.note ? `<div class="sub">${esc(m.note)}</div>` : ''}</td></tr>`).join('')}</tbody></table>` : '<div class="info">Brak adnotacji o uszkodzeniach</div>'}</div></div>` : ''}
+    ${media.length ? `<h2 style="margin-top:14px">Zdjęcia z przyjęcia</h2>${fileGrid(media)}` : ''}
     ${s.card_rodo ? `<div class="note" style="margin-top:12px">${esc(s.card_rodo)}</div>` : ''}${s.card_intake_extra ? `<div class="note" style="margin-top:8px">${esc(s.card_intake_extra)}</div>` : ''}
     <div style="margin-top:12px"><a class="btn alt" href="/k/${t}/doc/intake">Podgląd dokumentu</a></div>
     ${signBox(s, o, 'intake', req.params.token, 'Potwierdzam przekazanie pojazdu do serwisu na powyższych warunkach.')}</div></details>` : '';
@@ -239,8 +245,7 @@ pub.get('/k/:token', (req, res) => {
     <div style="margin-top:12px"><a class="btn alt" href="/k/${t}/doc/release">Podgląd dokumentu</a></div>
     ${signBox(s, o, 'release', req.params.token, 'Potwierdzam odbiór pojazdu.')}</div></details>` : '';
 
-  const filesSec = files.length ? `<details class="sec" open><summary><span class="ico">${ICO.files}</span><span class="tt">Zdjęcia i pliki</span><span class="st">${files.length}</span></summary><div class="body"><div class="files">
-    ${files.map((f) => `<a href="/k/${t}/file/${f.id}" target="_blank" rel="noopener">${/^image\//.test(f.mime) ? `<img src="/k/${t}/file/${f.id}" alt="" loading="lazy">` : /^video\//.test(f.mime) ? `<video src="/k/${t}/file/${f.id}" preload="metadata" muted></video>` : '<div style="height:120px;display:grid;place-items:center;background:var(--soft);font-weight:700">PDF</div>'}<span>${esc(f.name)}</span></a>`).join('')}</div></div></details>` : '';
+  const filesSec = restFiles.length ? `<details class="sec" open><summary><span class="ico">${ICO.files}</span><span class="tt">Zdjęcia i pliki</span><span class="st">${restFiles.length}</span></summary><div class="body">${fileGrid(restFiles)}</div></details>` : '';
   const salesSec = sales.length ? `<details class="sec" open><summary><span class="ico">${ICO.docs}</span><span class="tt">Dokumenty sprzedaży</span></summary><div class="body"><table><tbody>
     ${sales.map((d) => `<tr><td>${esc(DOC.SALE_KIND[d.kind])} <b>${esc(d.number)}</b><div class="sub">${esc(d.issue_date)}</div></td><td class="r">${zl(d.total_gross)} zł</td><td class="r"><a class="btn alt" href="/k/${t}/sale/${d.id}">Otwórz</a></td></tr>`).join('')}
     ${o.invoice_ext_id && !sales.some((d) => d.kind === 'vat') ? `<tr><td>Faktura VAT <b>${esc(o.invoice_no || '')}</b></td><td></td><td class="r"><a class="btn alt" href="/k/${t}/faktura.pdf">PDF</a></td></tr>` : ''}</tbody></table></div></details>`

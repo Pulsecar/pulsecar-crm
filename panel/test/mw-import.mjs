@@ -128,6 +128,17 @@ try {
     const cust = ok(await req('/crm-api/customers/' + o.customer_id), 'cust');
     assert.ok(cust.sms.some((x) => x.kind === 'email' && /w załączniku wycena/.test(x.text)), 'письмо в истории клиента');
   }
+  { // фото заказа из MW: проверка «что нужно», загрузка, повтор без дубля, видно в карте
+    const ck = async (items) => (await fetch(`${BASE}/mw-import/files/check`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Import-Token': token }, body: JSON.stringify({ items }) })).json();
+    assert.deepEqual((await ck([{ id: 5001, o: 2000154 }, { id: 5002, o: 999 }])).need, [5001], 'нужен только файл известного заказа');
+    const up = async () => { const fd = new FormData(); fd.append('id', '5001'); fd.append('o', '2000154'); fd.append('name', 'IMG_1.jpg'); fd.append('created_at', '2026-01-06 09:10:00');
+      fd.append('file', new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' }), 'IMG_1.jpg');
+      return (await fetch(`${BASE}/mw-import/file`, { method: 'POST', headers: { 'X-Import-Token': token }, body: fd })).json(); };
+    assert.equal((await up()).created, true); assert.equal((await up()).skipped, true, 'повтор без дубля');
+    assert.deepEqual((await ck([{ id: 5001, o: 2000154 }])).need, []);
+    const oo = ok(await req('/crm-api/orders/' + o.id), 'order');
+    assert.equal(oo.files.filter((f) => f.name === 'IMG_1.jpg').length, 1); assert.equal(oo.files[0].client_visible, 1);
+  }
   { // возврат по корректе → расход из кассы (KW), без задвоения
     const cash = ok(await req('/crm-api/cash?from=2026-01-01&to=2026-01-31'), 'cash');
     const refunds = cash.rows.filter((p) => /Zwrot/.test(p.note || ''));

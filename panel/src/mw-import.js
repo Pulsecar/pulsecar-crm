@@ -2,10 +2,12 @@
 // Данные читает скрипт tools/mw-export.js во вкладке Motowarsztat (только GET к их API) и присылает пакетами сюда.
 // Каждая запись хранит mw_id («ro:123», «c:45»…), поэтому перенос можно повторять: новое добавится, изменённое обновится, дублей не будет.
 import express from 'express';
+import multer from 'multer';
+import fs from 'node:fs';
+import { FILES_DIR } from './documents.js';
 import crypto from 'node:crypto';
 import { all, one, run, insert, tx, getSetting, setSetting, mainDb, withDb } from './db.js';
-import { dirname, join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import path, { dirname, join } from 'node:path';
 import { config } from './config.js';
 import { HttpError, newCardNo, normPhone, normPlate, normVin, round2 } from './util.js';
 import { recalc } from './orders.js';
@@ -408,7 +410,7 @@ const HANDLERS = {
 /** Сохранить копию базы и удалить тестовые данные (клиенты, авто, заказы, склад, документы). Настройки, сотрудники, статусы, посты остаются. */
 export function wipeForImport() {
   const dir = join(dirname(config.dbPath), 'backups');
-  mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   const file = join(dir, `before-mw-import-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
   mainDb.exec(`VACUUM INTO '${file}'`);
   const t = ['order_comments', 'order_checklists', 'order_signatures', 'order_files', 'order_items', 'car_recommendations', 'appointments', 'receipts', 'sales_docs', 'payments',
@@ -430,6 +432,39 @@ mwImport.use((req, res, next) => {
   next();
 });
 mwImport.use(express.json({ limit: '25mb' }));
+// ── Файлы заказов из MW (фото с приёмки и т.п.): браузер скачивает из MW и шлёт сюда по одному ──
+const fileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
+/** какие файлы ещё не перенесены (и чей заказ уже есть в CRM) — чтобы не качать лишнее и продолжать с места остановки */
+mwImport.post('/files/check', (req, res) => {
+  withDb(mainDb, () => {
+    checkToken(req);
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 5000) : [];
+    const need = items.filter((x) => !one('SELECT 1 FROM order_files WHERE mw_id = ?', 'mf:' + x.id) && idOf('orders', (x.kind === 'q' ? 'q:' : 'ro:') + x.o)).map((x) => x.id);
+    res.json({ need });
+  });
+});
+mwImport.post('/file', fileUpload.single('file'), (req, res) => {
+  withDb(mainDb, () => {
+    checkToken(req);
+    const b = req.body || {};
+    const mw = 'mf:' + String(b.id || '').replace(/\D/g, '');
+    if (mw === 'mf:' || !req.file) throw new HttpError(400, 'Нет файла');
+    if (one('SELECT 1 FROM order_files WHERE mw_id = ?', mw)) return res.json({ skipped: true });
+    const orderId = idOf('orders', (b.kind === 'q' ? 'q:' : 'ro:') + b.o);
+    if (!orderId) return res.json({ skipped: true });
+    const mime = String(req.file.mimetype || b.mime || '');
+    if (!/^(image\/|video\/|application\/pdf)/.test(mime)) return res.json({ skipped: true });
+    const dir = path.join(FILES_DIR, String(orderId));
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = String(b.name || 'zdjecie.jpg').normalize('NFKD').replace(/[^\w.\-]+/g, '_').slice(-80) || 'plik';
+    const name = `mw-${String(b.id).replace(/\D/g, '')}-${safe}`;
+    fs.writeFileSync(path.join(dir, name), req.file.buffer);
+    insert('order_files', { order_id: orderId, name: s(b.name, 200) || 'zdjecie.jpg', path: `${orderId}/${name}`, mime, size: req.file.size, client_visible: 1, staff: 'Motowarsztat',
+      created_at: dt(b.created_at) || undefined, mw_id: mw });
+    res.json({ created: true });
+  });
+});
+
 mwImport.post('/:entity', (req, res) => {
   withDb(mainDb, () => {
     checkToken(req);
