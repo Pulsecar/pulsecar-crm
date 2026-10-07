@@ -768,6 +768,62 @@ if (getSetting('status_split') === null) {
   }
   setSetting('status_split', '1');
 }
+// ── ИИ-запчастист (модуль src/ai-parts). Только новые таблицы ai_*; откат: node tools/ai-parts-down.js ──
+db.exec(`CREATE TABLE IF NOT EXISTS ai_jobs (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'pick',            -- pick | backtest
+  order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'queued',        -- queued | running | done | error | cancelled
+  request TEXT,                                 -- JSON: текст, уровень, срочность, комментарий, вставка из partslink24
+  steps TEXT,                                   -- JSON: [{key, state, info}]
+  result TEXT,                                  -- JSON: итог / отчёт бэктеста
+  error TEXT,
+  added INTEGER NOT NULL DEFAULT 0, to_check INTEGER NOT NULL DEFAULT 0,
+  tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS ai_jobs_order ON ai_jobs(order_id)');
+db.exec('CREATE INDEX IF NOT EXISTS ai_jobs_status ON ai_jobs(status)');
+db.exec(`CREATE TABLE IF NOT EXISTS ai_lines (
+  id INTEGER PRIMARY KEY,
+  job_id INTEGER REFERENCES ai_jobs(id) ON DELETE SET NULL,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  order_item_id INTEGER,                        -- позиция в заказе (order_items.id)
+  group_key TEXT, title TEXT, qty REAL, qty_note TEXT,
+  oe TEXT,                                      -- JSON: [{number, source}]
+  variants TEXT,                                -- JSON: {eco, mid, oe} — бренд, артикул, sku, цены, наличие, срок
+  chosen TEXT,                                  -- eco | mid | oe
+  confidence TEXT NOT NULL DEFAULT 'high',      -- high | check
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',         -- draft | accepted | ordered | delivered | checked | installed | returned | removed
+  created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS ai_lines_order ON ai_lines(order_id)');
+db.exec(`CREATE TABLE IF NOT EXISTS ai_events (
+  id INTEGER PRIMARY KEY, at TEXT NOT NULL DEFAULT (datetime('now')), staff TEXT,
+  order_id INTEGER, line_id INTEGER, job_id INTEGER, kind TEXT NOT NULL, data TEXT
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS ai_events_kind ON ai_events(kind, at)');
+db.exec(`CREATE TABLE IF NOT EXISTS ai_rules (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                           -- brand | blacklist_brand | blacklist_supplier | markup
+  group_key TEXT, level TEXT, value TEXT,
+  draft INTEGER NOT NULL DEFAULT 0, source TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS ai_kits (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, aliases TEXT, fuel TEXT, items TEXT,
+  draft INTEGER NOT NULL DEFAULT 0, source TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS ai_history (
+  order_id INTEGER PRIMARY KEY, kind TEXT, vin TEXT, make TEXT, model TEXT, engine TEXT, capacity INTEGER, fuel TEXT, year TEXT,
+  work TEXT, items TEXT, negative INTEGER NOT NULL DEFAULT 0, weight REAL NOT NULL DEFAULT 1, at TEXT
+)`);
+db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS ai_history_fts USING fts5(car, work, parts, tokenize='unicode61 remove_diacritics 2')`);
+db.exec(`CREATE TABLE IF NOT EXISTS ai_verified (
+  id INTEGER PRIMARY KEY, car_sig TEXT, group_key TEXT, oe TEXT, brand TEXT, article TEXT, sku TEXT, name TEXT,
+  weight REAL NOT NULL DEFAULT 1, source TEXT, at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS ai_verified_sig ON ai_verified(car_sig, group_key)');
 if (getSetting('mw_internal_comments') === null) {
   db.exec(`INSERT INTO order_comments (order_id, at, staff, text, mw_id)
   SELECT o.id, COALESCE(o.created_at, datetime('now','localtime')), 'Motowarsztat', o.internal_note, 'ic:' || o.mw_id FROM orders o

@@ -1,15 +1,17 @@
 import { html, useState, useData, api, act, go, useApp, Icon, Modal, ConfirmButton, Badge, zl, num, fdt, toast } from '../lib.js';
 import Integrations from './integrations.js';
 import Messaging, { TplField } from './messaging.js';
+import { AiSettings } from './ai-parts.js';
 import { Params, Numbering, StaffAccess, CatalogFull, Templates, ChecklistsSettings, Lists } from './settings2.js';
 
-const TABS = [['integrations', 'Интеграции'], ['staff', 'Сотрудники и доступы'], ['params', 'Параметры'], ['messages', 'SMS и шаблоны'], ['company', 'Фирма'], ['numbering', 'Нумерация'], ['statuses', 'Статусы заказов'], ['qstatuses', 'Статусы выцен'], ['catalog', 'Прайс работ'], ['templates', 'Шаблоны заказов'], ['checklists', 'Чек-листы'], ['types', 'Источники'], ['stations', 'Посты'], ['lists', 'Справочники'], ['import', 'Импорт данных']];
+const TABS = [['integrations', 'Интеграции'], ['ai', 'ИИ-запчастист'], ['staff', 'Сотрудники и доступы'], ['params', 'Параметры'], ['messages', 'SMS и шаблоны'], ['company', 'Фирма'], ['numbering', 'Нумерация'], ['statuses', 'Статусы заказов'], ['qstatuses', 'Статусы выцен'], ['catalog', 'Прайс работ'], ['templates', 'Шаблоны заказов'], ['checklists', 'Чек-листы'], ['types', 'Источники'], ['stations', 'Посты'], ['lists', 'Справочники'], ['import', 'Импорт данных']];
 
 export default function Settings({ sub }) {
   const tab = TABS.some(([k]) => k === sub) ? sub : 'integrations';
   return html`<div class="page-head"><h1>Настройки</h1></div>
     <div class="pill-tabs" style="margin-bottom:14px">${TABS.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => go('/settings/' + k)}>${l}</button>`)}</div>
     ${tab === 'integrations' && html`<${Integrations} />`}
+    ${tab === 'ai' && html`<${AiSettings} />`}
     ${tab === 'messages' && html`<${Messaging} />`}
     ${tab === 'company' && html`<${Company} />`}
     ${tab === 'statuses' && html`<${Dict} name="statuses" scope="order" key="so" />`}

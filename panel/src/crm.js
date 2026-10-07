@@ -42,6 +42,7 @@ import { FIELDS as TPL_FIELDS, render, orderContext, cardUrl, textToHtml } from 
 import { decodeAztec, lookupPlate, testPlate } from './vehicle.js';
 import * as REC from './recommendations.js';
 import * as MW from './mw-import.js';
+import { mountAiParts, aiEnabled } from './ai-parts/index.js';
 /** Способы оплаты (платёж): наличные, карта, BLIK, перевод. «mixed» — только как способ в документах/настройках */
 const PAY_METHODS = ['cash', 'card', 'blik', 'transfer'];
 
@@ -216,6 +217,8 @@ function who(req, min = 'mechanic') {
   return s;
 }
 
+mountAiParts(crm, (req, perm) => who(req, perm));
+
 const lists = () => ({
   statuses: all('SELECT * FROM order_statuses ORDER BY pos'),
   expenses: all('SELECT * FROM expense_categories ORDER BY pos, name'),
@@ -241,7 +244,7 @@ crm.get('/me', (req, res) => {
     loyalty: loyaltySummary(0).rules,
     features: {
       invoices: invoicesEnabled(), ksef: KSEF.ksefEnabled(), fiscal: (() => { const c = FISCAL.fiscalCfg(); return c ? { driver: c.driver, url: c.url, autoOnPay: c.autoOnPay } : null; })(), marketingUrl: cfg('marketing')?.url || config.marketingUrl, autoEarnFromCrm: config.loyalty.autoEarnFromCrm,
-      intercars: !!cfg('intercars'), tecrmi: RMI.tecrmiOn() ? { auto: cfg('tecrmi').auto !== false } : null, tpay: !!cfg('tpay'), email: !!cfg('email'), sms: !!activeProvider(), smsProvider: activeProvider(), plate: !!cfg('plate'),
+      intercars: !!cfg('intercars'), aiParts: aiEnabled(), tecrmi: RMI.tecrmiOn() ? { auto: cfg('tecrmi').auto !== false } : null, tpay: !!cfg('tpay'), email: !!cfg('email'), sms: !!activeProvider(), smsProvider: activeProvider(), plate: !!cfg('plate'),
     },
   });
 });

@@ -1,0 +1,159 @@
+// ИИ-запчастист: флаг, подбор с поддельными Claude и Inter Cars, уровни по цене продажи, цена = рекомендуемая IC,
+// без дублей при повторном подборе, принять / отменить, шифрование ключей интеграций.
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import { rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import assert from 'node:assert/strict';
+
+const PORT = 3195, MOCK = 3194;
+const BASE = `http://localhost:${PORT}`, M = `http://localhost:${MOCK}`;
+const DB = './data/test-ai.db';
+for (const s of ['', '-wal', '-shm']) rmSync(DB + s, { force: true });
+const calls = [];
+
+// каталог IC: артикул → товар; цены: sku → закупка нетто и рекомендуемая брутто
+const CATALOG = {
+  'VKMA01121': { sku: 'SKF1', brand: 'SKF', articleNumber: 'VKMA 01121' },
+  '530064010': { sku: 'INA1', brand: 'INA', articleNumber: '530 0640 10' },
+  'CT1168K2': { sku: 'CT1', brand: 'CONTITECH', articleNumber: 'CT1168K2' },
+  'K015688XS': { sku: 'GAT1', brand: 'GATES', articleNumber: 'K015688XS' },
+  '04E198119A': { sku: 'VAG1', brand: 'VAG', articleNumber: '04E198119A' },
+  'W71295': { sku: 'MANN1', brand: 'MANN-FILTER', articleNumber: 'W 712/95' },
+};
+const PRICE = { SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0] };
+
+const mock = createServer(async (req, res) => {
+  let body = ''; for await (const c of req) body += c;
+  const u = new URL(req.url, M);
+  calls.push(`${req.method} ${u.pathname}${u.search}`);
+  const json = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
+  if (u.pathname === '/oauth2/token') return json(200, { access_token: 'ictok', expires_in: 3600 });
+  if (u.pathname === '/v1/messages') {
+    const b = JSON.parse(body);
+    assert.equal(b.model, 'claude-sonnet-5');
+    assert.equal(b.tool_choice.name, 'parts_plan');
+    const ctx = JSON.parse(b.messages[0].content);
+    assert.equal(ctx.vehicle.vin, 'WVWZZZAUZGW123456');
+    assert.ok(!JSON.stringify(ctx).includes('Kowalski'), 'данные клиента не уходят в Claude');
+    return json(200, { usage: { input_tokens: 1200, output_tokens: 400 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
+      { key: 'timing_kit', name_pl: 'Zestaw paska rozrządu', qty: 1, unit: 'kpl.', qty_note: '1 комплект', oe: [{ number: '04E 198 119 A', from: 'knowledge' }], oe_sure: true,
+        analogs: [{ brand: 'SKF', article: 'VKMA 01121' }, { brand: 'INA', article: '530 0640 10' }, { brand: 'Contitech', article: 'CT1168K2' }, { brand: 'Gates', article: 'K015688XS' }, { brand: 'Fake', article: 'NOPE1' }] },
+      { key: 'oil_filter', name_pl: 'Filtr oleju', qty: 1, unit: 'szt.', oe: [], analogs: [{ brand: 'MANN', article: 'W 712/95' }] },
+      { key: 'spark_plug', name_pl: 'Świeca zapłonowa', qty: 4, unit: 'szt.', qty_note: '4 цилиндра', oe: [], analogs: [{ brand: 'NGK', article: 'XX1' }], check: 'Проверьте калильное число' },
+    ] } }] });
+  }
+  if (req.headers.authorization !== 'Bearer ictok') return json(401, {});
+  if (u.pathname === '/ic/catalog/products') {
+    const p = CATALOG[u.searchParams.get('index').toUpperCase().replace(/[^A-Z0-9]/g, '')];
+    return json(200, { totalResults: p ? 1 : 0, products: p ? [{ ...p, index: p.articleNumber, shortDescription: 'x' }] : [] });
+  }
+  if (u.pathname === '/ic/inventory/quote') {
+    const b = JSON.parse(body);
+    return json(200, b.lines.map((l) => ({ sku: l.sku, price: { customerPriceNet: PRICE[l.sku][0], listPriceGross: PRICE[l.sku][1], vatPercentage: 23 },
+      lines: [{ sku: l.sku, location: 'WAW', availability: l.sku === 'GAT1' ? 0 : 3, customerRouteStartDateTime: new Date().toISOString() }] })));
+  }
+  if (u.pathname.startsWith('/ic/sales')) throw new Error('ассистент не должен заказывать');
+  json(404, {});
+});
+await new Promise((r) => mock.listen(MOCK, r));
+
+const srv = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/index.js'], {
+  env: { ...process.env, NODE_ENV: 'test', PORT, DB_PATH: DB, ADMIN_PASSWORD: 'test-pass-123', SESSION_SECRET: 'z'.repeat(40), PUBLIC_URL: BASE,
+    ANTHROPIC_BASE_URL: M, SECRETS_KEY: Buffer.alloc(32, 7).toString('base64') },
+});
+srv.stderr.on('data', (d) => process.stderr.write(d));
+for (let i = 0; i < 60; i++) { try { await fetch(BASE + '/'); break; } catch { await new Promise((r) => setTimeout(r, 250)); } }
+
+let cookie = '';
+async function req(path, { body, method } = {}) {
+  const r = await fetch(BASE + '/crm-api/' + path, { method: method || (body ? 'POST' : 'GET'), headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const sc = r.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || r.status), { status: r.status });
+  return j;
+}
+const fails = [];
+const t = async (name, fn) => { try { await fn(); console.log('✓', name); } catch (e) { fails.push(name); console.log('✗', name, e.message); } };
+
+try {
+  await req('login', { body: { login: 'admin', password: 'test-pass-123' } });
+  const c = await req('customers', { body: { name: 'Jan Kowalski', phone: '600100200' } });
+  const car = await req('cars', { body: { customer_id: c.id, make: 'Volkswagen', model: 'Golf VII 1.4 TSI', vin: 'WVWZZZAUZGW123456', year: '2016', capacity: 1395, fuel: 'benzyna' } });
+  const q = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+
+  await t('флаг выключен — модуль недоступен, CRM как раньше', async () => {
+    await assert.rejects(req(`ai-parts/orders/${q.id}`), (e) => e.status === 404);
+    assert.equal((await req('me')).features.aiParts, false);
+  });
+  await t('ключи интеграций шифруются (AES-GCM), а читаются как обычно', async () => {
+    await req('integrations/assistant', { method: 'PUT', body: { enabled: false, values: { apiKey: 'sk-ant-test-123' } } });
+    await req('integrations/intercars', { method: 'PUT', body: { enabled: true, values: { clientId: 'cid', clientSecret: 'csecret', baseUrl: M, tokenUrl: M + '/oauth2/token' } } });
+    const raw = new DatabaseSync(DB).prepare("SELECT config FROM integrations WHERE key = 'intercars'").get().config;
+    assert.ok(!raw.includes('csecret') && raw.includes('enc:v1:'), raw);
+    const list = (await req('integrations')).list.find((x) => x.key === 'intercars');
+    assert.equal(list.values.clientSecret, '••••cret');
+  });
+  await t('включение модуля и настройки', async () => {
+    await req('ai-parts/settings', { method: 'PUT', body: { enabled: true, limit: 2, markup: 50 } });
+    const s = await req('ai-parts/settings');
+    assert.equal(s.enabled, true); assert.equal(s.model, 'claude-sonnet-5'); assert.deepEqual(s.ready, { claude: true, intercars: true });
+    assert.equal((await req('me')).features.aiParts, true);
+  });
+  const run = async (body) => {
+    const { id } = await req(`ai-parts/orders/${q.id}/jobs`, { body });
+    for (let i = 0; i < 80; i++) { const j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) return j; await new Promise((r) => setTimeout(r, 150)); }
+    throw new Error('подбор не закончился');
+  };
+  let first;
+  await t('подбор: позиции в выцене, уровни по цене продажи, цена = рекомендуемая Inter Cars', async () => {
+    first = await run({ text: 'замена ГРМ + масляный фильтр + свечи', level: 'mid', urgency: 'any' });
+    assert.equal(first.status, 'done', first.error);
+    assert.equal(first.added, 3); assert.ok(first.steps.every((s) => s.state === 'ok'));
+    const d = await req(`ai-parts/orders/${q.id}`);
+    const tk = d.lines.find((l) => l.group_key === 'timing_kit');
+    // аналоги по цене продажи: SKF 520 < Contitech 610 < Gates 640 < INA 700 → эконом SKF, средний — середина, OE — VAG
+    assert.equal(tk.variants.eco.brand, 'SKF'); assert.equal(tk.variants.eco.sellGross, 520); assert.equal(tk.variants.eco.priceNet, 300);
+    assert.equal(tk.variants.mid.brand, 'GATES');
+    assert.equal(tk.variants.oe.brand, 'VAG'); assert.equal(tk.variants.oe.sellGross, 1200);
+    assert.equal(tk.chosen, 'mid'); assert.equal(tk.confidence, 'high');
+    const o = await req('orders/' + q.id);
+    const item = o.items.find((i) => i.id === tk.order_item_id);
+    assert.equal(item.price, 640); assert.equal(item.cost, 350); assert.equal(item.code, 'K015688XS');
+    const of = d.lines.find((l) => l.group_key === 'oil_filter');
+    assert.equal(of.variants.eco.sellGross, 36.9, 'нет рекомендуемой цены → наценка 50% от закупки'); assert.equal(of.confidence, 'check');
+    const sp = d.lines.find((l) => l.group_key === 'spark_plug');
+    assert.equal(sp.chosen, null); assert.equal(sp.confidence, 'check'); assert.match(sp.reason, /Не найдено в Inter Cars/);
+    assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
+  });
+  await t('смена варианта меняет позицию в выцене', async () => {
+    const d = await req(`ai-parts/orders/${q.id}`);
+    const tk = d.lines.find((l) => l.group_key === 'timing_kit');
+    await req('ai-parts/lines/' + tk.id, { body: { variant: 'oe' } });
+    const item = (await req('orders/' + q.id)).items.find((i) => i.id === tk.order_item_id);
+    assert.equal(item.price, 1200); assert.equal(item.code, '04E198119A');
+  });
+  await t('повторный подбор — без дублей; лимит в месяц', async () => {
+    const j = await run({ text: 'ещё раз ГРМ', level: 'eco' });
+    assert.equal(j.status, 'done'); assert.equal(j.added, 0);
+    await assert.rejects(run({ text: 'третий' }), (e) => e.status === 429);
+  });
+  await t('принять все → проверенные номера для следующих подборов; отмена удаляет только черновики', async () => {
+    const d = await req(`ai-parts/orders/${q.id}`);
+    await req('ai-parts/lines/' + d.lines[1].id, { body: { status: 'accepted' } });
+    const before = (await req('orders/' + q.id)).items.length;
+    const r = await req(`ai-parts/jobs/${first.id}/undo`, { method: 'POST' });
+    assert.equal(r.n, 2);
+    assert.equal((await req('orders/' + q.id)).items.length, before - 2);
+    assert.equal(new DatabaseSync(DB).prepare('SELECT COUNT(*) n FROM ai_verified').get().n, 1);
+  });
+  await t('без VIN — подбор недоступен', async () => {
+    const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });
+    const q2 = await req('orders', { body: { kind: 'quote', customer_id: c2.id } });
+    await assert.rejects(req(`ai-parts/orders/${q2.id}/jobs`, { body: { text: 'x' } }), (e) => /VIN/.test(e.message));
+  });
+} finally {
+  srv.kill(); mock.close();
+}
+if (fails.length) { console.log('\nНЕ ПРОЙДЕНО:', fails.join(', ')); process.exit(1); }
+console.log('\nИИ-запчастист: ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ');

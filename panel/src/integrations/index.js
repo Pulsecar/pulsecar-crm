@@ -1,5 +1,6 @@
 // Реестр интеграций: настройки хранятся в базе (Настройки → Интеграции), .env — запасной вариант
-import { one, run } from '../db.js';
+import { one, run, all } from '../db.js';
+import { encrypt, decrypt, secretsOn, isEnc } from '../secrets.js';
 
 /**
  * Каждая интеграция: поля (secret — маскируется и не отдаётся в браузер), описание, где взять токен.
@@ -276,13 +277,14 @@ export function cfg(key, { ignoreEnabled = false } = {}) {
   const d = def(key);
   const row = one('SELECT * FROM integrations WHERE key = ?', key);
   const c = row ? JSON.parse(row.config) : {};
+  for (const k of Object.keys(c)) if (isEnc(c[k])) c[k] = decrypt(c[k]);
   const out = {};
   for (const f of d.fields) {
     const envName = ENV[key]?.[f.k];
     out[f.k] = c[f.k] !== undefined && c[f.k] !== '' ? c[f.k] : envName && process.env[envName] ? process.env[envName] : f.def;
   }
   const envOn = ENV[key] && d.fields.filter((f) => f.required).every((f) => ENV[key][f.k] && process.env[ENV[key][f.k]]);
-  const enabled = row ? !!row.enabled : !!envOn;
+  const enabled = row ? !!row.enabled : !!envOn || !!d.defaultOn;
   if (!enabled && !ignoreEnabled) return null;
   return out;
 }
@@ -326,9 +328,35 @@ export function save(key, enabled, values = {}) {
     if (!(f.k in values)) continue;
     const v = values[f.k];
     if (f.secret && (v === '' || v === null || String(v).startsWith('••••'))) continue;
-    cur[f.k] = f.type === 'number' ? Number(v) : f.type === 'bool' ? !!v : v;
+    cur[f.k] = f.type === 'number' ? Number(v) : f.type === 'bool' ? !!v : f.secret ? encrypt(v) : v;
   }
   run(`INSERT INTO integrations (key, enabled, config, updated_at) VALUES (?, ?, ?, datetime('now'))
        ON CONFLICT(key) DO UPDATE SET enabled = excluded.enabled, config = excluded.config, updated_at = excluded.updated_at`,
     key, enabled ? 1 : 0, JSON.stringify(cur));
+}
+
+/** Зашифровать уже сохранённые открытые секреты (запускается при старте, если задан SECRETS_KEY). Возвращает число полей. */
+export function encryptStoredSecrets() {
+  if (!secretsOn()) return 0;
+  let n = 0;
+  for (const row of all('SELECT key, config FROM integrations')) {
+    const d = def(row.key);
+    if (!d) continue;
+    const c = JSON.parse(row.config || '{}');
+    let ch = false;
+    for (const f of d.fields) if (f.secret && c[f.k] && !isEnc(c[f.k])) { c[f.k] = encrypt(c[f.k]); ch = true; n++; }
+    if (ch) run('UPDATE integrations SET config = ? WHERE key = ?', JSON.stringify(c), row.key);
+  }
+  return n;
+}
+/** Откат: расшифровать всё обратно в открытый вид (tools/secrets.js decrypt) */
+export function decryptStoredSecrets() {
+  let n = 0;
+  for (const row of all('SELECT key, config FROM integrations')) {
+    const c = JSON.parse(row.config || '{}');
+    let ch = false;
+    for (const k of Object.keys(c)) if (isEnc(c[k])) { c[k] = decrypt(c[k]); ch = true; n++; }
+    if (ch) run('UPDATE integrations SET config = ? WHERE key = ?', JSON.stringify(c), row.key);
+  }
+  return n;
 }

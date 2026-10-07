@@ -6,6 +6,7 @@ import { SupplierParts } from './suppliers.js';
 import { CarDiagram, DMG } from './order-docs.js';
 import { detectBody, BODY_TYPES } from '../car-shapes.js';
 import { LaborBlock } from './labor.js';
+import { useAi, AiButton, AiBanner, AiItemInfo, AiModal } from './ai-parts.js';
 
 export const FLAGS = [['return_parts', 'Возврат деталей клиенту'], ['reg_doc', 'Техпаспорт'], ['test_drive', 'Согласие на тест-драйв'], ['fluids', 'Долить жидкости'], ['lights', 'Проверить освещение']];
 export const FUEL = ['', 'резерв', '1/4', '1/2', '3/4', 'полный'];
@@ -171,6 +172,10 @@ export function ItemsMW({ o, reload }) {
   const vats = String(S.vat_rates || '23,8,5,0').split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
   const labor = o.items.filter((i) => i.kind === 'labor');
   const parts = o.items.filter((i) => i.kind === 'part');
+  const aiOn = !!app.features?.aiParts && !mech;
+  const partCols = 6 + (quote ? 0 : 1) + (seePrice ? 4 + (showCost ? 1 : 0) + (showDisc ? 1 : 0) : 0);
+  const ai = useAi(o, aiOn);
+  const [aiOpen, setAiOpen] = useState(false);
   const add = async (it) => { await act(() => api(`orders/${o.id}/items`, { body: it })); reload(); };
   const save = async (it, patch) => { await act(() => api(`orders/${o.id}/items/${it.id}`, { method: 'PUT', body: patch })); reload(); };
   const del = async (it) => { await act(() => api(`orders/${o.id}/items/${it.id}`, { method: 'DELETE' })); reload(); };
@@ -193,10 +198,11 @@ export function ItemsMW({ o, reload }) {
 
     <div class="card tight">
       <div class="mw-bar"><h2>Товары</h2>${seePrice && html`<${NetGross} value=${modeP} set=${(v) => { setModeP(v); keep('pc-ng-parts', v); }} />`}</div>
+      ${aiOn && html`<${AiBanner} ai=${ai} reload=${reload} />`}
       ${parts.length ? html`<div class="tbl-wrap"><table class="tbl items mw-items" data-cols="parts"><thead>${partsHead}</thead><tbody>
-        ${parts.map((it, n) => html`<tr><td class="sub">${n + 1}</td>
+        ${parts.map((it, n) => html`<tr key=${'p' + it.id} class=${aiOn && ai.byItem[it.id] ? (ai.byItem[it.id].confidence === 'check' && ai.byItem[it.id].status === 'draft' ? 'ai-row ai-chk' : 'ai-row') : ''}><td class="sub">${n + 1}</td>
           <td><input class="inline-input iname" value=${it.name} disabled=${mech} onChange=${(e) => save(it, { name: e.target.value })} />
-            ${it.product_id && it.product_stock !== null && it.product_stock < it.qty ? html`<div class="stock-warn">на складе ${num(it.product_stock, 2)} — нужно заказать</div>` : ''}${!it.product_id ? html`<div class="sub">без склада</div>` : ''}</td>
+            ${it.product_id && it.product_stock !== null && it.product_stock < it.qty ? html`<div class="stock-warn">на складе ${num(it.product_stock, 2)} — нужно заказать</div>` : ''}${!it.product_id && !(aiOn && ai.byItem[it.id]) ? html`<div class="sub">без склада</div>` : ''}</td>
           <td><input class="inline-input" style="width:120px" value=${it.code || ''} disabled=${mech} onChange=${(e) => save(it, { code: e.target.value })} /></td>
           ${!quote && html`<td><select class="inline-input" style="max-width:170px" value=${it.task_id || ''} disabled=${mech} onChange=${(e) => save(it, { task_id: e.target.value ? Number(e.target.value) : null })}><option value="">—</option>${labor.map((l) => html`<option value=${l.id}>${l.name}</option>`)}</select></td>`}
           <td class="r">${numIn(it, 'qty', 'qty', it.qty, (v) => save(it, { qty: v }), mech, '1')}</td><td class="sub">${it.unit || 'szt.'}</td>
@@ -204,17 +210,20 @@ export function ItemsMW({ o, reload }) {
             ${showCost && html`<td class="r">${numIn(it, 'cost', 'price cost', shown(it, modeP, 'cost'), (v) => setPrice(it, modeP, v, 'cost'), !editPrice)}${it.cost > 0 ? html`<div class="sub">маржа ${zl(net(lineGross(it), it.vat) - it.qty * it.cost)}</div>` : ''}</td>`}
             ${showDisc && html`<td class="r">${numIn(it, 'discount', 'disc', it.discount, (v) => save(it, { discount: v }), !editPrice, '1')}</td>`}<td>${vatSel(it)}</td>
             <td class="r nowrap">${zl(net(lineGross(it), it.vat))}</td><td class="r nowrap"><b>${zl(lineGross(it))}</b></td>`}
-          <td class="act">${!mech && html`<button class="icon-btn" title="Удалить" onClick=${() => del(it)}><${Icon} n="trash" /></button>`}</td></tr>`)}
+          <td class="act">${!mech && html`<button class="icon-btn" title="Удалить" onClick=${() => del(it)}><${Icon} n="trash" /></button>`}</td></tr>
+          ${aiOn && ai.byItem[it.id] && html`<tr key=${'a' + it.id} class=${'ai-sub' + (ai.byItem[it.id].confidence === 'check' && ai.byItem[it.id].status === 'draft' ? ' ai-chk' : '')}><td></td><td colspan=${partCols - 1}><${AiItemInfo} line=${ai.byItem[it.id]} reload=${reload} ai=${ai} /></td></tr>`}`)}
         ${seePrice && sumRow(parts, modeP, (quote ? 5 : 6) + 1 + (showCost ? 1 : 0) + (showDisc ? 1 : 0) + 1, html`<td></td>`)}</tbody></table></div>` : html`<div class="empty" style="padding:16px">Товаров пока нет</div>`}
       ${!mech && html`<div class="mw-actions" data-ui="order.btn.addpart">
         <div class="grow" style="max-width:480px"><${Picker} placeholder="+ Со склада: название, код, EAN…" path=${(q) => 'products?q=' + encodeURIComponent(q)}
           render=${(p) => html`<b>${p.name}</b> <span class="sub">${p.code || ''} · в наличии ${num(p.stock - p.reserved, 2)} ${p.unit} · ${zl(p.sell_price)}</span>`}
           onPick=${(p) => add({ kind: 'part', product_id: p.id, name: p.name, code: p.code, qty: 1, unit: p.unit, price: p.sell_price, vat: p.vat, discount: discP })}
           extra=${{ label: 'Без склада (заказать / своя)', onClick: (q) => q && add({ kind: 'part', name: q, qty: 1, unit: 'szt.', price: 0, discount: discP }) }} /></div>
+        ${aiOn && html`<${AiButton} ai=${ai} onClick=${() => setAiOpen(true)} />`}
         <button class="btn sm" onClick=${() => setIc(true)}><${Icon} n="box" />От поставщика</button>
         <button class="btn sm" onClick=${() => add({ kind: 'part', name: 'Nowy towar', qty: 1, unit: 'szt.', price: 0, discount: discP })}><${Icon} n="plus" />Добавить позицию</button></div>`}
     </div>
     ${seePrice && html`<div class="mw-total"><span>Итого нетто <b>${zl(o.total_net)}</b></span><span class="big">Итого брутто: ${zl(o.total)}</span></div>`}
+    ${aiOpen && html`<${AiModal} o=${o} ai=${ai} reload=${reload} onClose=${() => { setAiOpen(false); reload(); }} />`}
     ${ic && html`<${SupplierParts} o=${o} onClose=${() => { setIc(false); reload(); }} onAdd=${async (it) => { await add(it); }} />`}
     <div class="card"><label class="f">Описание для механика<textarea rows="2" value=${o.mechanic_note || ''} disabled=${mech}
       onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { mechanic_note: e.target.value } }), 'Сохранено'); }}></textarea></label>

@@ -80,12 +80,15 @@ function hideCols() {
     for (const tr of t.rows) {
       let p = 0;
       for (const td of tr.cells) {
-        const span = Number(td.dataset.cs || td.colSpan || 1);
+        // исходный colspan запоминаем; если Preact переиспользовал ячейку с другим colspan — берём новый (иначе таблица «разъезжается»)
+        const cur = td.hasAttribute('colspan') ? td.colSpan : 1;
+        if (td.dataset.cs && String(cur) !== td.dataset.cset) { delete td.dataset.cs; delete td.dataset.cset; }
+        const span = Number(td.dataset.cs || cur);
         if (span > 1 && !td.dataset.cs) td.dataset.cs = String(span);
         let covered = 0;
         for (let x = p; x < p + span; x++) if (off.has(x)) covered++;
         if (span === 1) td.classList.toggle('ui-hc', covered === 1);
-        else { const left = span - covered; td.classList.toggle('ui-hc', left <= 0); if (left > 0) td.colSpan = left; }
+        else { const left = span - covered; td.classList.toggle('ui-hc', left <= 0); if (left > 0) { td.colSpan = left; td.dataset.cset = String(left); } }
         p += span;
       }
     }

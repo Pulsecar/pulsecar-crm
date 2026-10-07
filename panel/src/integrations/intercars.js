@@ -49,6 +49,10 @@ async function ic(path, { method = 'GET', body, query } = {}, retry = true) {
   return j;
 }
 
+/** Чтение каталога / цен / наличия IC для модуля ИИ-запчастиста (только GET каталога и расчёт цен — без заказов) */
+export const icRead = (path, opts = {}) => ic(path, { ...opts, method: opts.body ? 'POST' : 'GET' });
+export const icConf = () => conf();
+
 const d2s = (d) => d.toISOString().slice(0, 10);
 
 /** Проверка связи: данные клиента и финансы */
