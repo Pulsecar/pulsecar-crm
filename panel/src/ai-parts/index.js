@@ -63,7 +63,7 @@ export function mountAiParts(crm, who) {
     if (limit && one("SELECT COUNT(*) n FROM ai_jobs WHERE kind = 'pick' AND substr(created_at,1,7) = strftime('%Y-%m','now')").n >= limit)
       throw new HttpError(429, `Лимит подборов в этом месяце исчерпан (${limit}). Увеличить: Настройки → ИИ-запчастист.`);
     const request = { text, level: LEVELS[b.level] ? b.level : 'mid', urgency: ['today', 'tomorrow', 'any'].includes(b.urgency) ? b.urgency : 'any',
-      comment: String(b.comment || '').slice(0, 1000), paste: String(b.paste || '').slice(0, 20000), ext: !!b.ext, extAllegro: !!b.extAllegro };
+      comment: String(b.comment || '').slice(0, 1000), paste: String(b.paste || '').slice(0, 20000), ext: !!b.ext, extAllegro: !!b.extAllegro, extV: Math.max(0, Math.round(Number(b.extV) || 0)) };
     const id = insert('ai_jobs', { order_id: o.id, request: JSON.stringify(request), created_by: s.name,
       steps: JSON.stringify(STEPS.map(([key]) => ({ key, state: 'wait' }))) });
     ev('job', request, { job_id: id, order_id: o.id, staff: s.name });
@@ -185,6 +185,7 @@ export function mountAiParts(crm, who) {
       if (l.link) dropOrderLink(j.order_id, l.link);
       run("UPDATE ai_lines SET status = 'removed', updated_at = datetime('now') WHERE id = ?", l.id);
     }
+    dropJobNote(j.order_id, j.id);
     recalc(j.order_id);
     run("UPDATE ai_jobs SET status = CASE WHEN status IN ('queued','running') THEN 'cancelled' ELSE status END WHERE id = ?", j.id);
     ev('undo', { n: lines.length }, { job_id: j.id, order_id: j.order_id, staff: s.name });
@@ -303,6 +304,17 @@ function addOrderLink(orderId, title, v) {
   if (!o || String(o.internal_note || '').includes(v.url)) return;
   const row = `ИИ-подбор — заказать на Allegro: ${[title, v.brand, v.article].filter(Boolean).join(' ')}, закупка ${String(v.buyGross ?? v.sellGross).replace('.', ',')} zł brutto${v.delivery ? ', ' + v.delivery : ''} — ${v.url}`;
   run('UPDATE orders SET internal_note = ? WHERE id = ?', [o.internal_note, row].filter((x) => x && String(x).trim()).join('\n'), orderId);
+}
+/** Строка подбора во внутреннем описании (с номером подбора — уберётся при отмене) */
+export function addJobNote(orderId, jobId, text) {
+  const o = one('SELECT internal_note FROM orders WHERE id = ?', orderId);
+  if (!o) return;
+  run('UPDATE orders SET internal_note = ? WHERE id = ?', [o.internal_note, `ИИ-подбор #${jobId} — ${text}`].filter((x) => x && String(x).trim()).join('\n'), orderId);
+}
+function dropJobNote(orderId, jobId) {
+  const o = one('SELECT internal_note FROM orders WHERE id = ?', orderId);
+  if (!o?.internal_note?.includes(`ИИ-подбор #${jobId} — `)) return;
+  run('UPDATE orders SET internal_note = ? WHERE id = ?', o.internal_note.split('\n').filter((x) => !x.startsWith(`ИИ-подбор #${jobId} — `)).join('\n').trim() || null, orderId);
 }
 function dropOrderLink(orderId, url) {
   if (!url) return;

@@ -138,7 +138,7 @@ export function AiModal({ o, ai, onClose, reload }) {
   };
 
   const start = async () => {
-    const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: { ...f, ext: extOk, extAllegro } }));
+    const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: { ...f, ext: extOk, extAllegro, extV: extN } }));
     if (r) setJob({ id: r.id, status: 'queued', steps: d.steps.map((s) => ({ key: s.key, state: 'wait' })) });
   };
   const label = Object.fromEntries((d?.steps || []).map((s) => [s.key, s.label]));

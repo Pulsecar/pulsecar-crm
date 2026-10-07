@@ -39,7 +39,8 @@
   }
 
   globalThis.ecatRun = async function ecatRun({ oes, host }, progress) {
-    oes = [...new Set((oes || []).map((x) => String(x).toUpperCase().replace(/[^A-Z0-9]/g, '')).filter((x) => x.length >= 5))].slice(0, 15);
+    // строка — OE-номер (сжимаем), { q } — поиск по названию (масла, жидкости), как есть
+    oes = [...new Set((oes || []).map((x) => (x && typeof x === 'object' ? String(x.q || '').trim().slice(0, 80) : String(x).toUpperCase().replace(/[^A-Z0-9]/g, ''))).filter((x) => x.length >= 5))].slice(0, 15);
     if (!oes.length) return { ok: true, results: [] };
     const tabs = await chrome.tabs.query({ url: 'https://*.e-cat.intercars.eu/*' });
     const base = host && /^[a-z]{2}\.e-cat\.intercars\.eu$/.test(host) ? 'https://' + host : tabs[0] ? new URL(tabs[0].url).origin : 'https://pl.e-cat.intercars.eu';
@@ -48,7 +49,7 @@
     const results = [];
     for (const [i, oe] of oes.entries()) {
       if (i) await pause();
-      progress(`Inter Cars: аналоги для OE ${oe} (${i + 1} из ${oes.length})…`, results);
+      progress(`Inter Cars: ${/\s/.test(oe) ? '' : 'аналоги для OE '}${oe} (${i + 1} из ${oes.length})…`, results);
       await chrome.tabs.update(tabId, { url: `${base}/pl/Pe%C5%82na-oferta/c/tecdoc?q=${encodeURIComponent(oe)}%3Adefault&initialSearch=true` });
       await waitLoad(tabId);
       let r = { items: [] };

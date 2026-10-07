@@ -6,7 +6,7 @@ import { recalc } from '../orders.js';
 import { decodeVin } from '../integrations/services.js';
 import { callTool } from './claude.js';
 import { findByArticle, quote, normBrand, norm, whenText, icOn } from './ic.js';
-import { addAiLine, addAiLabor } from './index.js';
+import { addAiLine, addAiLabor, addJobNote } from './index.js';
 import { icSell, allegroSell, allegroMarkup, minMargin } from './pricing.js';
 import { preferredBrands, blacklist } from './rules.js';
 import { similarJobs, jobKnowledge, trainOnHistory, trainedStat } from './history.js';
@@ -147,6 +147,9 @@ async function pick(jobId) {
   // OE — номер производителя (есть цифры, не название масла); масла и жидкости ищем по артикулам, не по OE
   const oeOk = (x) => x.length >= 5 && (x.match(/\d/g) || []).length >= 4 && !/\d+W\d+/.test(x);
   const oeList = [...new Set(parts.filter((p) => p.unit !== 'l').flatMap((p) => (p.oe || []).map((x) => norm(x.number)).filter(oeOk)))].slice(0, 15);
+  // масла и жидкости — поиск в e-Catalog по названию (расширение 1.6.2+)
+  const nameQ = (p) => String(p.name_pl || '').replace(/olej silnikowy|olej|płyn|syntetyczny|silnikowy/gi, ' ').replace(/\s+/g, ' ').trim();
+  if ((req.extV || 0) >= 10602) for (const p of parts) if (p.unit === 'l' && nameQ(p).length >= 5 && oeList.length < 15) { p._q = nameQ(p); oeList.push({ q: p._q }); }
   if (req.ext && oeList.length && !cancelled()) {
     step('prices', 'run', `ищу аналоги по ${oeList.length} OE-номерам в Inter Cars e-Catalog (окно подбора не закрывайте)…`);
     withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ wait: 'ecat', need: oeList }), jobId));
@@ -161,6 +164,7 @@ async function pick(jobId) {
     if (ecat?.length) {
       // какие товары из списка e-Catalog — именно та деталь, что нужна (комплект с помпой / без, фильтр, а не корпус…)
       const byOe = new Map(ecat.map((r) => [norm(r.oe), r.items || []]));
+      for (const p of parts) if (p._q) p.oe = [...(p.oe || []), { number: p._q, from: 'search', hidden: true }];
       const cand = parts.map((p, pi) => ({ pi, key: p.key, name_pl: p.name_pl, check: p.check || null,
         items: [...new Map((p.oe || []).flatMap((x) => byOe.get(norm(x.number)) || []).map((it) => [it.code, it])).values()].slice(0, 40) })).filter((c) => c.items.length);
       if (cand.length) {
@@ -172,7 +176,8 @@ async function pick(jobId) {
             maxTokens: 3000, timeout: 90_000,
           });
           run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u3.input_tokens || 0, u3.output_tokens || 0, jobId);
-          const oeNums = new Set(parts.flatMap((p) => (p.oe || []).map((x) => norm(x.number))));
+          const oeNums = new Set(parts.flatMap((p) => (p.oe || []).filter((x) => !x.hidden).map((x) => norm(x.number))));
+      for (const p of parts) if (p._q) p.oe = (p.oe || []).filter((x) => !x.hidden);
           for (const pp of pk.parts || []) {
             const c = cand.find((x) => x.key === pp.key);
             if (!c) continue;
@@ -323,6 +328,7 @@ async function pick(jobId) {
   } else if (noStock.length && !req.extAllegro) allegroNote = 'Поиск на Allegro работает через расширение Pulsecar 1.6+ — установите его, чтобы ассистент искал то, чего нет в Inter Cars';
 
   let added = 0, toCheck = 0, fromAllegro = 0;
+  const notFound = [];
   const hist = new Set(verified.map((v) => norm(v.oe)));
   const pasted = norm(req.paste || '');
   for (const [pi, p] of parts.entries()) {
@@ -349,6 +355,7 @@ async function pick(jobId) {
       group_key: String(p.key || p.name_pl).toLowerCase().slice(0, 60), title: p.name_pl, qty: Number(p.qty) || 1, unit: p.unit || 'szt.', qty_note: p.qty_note || null,
       oe, variants: chosen ? variants : {}, chosen, confidence: reasons.length ? 'check' : 'high', reason: reasons.join(' · ') || null,
     };
+    if (!chosen) { notFound.push(`${p.name_pl}${oe.length ? ' (OE ' + oe.map((x) => x.number).join(', ') + ')' : ''}${p.check ? ' — ' + p.check : ''}`); continue; }
     const id = withDb(d, () => addAiLine(jobId, o.id, line));
     if (id) { added++; if (reasons.length) toCheck++; if (chosen && supplierSrc === 'allegro') fromAllegro++; }
   }
@@ -361,10 +368,12 @@ async function pick(jobId) {
     const id = withDb(d, () => addAiLabor(jobId, o.id, { title: String(w.job).slice(0, 200), hours: Number(w.hours), src: w.source === 'history' ? 'history' : 'estimate', purpose: w.purpose || null }));
     if (id) { laborAdded++; added++; }
   }
+  if (notFound.length) withDb(d, () => addJobNote(o.id, jobId, `нет в наличии${req.extAllegro ? ' в Inter Cars и на Allegro' : ' в Inter Cars'}, подберите вручную: ${notFound.join('; ')}`));
   recalc(o.id);
-  const note = [data.note, allegroNote].filter(Boolean).join(' · ') || null;
+  const note = [data.note, allegroNote, notFound.length ? `не найдено в наличии: ${notFound.length}` : null].filter(Boolean).join(' · ') || null;
   run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), allegro: fromAllegro, labor: laborAdded }), jobId);
-  step('add', 'ok', added ? `добавлено ${added} (работ ${laborAdded}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}${allegroNote ? ' · ' + allegroNote : ''}` : 'новых позиций нет — всё уже в выцене');
+  step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
+    + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (allegroNote ? ' · ' + allegroNote : ''));
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
 }
 

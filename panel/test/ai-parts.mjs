@@ -123,7 +123,7 @@ try {
   await t('подбор: позиции в выцене, уровни по цене продажи, цена = рекомендуемая Inter Cars', async () => {
     first = await run({ text: 'замена ГРМ + масляный фильтр + свечи', level: 'mid', urgency: 'any' });
     assert.equal(first.status, 'done', first.error);
-    assert.equal(first.added, 4, 'три детали + работа'); assert.ok(first.steps.every((s) => s.state === 'ok'));
+    assert.equal(first.added, 3, 'две детали в наличии + работа; свечей нет в наличии — не добавлены'); assert.ok(first.steps.every((s) => s.state === 'ok'));
     const d = await req(`ai-parts/orders/${q.id}`);
     const tk = d.lines.find((l) => l.group_key === 'timing_kit');
     // только в наличии (Gates — нет): SKF 520 < Contitech 610 < INA 700 → эконом SKF, средний — середина, OE — VAG
@@ -137,8 +137,8 @@ try {
     assert.equal(item.price, 610); assert.equal(item.cost, 330); assert.equal(item.code, 'CT1168K2');
     const of = d.lines.find((l) => l.group_key === 'oil_filter');
     assert.equal(of.variants.eco.sellGross, 36.9, 'нет рекомендуемой цены → наценка 50% от закупки'); assert.equal(of.confidence, 'check');
-    const sp = d.lines.find((l) => l.group_key === 'spark_plug');
-    assert.equal(sp.chosen, null); assert.equal(sp.confidence, 'check'); assert.match(sp.reason, /Нет в наличии в Inter Cars/);
+    assert.ok(!d.lines.some((l) => l.group_key === 'spark_plug'), 'нет в наличии — в выцену не добавляем');
+    assert.match(o.internal_note, /ИИ-подбор #\d+ — нет в наличии в Inter Cars, подберите вручную: Świeca zapłonowa — Проверьте калильное число/);
     // работа с нормой часов: единица «oper» → цена = часы × ставка RBH брутто, пометка «что входит + часы»
     const lab = d.lines.find((l) => l.kind === 'labor');
     assert.equal(lab.title, 'Wymiana rozrządu'); assert.equal(lab.hours, 3.5);
@@ -163,8 +163,10 @@ try {
     await req('ai-parts/lines/' + d.lines[1].id, { body: { status: 'accepted' } });
     const before = (await req('orders/' + q.id)).items.length;
     const r = await req(`ai-parts/jobs/${first.id}/undo`, { method: 'POST' });
-    assert.equal(r.n, 3);
-    assert.equal((await req('orders/' + q.id)).items.length, before - 3);
+    assert.equal(r.n, 2);
+    const after = await req('orders/' + q.id);
+    assert.equal(after.items.length, before - 2);
+    assert.ok(!String(after.internal_note || '').includes(`ИИ-подбор #${first.id} — `), 'отмена убирает и строку «не найдено» этого подбора');
     assert.equal(new DatabaseSync(DB).prepare('SELECT COUNT(*) n FROM ai_verified').get().n, 1);
   });
   await t('правила подбора: бренды уровня «Средний», чёрный список, указания ассистенту', async () => {
