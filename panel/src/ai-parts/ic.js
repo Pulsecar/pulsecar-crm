@@ -7,7 +7,7 @@ import { round2 } from '../util.js';
 export const icOn = () => { const c = cfg('intercars'); return !!(c?.clientId && c.clientSecret); };
 export const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 // одинаковые бренды под разными названиями
-const BRAND_ALIAS = { MANNFILTER: 'MANN', MANN: 'MANN', VAG: 'VAG', VW: 'VAG', VOLKSWAGEN: 'VAG', AUDI: 'VAG', SKODA: 'VAG', SEAT: 'VAG', BOSCH: 'BOSCH', ROBERTBOSCH: 'BOSCH',
+const BRAND_ALIAS = { MANNFILTER: 'MANN', MANN: 'MANN', KNECHT: 'MAHLE', MAHLE: 'MAHLE', MAHLEKNECHT: 'MAHLE', FEBIBILSTEIN: 'FEBI', FEBI: 'FEBI', SWAG: 'FEBI', HERTHBUSS: 'HERTHBUSS', HERTHBUSSJAKOPARTS: 'HERTHBUSS', BLUEPRINT: 'BLUEPRINT', ADBLUEPRINT: 'BLUEPRINT', VAG: 'VAG', VW: 'VAG', VOLKSWAGEN: 'VAG', AUDI: 'VAG', SKODA: 'VAG', SEAT: 'VAG', BOSCH: 'BOSCH', ROBERTBOSCH: 'BOSCH',
   LEMFORDER: 'LEMFOERDER', LEMFOERDER: 'LEMFOERDER', TRW: 'TRW', TRWAUTOMOTIVE: 'TRW', SKF: 'SKF', INA: 'INA', LUK: 'LUK', FAG: 'FAG', SCHAEFFLER: 'INA', CONTITECH: 'CONTITECH', CONTINENTAL: 'CONTITECH',
   MERCEDES: 'MB', MERCEDESBENZ: 'MB', MB: 'MB', BMW: 'BMW', MINI: 'BMW', PSA: 'PSA', PEUGEOT: 'PSA', CITROEN: 'PSA', RENAULT: 'RENAULT', DACIA: 'RENAULT', OPEL: 'GM', GM: 'GM', TOYOTA: 'TOYOTA', LEXUS: 'TOYOTA',
   FORD: 'FORD', HYUNDAI: 'HYUNDAI', KIA: 'HYUNDAI', HYUNDAIKIA: 'HYUNDAI', FIAT: 'FIAT', NISSAN: 'NISSAN', HONDA: 'HONDA', MAZDA: 'MAZDA', VOLVO: 'VOLVO', NGK: 'NGK', NGKSPARKPLUG: 'NGK', DENSO: 'DENSO' };
@@ -27,13 +27,16 @@ export async function findByArticle(article, brand, cache) {
     for (const p of r?.products || []) {
       const okArt = norm(p.articleNumber) === want || norm(p.index) === want || norm(p.index).endsWith(want) || norm(p.tecDoc) === want;
       if (!okArt) continue;
-      if (wb && p.brand && normBrand(p.brand) !== wb) continue;
-      if (!out.some((x) => x.sku === p.sku)) out.push({ sku: p.sku, index: p.index, brand: p.brand, articleNumber: p.articleNumber, name: p.shortDescription || p.description || '' });
+      const brandOk = !wb || !p.brand || normBrand(p.brand) === wb;
+      if (!out.some((x) => x.sku === p.sku)) out.push({ sku: p.sku, index: p.index, brand: p.brand, articleNumber: p.articleNumber, name: p.shortDescription || p.description || '', brandOk });
     }
     if (out.length) break;
   }
-  cache?.set(key, out);
-  return out;
+  // бренд совпал — берём только такие; не совпал ни один, но артикул точный и товар один — берём (бренд в IC записан иначе)
+  const ok = out.filter((x) => x.brandOk);
+  const res = (ok.length ? ok : out.length === 1 ? out : []).map(({ brandOk, ...x }) => x);
+  cache?.set(key, res);
+  return res;
 }
 
 /** Цены и наличие по списку SKU (до 100 за запрос): закупка нетто, рекомендуемая IC цена продажи брутто, наличие и срок */
