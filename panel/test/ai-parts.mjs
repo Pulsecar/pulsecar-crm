@@ -255,8 +255,8 @@ try {
     for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 200)); }
     assert.equal(j.status, 'done', j.error);
     const sp = (await req(`ai-parts/orders/${q7.id}`)).lines.find((l) => l.group_key === 'spark_plug');
-    assert.equal(sp.variants.eco.supplier, 'Allegro'); assert.equal(sp.variants.eco.buyGross, 40, 'закупка с доставкой');
-    assert.equal(sp.variants.eco.sellGross, 60, 'до 100 zł — наценка 50%');
+    assert.equal(sp.variants.eco.supplier, 'Allegro'); assert.equal(sp.variants.eco.buyGross, 32.5, 'закупка + доставка, разделённая на 4 шт.');
+    assert.equal(sp.variants.eco.sellGross, 48.75, 'до 100 zł — наценка 50%');
     assert.equal(sp.variants.mid.sellGross, 261, '180 zł — наценка 45%');
     assert.equal(sp.variants.oe.sellGross, 1560, 'дороже 1000 zł — 30%');
     assert.ok(!Object.values(sp.variants).some((v) => v.sku === 'allegro:33333333333'), 'б/у не берём');

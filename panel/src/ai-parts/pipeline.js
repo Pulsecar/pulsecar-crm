@@ -378,7 +378,9 @@ async function pick(jobId) {
           const c = cand.find((x) => parts[x.pi].key === pp.key);
           if (!c) continue;
           const toV = (it) => {
-            const buy = round2(it.withDelivery || it.gross); // закупка брутто с доставкой
+            // закупка брутто за 1 шт.; доставка одна на заказ — делим на количество
+            const qn = Math.max(1, Number(parts[c.pi].qty) || 1);
+            const buy = round2(it.gross + Math.max(0, (it.withDelivery || it.gross) - it.gross) / qn);
             const sell = allegroSell(buy);
             return perLitre({ brand: it.brand || '', article: it.article || '', sku: 'allegro:' + it.offerId, url: it.url, title: it.title, priceNet: round2(it.net ? it.net * (buy / it.gross) : buy / 1.23), buyGross: buy,
               sellGross: sell, sellNet: round2(sell / 1.23), sellSrc: 'allegro', markup: allegroMarkup(buy), availability: 1, delivery: it.delivery || '', supplier: 'Allegro' }, parts[c.pi].unit, it.title);
