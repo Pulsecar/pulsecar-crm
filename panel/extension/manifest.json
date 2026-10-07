@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pulsecar — запчасти от поставщика",
   "short_name": "Pulsecar",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Кнопка «Pulsecar» на сайтах поставщиков и Allegro: запчасть сразу в заказ, выцену или на склад, фактуры и WZ — в приход CRM Pulsecar. Печать чеков на фискальной кассе Novitus.",
   "icons": {
     "16": "icons/icon16.png",

@@ -39,6 +39,11 @@ const mock = createServer(async (req, res) => {
       // из списка e-Catalog берём только комплекты (не одиночный ремень)
       return json(200, { usage: { input_tokens: 500, output_tokens: 50 }, content: [{ type: 'tool_use', name: 'pick_items', input: { parts: ctx.parts.map((p) => ({ key: p.key, codes: p.items.filter((i) => /Zestaw/.test(i.name)).map((i) => i.code) })) } }] });
     }
+    if (b.tool_choice.name === 'pick_offers') {
+      const ctx = JSON.parse(b.messages[0].content);
+      // б/у и «do wyboru» не берём; первое — аналог, OE — помеченное
+      return json(200, { usage: { input_tokens: 300, output_tokens: 40 }, content: [{ type: 'tool_use', name: 'pick_offers', input: { parts: ctx.parts.map((p) => ({ key: p.key, offers: p.offers.filter((o) => !/używana/i.test(o.title)).map((o) => ({ id: o.id, oe: /Oryginał/.test(o.title) })) })) } }] });
+    }
     assert.equal(b.tool_choice.name, 'parts_plan');
     const ctx = JSON.parse(b.messages[0].content);
     if (ctx.request !== undefined) lastCtx = ctx;
@@ -118,21 +123,27 @@ try {
   await t('подбор: позиции в выцене, уровни по цене продажи, цена = рекомендуемая Inter Cars', async () => {
     first = await run({ text: 'замена ГРМ + масляный фильтр + свечи', level: 'mid', urgency: 'any' });
     assert.equal(first.status, 'done', first.error);
-    assert.equal(first.added, 3); assert.ok(first.steps.every((s) => s.state === 'ok'));
+    assert.equal(first.added, 4, 'три детали + работа'); assert.ok(first.steps.every((s) => s.state === 'ok'));
     const d = await req(`ai-parts/orders/${q.id}`);
     const tk = d.lines.find((l) => l.group_key === 'timing_kit');
-    // аналоги по цене продажи: SKF 520 < Contitech 610 < Gates 640 < INA 700 → эконом SKF, средний — середина, OE — VAG
+    // только в наличии (Gates — нет): SKF 520 < Contitech 610 < INA 700 → эконом SKF, средний — середина, OE — VAG
     assert.equal(tk.variants.eco.brand, 'SKF'); assert.equal(tk.variants.eco.sellGross, 520); assert.equal(tk.variants.eco.priceNet, 300);
-    assert.equal(tk.variants.mid.brand, 'GATES');
+    assert.equal(tk.variants.mid.brand, 'CONTITECH');
+    assert.ok(!Object.values(tk.variants).some((v) => v.brand === 'GATES'), 'нет в наличии — не предлагаем');
     assert.equal(tk.variants.oe.brand, 'VAG'); assert.equal(tk.variants.oe.sellGross, 1200);
     assert.equal(tk.chosen, 'mid'); assert.equal(tk.confidence, 'high');
     const o = await req('orders/' + q.id);
     const item = o.items.find((i) => i.id === tk.order_item_id);
-    assert.equal(item.price, 640); assert.equal(item.cost, 350); assert.equal(item.code, 'K015688XS');
+    assert.equal(item.price, 610); assert.equal(item.cost, 330); assert.equal(item.code, 'CT1168K2');
     const of = d.lines.find((l) => l.group_key === 'oil_filter');
     assert.equal(of.variants.eco.sellGross, 36.9, 'нет рекомендуемой цены → наценка 50% от закупки'); assert.equal(of.confidence, 'check');
     const sp = d.lines.find((l) => l.group_key === 'spark_plug');
-    assert.equal(sp.chosen, null); assert.equal(sp.confidence, 'check'); assert.match(sp.reason, /Не найдено в Inter Cars/);
+    assert.equal(sp.chosen, null); assert.equal(sp.confidence, 'check'); assert.match(sp.reason, /Нет в наличии в Inter Cars/);
+    // работа с нормой часов: единица «oper» → цена = часы × ставка RBH брутто, пометка «что входит + часы»
+    const lab = d.lines.find((l) => l.kind === 'labor');
+    assert.equal(lab.title, 'Wymiana rozrządu'); assert.equal(lab.hours, 3.5);
+    const li = o.items.find((i) => i.id === lab.order_item_id);
+    assert.equal(li.kind, 'labor'); assert.equal(li.unit, 'oper'); assert.equal(li.price, 1076.25); assert.match(li.norm_src, /ИИ: ~3,5 h \(история сервиса\)/); assert.match(li.note, /~3,5 h × 250 zł\/h/);
     assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
   });
   await t('смена варианта меняет позицию в выцене', async () => {
@@ -152,8 +163,8 @@ try {
     await req('ai-parts/lines/' + d.lines[1].id, { body: { status: 'accepted' } });
     const before = (await req('orders/' + q.id)).items.length;
     const r = await req(`ai-parts/jobs/${first.id}/undo`, { method: 'POST' });
-    assert.equal(r.n, 2);
-    assert.equal((await req('orders/' + q.id)).items.length, before - 2);
+    assert.equal(r.n, 3);
+    assert.equal((await req('orders/' + q.id)).items.length, before - 3);
     assert.equal(new DatabaseSync(DB).prepare('SELECT COUNT(*) n FROM ai_verified').get().n, 1);
   });
   await t('правила подбора: бренды уровня «Средний», чёрный список, указания ассистенту', async () => {
@@ -166,8 +177,8 @@ try {
     let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
     assert.equal(j.status, 'done', j.error);
     const tk = (await req(`ai-parts/orders/${q3.id}`)).lines.find((l) => l.group_key === 'timing_kit');
-    // INA и Gates в правилах → средний — середина из них (по цене: Gates 640, INA 700 → Gates); Contitech в чёрном списке не проверялся
-    assert.equal(tk.variants.mid.brand, 'GATES'); assert.ok(!calls.some((x) => x.includes('CT1168K2')) || true);
+    // INA и Gates в правилах → средний из них; Gates нет в наличии → INA; Contitech в чёрном списке
+    assert.equal(tk.variants.mid.brand, 'INA'); assert.ok(!calls.some((x) => x.includes('CT1168K2')) || true);
     assert.ok(Array.isArray((await req('ai-parts/rules/suggest')).brands));
   });
   await t('обучение на истории: типовые детали к работе, часы, пометка «для чего + часы» в позиции', async () => {
@@ -209,6 +220,54 @@ try {
     assert.equal(tk.variants.eco.sku, 'EC2'); assert.equal(tk.variants.eco.sellGross, 460);
     assert.equal(tk.variants.mid.sku, 'EC3');
     assert.ok(!Object.values(tk.variants).some((v) => v.sku === 'EC1'), 'одиночный ремень не попал');
+  });
+  await t('минимальная маржа: рекомендуемая цена IC ниже закупки брутто + минимум → поднимаем, выше — не трогаем', async () => {
+    await req('ai-parts/settings', { method: 'PUT', body: { minMargin: 80 } });
+    const q6 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${q6.id}/jobs`, { body: { text: 'ГРМ', level: 'eco' } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'done', j.error);
+    const tk = (await req(`ai-parts/orders/${q6.id}`)).lines.find((l) => l.group_key === 'timing_kit');
+    assert.equal(tk.variants.eco.sellGross, 664.2, 'SKF: 300 нетто × 1,23 × 1,8'); assert.equal(tk.variants.eco.sellSrc, 'min');
+    assert.equal(tk.variants.oe.sellGross, 1549.8, 'VAG: 700 × 1,23 × 1,8 > 1200');
+    await req('ai-parts/settings', { method: 'PUT', body: { minMargin: 30 } });
+    assert.equal((await req('ai-parts/settings')).minMargin, 30);
+  });
+  await t('нет в наличии в Inter Cars → Allegro через расширение: наценка по сумме, ссылка в пометке и во внутреннем описании', async () => {
+    const q7 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id, internal_note: 'Клиент просит позвонить' } });
+    const { id } = await req(`ai-parts/orders/${q7.id}/jobs`, { body: { text: 'свечи', level: 'mid', extAllegro: true } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (j.status === 'waiting' || ['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'waiting', j.error); assert.equal(j.result.wait, 'allegro');
+    assert.deepEqual(j.result.allegroNeed.map((x) => x.key), ['spark_plug']);
+    await assert.rejects(req(`ai-parts/jobs/${id}/ecat`, { body: { results: [] } }).then((r) => { if (r.late) throw new Error('late'); }));
+    await req(`ai-parts/jobs/${id}/allegro`, { body: { results: [{ key: 'spark_plug', q: 'x', items: [
+      { offerId: '11111111111', title: 'Świeca NGK BKR6E komplet 4 szt', brand: 'NGK', article: 'BKR6E', gross: 30, withDelivery: 40, delivery: 'dostawa jutro' },
+      { offerId: '22222222222', title: 'Świece Bosch 4 szt', brand: 'Bosch', article: 'FR7DC', gross: 180, delivery: 'dostawa pojutrze' },
+      { offerId: '33333333333', title: 'Świeca używana', brand: 'NGK', article: 'BKR6E', gross: 5 },
+      { offerId: '44444444444', title: 'Oryginał VW świece', brand: 'VW', article: '101905601F', gross: 1200 },
+      { offerId: 'bad', title: 'x', gross: 10 }] }] } });
+    for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 200)); }
+    assert.equal(j.status, 'done', j.error);
+    const sp = (await req(`ai-parts/orders/${q7.id}`)).lines.find((l) => l.group_key === 'spark_plug');
+    assert.equal(sp.variants.eco.supplier, 'Allegro'); assert.equal(sp.variants.eco.buyGross, 40, 'закупка с доставкой');
+    assert.equal(sp.variants.eco.sellGross, 60, 'до 100 zł — наценка 50%');
+    assert.equal(sp.variants.mid.sellGross, 261, '180 zł — наценка 45%');
+    assert.equal(sp.variants.oe.sellGross, 1560, 'дороже 1000 zł — 30%');
+    assert.ok(!Object.values(sp.variants).some((v) => v.sku === 'allegro:33333333333'), 'б/у не берём');
+    assert.equal(sp.chosen, 'mid'); assert.match(sp.reason, /Allegro/);
+    let o = await req('orders/' + q7.id);
+    const it = o.items.find((i) => i.id === sp.order_item_id);
+    assert.equal(it.price, 261); assert.match(it.note, /Allegro \(заказать заранее\): https:\/\/allegro\.pl\/oferta\/22222222222/);
+    assert.match(o.internal_note, /^Клиент просит позвонить\nИИ-подбор — заказать на Allegro: .*https:\/\/allegro\.pl\/oferta\/22222222222$/);
+    // смена варианта — ссылка меняется и в пометке, и во внутреннем описании
+    await req('ai-parts/lines/' + sp.id, { body: { variant: 'eco' } });
+    o = await req('orders/' + q7.id);
+    assert.ok(o.internal_note.includes('11111111111') && !o.internal_note.includes('22222222222'));
+    assert.match(o.items.find((i) => i.id === sp.order_item_id).note, /11111111111/);
+    // отмена подбора убирает и ссылку из внутреннего описания
+    await req(`ai-parts/jobs/${id}/undo`, { method: 'POST' });
+    assert.equal((await req('orders/' + q7.id)).internal_note, 'Клиент просит позвонить');
+    assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });

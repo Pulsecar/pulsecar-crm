@@ -827,6 +827,8 @@ db.exec('CREATE INDEX IF NOT EXISTS ai_verified_sig ON ai_verified(car_sig, grou
 addColumn('order_items', 'note', 'TEXT');            // пометка к позиции (ИИ: для чего деталь и сколько часов работы)
 addColumn('ai_lines', 'purpose', 'TEXT');
 addColumn('ai_lines', 'hours', 'REAL');
+addColumn('ai_lines', 'kind', "TEXT NOT NULL DEFAULT 'part'");   // part | labor
+addColumn('ai_lines', 'link', 'TEXT');                             // ссылка на предложение Allegro (заказывает менеджер)
 // знания из истории сервиса: какие детали ставят вместе с работой и сколько часов она занимает
 db.exec(`CREATE TABLE IF NOT EXISTS ai_job_parts (job_key TEXT NOT NULL, job_name TEXT, part_name TEXT NOT NULL, n INTEGER NOT NULL, jobs INTEGER NOT NULL, PRIMARY KEY (job_key, part_name))`);
 db.exec(`CREATE TABLE IF NOT EXISTS ai_job_hours (job_key TEXT PRIMARY KEY, job_name TEXT, hours REAL, n INTEGER NOT NULL)`);

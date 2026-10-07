@@ -6,7 +6,8 @@ import { recalc } from '../orders.js';
 import { decodeVin } from '../integrations/services.js';
 import { callTool } from './claude.js';
 import { findByArticle, quote, normBrand, norm, whenText, icOn } from './ic.js';
-import { addAiLine } from './index.js';
+import { addAiLine, addAiLabor } from './index.js';
+import { icSell, allegroSell, allegroMarkup, minMargin } from './pricing.js';
 import { preferredBrands, blacklist } from './rules.js';
 import { similarJobs, jobKnowledge, trainOnHistory, trainedStat } from './history.js';
 
@@ -15,7 +16,7 @@ export const STEPS = [
   ['history', 'Похожие прошлые выцены'],
   ['parse', 'Разбор запроса и OE-номера (ИИ)'],
   ['prices', 'Аналоги, цены и наличие (Inter Cars)'],
-  ['add', 'Добавление в выцену'],
+  ['add', 'Allegro (чего нет в наличии) и добавление деталей и работ'],
 ];
 
 // не больше двух подборов одновременно на сервер
@@ -125,8 +126,8 @@ async function pick(jobId) {
   });
   run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', usage.input_tokens || 0, usage.output_tokens || 0, jobId);
   const parts = (data.parts || []).slice(0, 25);
-  if (!parts.length) throw new Error(data.note || 'Не удалось разобрать запрос — уточните, какие детали нужны');
-  step('parse', 'ok', `${parts.map((p) => p.name_pl).join(', ')} — ${parts.length} поз.${data.note ? ' · ' + data.note : ''}`);
+  if (!parts.length && !(data.labor || []).length) throw new Error(data.note || 'Не удалось разобрать запрос — уточните, какие детали нужны');
+  step('parse', 'ok', `${parts.map((p) => p.name_pl).join(', ') || 'без деталей'} — ${parts.length} поз.${(data.labor || []).length ? `, работ ${data.labor.length}` : ''}${data.note ? ' · ' + data.note : ''}`);
   if (cancelled()) return;
 
   // 4. Inter Cars: проверяем кандидатов в каталоге, берём цены и наличие
@@ -142,7 +143,7 @@ async function pick(jobId) {
   const oeList = [...new Set(parts.flatMap((p) => (p.oe || []).map((x) => norm(x.number)).filter((x) => x.length >= 5)))].slice(0, 15);
   if (req.ext && oeList.length && !cancelled()) {
     step('prices', 'run', `ищу аналоги по ${oeList.length} OE-номерам в Inter Cars e-Catalog (окно подбора не закрывайте)…`);
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ need: oeList }), jobId));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ wait: 'ecat', need: oeList }), jobId));
     let ecat = null;
     for (let i = 0; i < 100 && !ecat; i++) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -224,36 +225,23 @@ async function pick(jobId) {
   }
   withDb(d, () => run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ tried: tried.slice(0, 200), ecat: found.filter((f) => f.src === 'ecat').length }), jobId));
   const q = await quote(found.map((f) => f.prod.sku));
-  step('prices', 'ok', `проверено артикулов: ${checked}, найдено в Inter Cars: ${hits}, с ценой: ${[...q.values()].filter((x) => x.priceNet > 0).length}`);
+  const inStock = [...q.values()].filter((x) => x.priceNet > 0 && x.availability > 0).length;
+  step('prices', 'ok', `проверено артикулов: ${checked}, найдено в Inter Cars: ${hits}, в наличии с ценой: ${inStock}`);
   if (cancelled()) return;
 
-  // 5. Варианты и добавление
+  // 5. Варианты только из того, что есть в наличии в Inter Cars: Эконом / Средний / OE по цене продажи клиенту
   step('add', 'run');
-  const markup = Number(getSetting('ai_parts_markup') || 40);
   const variantOf = (f) => {
     const pr = q.get(f.prod.sku);
-    if (!pr || !(pr.priceNet > 0)) return null;
-    const sellSrc = pr.sellGross > 0 ? 'ic' : 'markup';
-    const sellGross = pr.sellGross > 0 ? pr.sellGross : round2(pr.priceNet * (1 + markup / 100) * 1.23);
-    return { brand: f.prod.brand || f.brand, article: f.prod.articleNumber || f.article, sku: f.prod.sku, index: f.prod.index, priceNet: round2(pr.priceNet), sellGross: round2(sellGross),
-      sellNet: round2(sellGross / 1.23), sellSrc, availability: pr.availability, delivery: pr.availability > 0 ? whenText(pr.deliveryAt) : (pr.deliveryAt ? 'под заказ, ' + whenText(pr.deliveryAt) : 'нет в наличии'), supplier: 'Inter Cars' };
+    if (!pr || !(pr.priceNet > 0) || !(pr.availability > 0)) return null;
+    const { sellGross, src } = icSell(pr.priceNet, pr.sellGross, pr.vat || 23);
+    return { brand: f.prod.brand || f.brand, article: f.prod.articleNumber || f.article, sku: f.prod.sku, index: f.prod.index, priceNet: round2(pr.priceNet), buyGross: round2(pr.priceNet * 1.23),
+      sellGross, sellNet: round2(sellGross / 1.23), sellSrc: src, availability: pr.availability, delivery: whenText(pr.deliveryAt), supplier: 'Inter Cars' };
   };
-  let added = 0, toCheck = 0;
-  const hist = new Set(verified.map((v) => norm(v.oe)));
-  const pasted = norm(req.paste || '');
-  for (const [pi, p] of parts.entries()) {
-    const mine = found.filter((f) => f.pi === pi);
-    const vars = (arr) => arr.map(variantOf).filter(Boolean);
-    // при срочности — только то, что есть в наличии (если есть хоть что-то)
-    const stockFirst = (arr) => { if (req.urgency === 'any') return arr; const s2 = arr.filter((x) => x.availability > 0); return s2.length ? s2 : arr; };
-    const oeVars = stockFirst(vars(mine.filter((f) => f.kind === 'oe'))).sort((a, b) => a.sellGross - b.sellGross);
-    const seen = new Set();
-    const analogs = stockFirst(vars(mine.filter((f) => f.kind === 'analog')).filter((v) => normBrand(v.brand) !== oeBrand && !seen.has(v.sku) && seen.add(v.sku)))
-      .sort((a, b) => a.sellGross - b.sellGross);
-    // уровни по цене продажи клиенту: Эконом — самый дешёвый аналог, Средний — средний по цене производитель, OE — оригинал
+  const tiers = (oeVars, analogs, key) => {
     const variants = {};
     // правила сервиса: если для уровня заданы бренды и среди найденных они есть — берём из них
-    const prefer = (level) => { const pb = preferredBrands(level, p.key); const m = pb.length ? analogs.filter((v) => pb.includes(normBrand(v.brand))) : []; return m; };
+    const prefer = (level) => { const pb = preferredBrands(level, key); return pb.length ? analogs.filter((v) => pb.includes(normBrand(v.brand))) : []; };
     const ecoPref = prefer('eco'), midPref = prefer('mid');
     if (analogs.length) variants.eco = (ecoPref.length ? ecoPref : analogs)[0];
     if (midPref.length) variants.mid = midPref[Math.floor((midPref.length - 1) / 2)];
@@ -261,8 +249,78 @@ async function pick(jobId) {
     else if (analogs.length === 2) variants.mid = analogs[1];
     if (variants.mid && variants.eco && variants.mid.sku === variants.eco.sku && analogs.length > 1) variants.mid = analogs.find((v) => v.sku !== variants.eco.sku && v.sellGross >= variants.eco.sellGross) || variants.mid;
     if (oeVars.length) variants.oe = oeVars[0];
-    const order = req.level === 'eco' ? ['eco', 'mid', 'oe'] : req.level === 'oe' ? ['oe', 'mid', 'eco'] : ['mid', 'eco', 'oe'];
-    const chosen = order.find((k) => variants[k]) || null;
+    return variants;
+  };
+  const pickLevel = (variants) => (req.level === 'eco' ? ['eco', 'mid', 'oe'] : req.level === 'oe' ? ['oe', 'mid', 'eco'] : ['mid', 'eco', 'oe']).find((k) => variants[k]) || null;
+  const per = parts.map((p, pi) => {
+    const mine = found.filter((f) => f.pi === pi);
+    const vars = (arr) => arr.map(variantOf).filter(Boolean);
+    const oeVars = vars(mine.filter((f) => f.kind === 'oe')).sort((a, b) => a.sellGross - b.sellGross);
+    const seen = new Set();
+    const analogs = vars(mine.filter((f) => f.kind === 'analog')).filter((v) => normBrand(v.brand) !== oeBrand && !seen.has(v.sku) && seen.add(v.sku)).sort((a, b) => a.sellGross - b.sellGross);
+    const variants = tiers(oeVars, analogs, p.key);
+    return { variants, chosen: pickLevel(variants), oeVars, src: 'ic' };
+  });
+
+  // 5а. Нет в наличии в Inter Cars → Allegro (Biznes) через расширение во вкладке менеджера: только чтение, заказывает менеджер
+  const noStock = per.map((x, pi) => ({ x, pi })).filter(({ x }) => !x.chosen);
+  let allegroNote = '';
+  if (noStock.length && req.extAllegro && !cancelled()) {
+    const queries = noStock.slice(0, 12).map(({ pi }) => {
+      const p = parts[pi];
+      const oe = (p.oe || []).map((x) => String(x.number || '').trim()).find((x) => x.length >= 5);
+      return { key: p.key, q: oe || [p.name_pl, vehicle.make, String(vehicle.model || '').split(/\s+/)[0], vehicle.capacity_ccm && (Math.round(vehicle.capacity_ccm / 100) / 10).toFixed(1)].filter(Boolean).join(' ') };
+    });
+    step('add', 'run', `нет в наличии в Inter Cars: ${noStock.map(({ pi }) => parts[pi].name_pl).join(', ')} — ищу на Allegro (окно подбора не закрывайте)…`);
+    const cur0 = withDb(d, () => JSON.parse(one('SELECT result FROM ai_jobs WHERE id = ?', jobId).result || '{}'));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ ...cur0, wait: 'allegro', allegroNeed: queries }), jobId));
+    let al = null, alErr = null;
+    for (let i = 0; i < 160 && !al; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const row = withDb(d, () => one('SELECT status, result FROM ai_jobs WHERE id = ?', jobId));
+      if (row.status === 'cancelled') return;
+      const rr = JSON.parse(row.result || '{}');
+      al = rr.allegro || null; alErr = rr.allegroError || null;
+    }
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ?", jobId));
+    if (alErr) allegroNote = alErr;
+    const cand = (al || []).map((r) => ({ r, pi: noStock.find(({ pi }) => parts[pi].key === r.key)?.pi })).filter((c) => c.pi != null && c.r.items?.length);
+    if (cand.length) {
+      try {
+        const { data: pk, usage: u4 } = await callTool({
+          system: 'You match Allegro offers to the parts needed for a repair. For each part choose ONLY offers that are exactly that product (same part type, NEW, fits this vehicle/engine per title or catalogue number, complete kit when a kit is needed; no used/regenerated parts, no single pieces instead of a kit, no "do wyboru" offers). Mark oe=true only for genuine original manufacturer parts (brand = vehicle make / OE packaging). Return up to 6 offer ids per part, best first. Add a short Russian check note if fitment is uncertain.',
+          user: JSON.stringify({ vehicle, request: req.text, parts: cand.map(({ r, pi }) => ({ key: parts[pi].key, name_pl: parts[pi].name_pl, oe: (parts[pi].oe || []).map((x) => x.number),
+            offers: r.items.map((it) => ({ id: it.offerId, title: it.title, brand: it.brand, article: it.article, price_gross: it.gross })) })) }),
+          tool: { name: 'pick_offers', description: 'Matching offers per part', input_schema: { type: 'object', properties: { parts: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, offers: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, oe: { type: 'boolean' } }, required: ['id'] } }, check: { type: 'string' } }, required: ['key', 'offers'] } } }, required: ['parts'] } },
+          maxTokens: 3000, timeout: 90_000,
+        });
+        run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u4.input_tokens || 0, u4.output_tokens || 0, jobId);
+        for (const pp of pk.parts || []) {
+          const c = cand.find((x) => parts[x.pi].key === pp.key);
+          if (!c) continue;
+          const toV = (it) => {
+            const buy = round2(it.withDelivery || it.gross); // закупка брутто с доставкой
+            const sell = allegroSell(buy);
+            return { brand: it.brand || '', article: it.article || '', sku: 'allegro:' + it.offerId, url: it.url, title: it.title, priceNet: round2(it.net ? it.net * (buy / it.gross) : buy / 1.23), buyGross: buy,
+              sellGross: sell, sellNet: round2(sell / 1.23), sellSrc: 'allegro', markup: allegroMarkup(buy), availability: 1, delivery: it.delivery || '', supplier: 'Allegro' };
+          };
+          const chosenOffers = (pp.offers || []).map((x) => ({ it: c.r.items.find((y) => y.offerId === String(x.id)), oe: !!x.oe })).filter((x) => x.it && !blackBrands.has(normBrand(x.it.brand)));
+          const oeV = chosenOffers.filter((x) => x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
+          const anV = chosenOffers.filter((x) => !x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
+          const variants = tiers(oeV, anV, parts[c.pi].key);
+          const chosen = pickLevel(variants);
+          if (chosen) per[c.pi] = { variants, chosen, oeVars: oeV, src: 'allegro' };
+          if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check;
+        }
+      } catch { /* без Allegro — позиции «подберите вручную» */ }
+    }
+  } else if (noStock.length && !req.extAllegro) allegroNote = 'Поиск на Allegro работает через расширение Pulsecar 1.6+ — установите его, чтобы ассистент искал то, чего нет в Inter Cars';
+
+  let added = 0, toCheck = 0, fromAllegro = 0;
+  const hist = new Set(verified.map((v) => norm(v.oe)));
+  const pasted = norm(req.paste || '');
+  for (const [pi, p] of parts.entries()) {
+    const { variants, chosen, oeVars, src: supplierSrc } = per[pi];
     const oe = (p.oe || []).filter((x) => x.number).map((x) => {
       const n = norm(x.number);
       const src = hist.has(n) ? 'история выцен' : pasted.includes(n) ? 'partslink24' : x.from === 'history' ? 'история выцен' : oeVars.some((v) => norm(v.article) === n) ? 'ИИ + каталог IC' : ecatParts.has(pi) ? 'ИИ + e-Catalog IC' : 'ИИ';
@@ -270,29 +328,40 @@ async function pick(jobId) {
     });
     const reasons = [];
     if (p.check) reasons.push(p.check);
-    if (!chosen) reasons.push('Не найдено в Inter Cars — подберите вручную');
+    if (!chosen) reasons.push('Нет в наличии в Inter Cars' + (req.extAllegro ? ' и не найдено на Allegro' : '') + ' — подберите вручную');
     else if (!oe.length) reasons.push('Нет OE-номера — проверьте применимость');
     else if (oe.every((x) => x.source === 'ИИ') && !p.oe_sure) reasons.push('OE-номер от ИИ не подтверждён историей / partslink24 — проверьте применимость');
-    if (chosen && variants[chosen].sellSrc === 'markup') reasons.push(`Inter Cars не дал рекомендуемую цену — цена продажи по наценке ${markup}%`);
+    if (chosen && supplierSrc === 'allegro') reasons.push(`С Allegro — закажите заранее по ссылке (наценка ${variants[chosen].markup}%)`);
+    if (chosen && variants[chosen].sellSrc === 'min') reasons.push(`Рекомендуемая цена Inter Cars ниже минимальной маржи — поднята до закупки брутто + ${minMargin()}%`);
+    if (chosen && variants[chosen].sellSrc === 'markup') reasons.push('Inter Cars не дал рекомендуемую цену — цена продажи по наценке');
     if (vinWarn) reasons.push(vinWarn);
     const line = {
       purpose: p.purpose || null, hours: Number(p.labor_hours) || null,
       note: [p.purpose, p.job ? `${p.job}${Number(p.labor_hours) ? ` ~${String(Math.round(Number(p.labor_hours) * 10) / 10).replace('.', ',')} h${p.hours_source === 'history' ? ' (история сервиса)' : ' (оценка ИИ)'}` : ''}` : null].filter(Boolean).join(' · ') || null,
       group_key: String(p.key || p.name_pl).toLowerCase().slice(0, 60), title: p.name_pl, qty: Number(p.qty) || 1, unit: p.unit || 'szt.', qty_note: p.qty_note || null,
-      oe, variants, chosen, confidence: reasons.length ? 'check' : 'high', reason: reasons.join(' · ') || null,
+      oe, variants: chosen ? variants : {}, chosen, confidence: reasons.length ? 'check' : 'high', reason: reasons.join(' · ') || null,
     };
-    if (!chosen) line.variants = {};
     const id = withDb(d, () => addAiLine(jobId, o.id, line));
-    if (id) { added++; if (reasons.length) toCheck++; }
+    if (id) { added++; if (reasons.length) toCheck++; if (chosen && supplierSrc === 'allegro') fromAllegro++; }
+  }
+
+  // 6. Работы с нормой часов (из истории сервиса или оценка ИИ)
+  const labor = (data.labor || []).filter((w) => w.job && Number(w.hours) > 0);
+  if (!labor.length) for (const p of parts) if (p.job && Number(p.labor_hours) > 0 && !labor.some((w) => w.job === p.job)) labor.push({ job: p.job, hours: Number(p.labor_hours), source: p.hours_source, purpose: null });
+  let laborAdded = 0;
+  for (const w of labor.slice(0, 10)) {
+    const id = withDb(d, () => addAiLabor(jobId, o.id, { title: String(w.job).slice(0, 200), hours: Number(w.hours), src: w.source === 'history' ? 'history' : 'estimate', purpose: w.purpose || null }));
+    if (id) { laborAdded++; added++; }
   }
   recalc(o.id);
-  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note: data.note || null, tried: tried.slice(0, 200) }), jobId);
-  step('add', 'ok', added ? `добавлено ${added}, проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене');
-  insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length }) });
+  const note = [data.note, allegroNote].filter(Boolean).join(' · ') || null;
+  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), allegro: fromAllegro, labor: laborAdded }), jobId);
+  step('add', 'ok', added ? `добавлено ${added} (работ ${laborAdded}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}${allegroNote ? ' · ' + allegroNote : ''}` : 'новых позиций нет — всё уже в выцене');
+  insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
 }
 
 const SYSTEM = `You are an experienced auto-parts specialist (części samochodowe) in a car repair workshop in Warsaw, Poland.
-A service advisor describes the job for a specific vehicle. Produce the list of PARTS (no labour) to put in the repair quote (wycena).
+A service advisor describes the job for a specific vehicle. Produce the list of PARTS to put in the repair quote (wycena) and the list of LABOUR operations (labor).
 
 Rules:
 - Expand standard jobs into parts (e.g. "rozrząd/ГРМ" → timing belt kit (+ water pump if the engine's pump is driven by the belt), "ТО/service" → oil, oil filter, air filter, cabin filter, drain plug washer...). Use workshop_kits when given.
@@ -304,6 +373,7 @@ Rules:
 - key: short English snake_case group (timing_kit, water_pump, engine_oil, oil_filter, spark_plug, glow_plug, brake_pads_front, ...).
 - Think like an experienced workshop: which ASSEMBLIES must be disassembled to do the requested job, and add the parts that must be renewed because of that disassembly — gaskets, seals, O-rings, one-time (stretch) bolts, clips, fluids that get drained (coolant when the cooling system is opened, oil when the sump comes off). Use workshop_similar_jobs_any_car and workshop_parts_usually_with_these_jobs (share = % of past jobs where this workshop also replaced that part) as the main guide. Do NOT add unrelated optional replacements (engine mounts, extra belts, "just in case" parts) — mention them in note as suggestions.
 - For EVERY part fill "purpose": a short explanation in the SAME LANGUAGE as the manager's request — why this part is needed (e.g. "прокладка крышки клапанов — снимается при замене свечей" / "uszczelka pokrywy — demontaż przy wymianie świec"); fill "job" with the labour operation it belongs to (Polish name, as on a repair order) and "labor_hours" — hours for that operation on THIS vehicle: take workshop_labor_hours_median / hours in similar jobs when available (hours_source "history"), otherwise your estimate (hours_source "estimate"). Parts of the same job share the same job and hours.
+- labor: every labour operation the request needs, as ONE line per operation the way this workshop writes them on repair orders (Polish, e.g. "Wymiana rozrządu z pompą wody", "Wymiana świec zapłonowych", "Geometria kół"); include operations without parts (diagnostics, alignment, coolant bleeding) only if they are clearly part of the job. hours = time for THIS vehicle for the whole operation (all pieces, e.g. both sides); prefer workshop_labor_hours_median / similar jobs (source "history"), otherwise your estimate (source "estimate"). purpose: short note in the request's language what the operation includes. Do not split one job into many small operations; operations already done as part of another (e.g. removing the valve cover for spark plugs) are included in that operation, not separate.
 - Do not duplicate parts. If the request is not about parts at all, return an empty list with a note.`;
 
 const TOOL = {
@@ -330,6 +400,7 @@ const TOOL = {
           required: ['key', 'name_pl', 'qty', 'unit', 'oe', 'analogs'],
         },
       },
+      labor: { type: 'array', items: { type: 'object', properties: { job: { type: 'string', description: 'Polish operation name' }, hours: { type: 'number' }, source: { type: 'string', enum: ['history', 'estimate'] }, purpose: { type: 'string' } }, required: ['job', 'hours'] } },
       note: { type: 'string', description: 'Russian, short note for the manager (optional)' },
     },
     required: ['parts'],

@@ -13,8 +13,8 @@
     if ((m.type === 'fiscal' || m.type === 'fiscal-allow') && m.reqId) {
       chrome.runtime.sendMessage({ type: m.type, job: m.job, url: m.url }, (r) => say({ type: m.type + '-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));
     }
-    if (m.type === 'ecat' && m.reqId) {
-      chrome.runtime.sendMessage({ type: 'ecat', reqId: m.reqId, job: m.job }, (r) => say({ type: 'ecat-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));
+    if ((m.type === 'ecat' || m.type === 'allegro') && m.reqId) {
+      chrome.runtime.sendMessage({ type: m.type, reqId: m.reqId, job: m.job }, (r) => say({ type: m.type + '-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));
     }
     if (m.type === 'pl24' && m.reqId) {
       chrome.runtime.sendMessage({ type: 'pl24', reqId: m.reqId, job: m.job }, (r) => say({ type: 'pl24-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));

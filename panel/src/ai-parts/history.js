@@ -1,4 +1,4 @@
-// Обучение на истории сервиса (без данных клиентов — RODO): выцены и заказы → индекс работ и деталей,
+// Обучение на истории сервиса (без данных клиентов — RODO; непринятые черновики ИИ не учитываются): выцены и заказы → индекс работ и деталей,
 // «какие детали ставят вместе с работой» (прокладки, уплотнения узлов, которые разбирают) и сколько часов занимает работа.
 // Модель не переобучается: перед каждым подбором ассистент получает похожие прошлые работы как примеры.
 import { all, one, run, tx, getSetting, setSetting } from '../db.js';
@@ -26,7 +26,8 @@ export function trainOnHistory() {
     h = Math.round(h * 10) / 10;
     return h >= 0.1 && h < 40 ? h : 0;
   };
-  const items = all("SELECT order_id, kind, name, code, qty, unit, price, discount, vat FROM order_items WHERE name IS NOT NULL AND name <> '' ORDER BY order_id, pos, id");
+  const items = all(`SELECT order_id, kind, name, code, qty, unit, price, discount, vat FROM order_items WHERE name IS NOT NULL AND name <> ''
+    AND id NOT IN (SELECT order_item_id FROM ai_lines WHERE status = 'draft' AND order_item_id IS NOT NULL) ORDER BY order_id, pos, id`);
   const byOrder = new Map();
   for (const it of items) (byOrder.get(it.order_id) || byOrder.set(it.order_id, []).get(it.order_id)).push(it);
   const co = new Map(), jobsCnt = new Map(), hours = new Map(), names = new Map();
