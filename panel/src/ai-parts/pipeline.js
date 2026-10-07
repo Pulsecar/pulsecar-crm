@@ -122,15 +122,39 @@ async function pick(jobId) {
     for (const a of (p.analogs || []).slice(0, 10)) if (a.article && !blackBrands.has(normBrand(a.brand))) tasks.push({ pi, kind: 'analog', brand: a.brand, article: a.article });
     for (const x of (p.oe || []).slice(0, 3)) if (x.number) tasks.push({ pi, kind: 'oe', brand: null, article: x.number });
   });
-  await pool(tasks, 4, async (t) => {
+  const tried = [];
+  const lookup = async (t) => {
     const r = await findByArticle(t.article, t.brand, cache);
     checked++;
+    tried.push({ pi: t.pi, kind: t.kind, brand: t.brand, article: t.article, found: r.length });
     for (const prod of r) {
       if (t.kind === 'oe' && prod.brand && normBrand(prod.brand) !== oeBrand) continue; // OE — только товар марки авто
       hits++;
       found.push({ ...t, prod });
     }
-  });
+  };
+  await pool(tasks, 4, lookup);
+  // второй круг: по деталям без найденных аналогов просим у Claude другие артикулы (с учётом того, что не нашлось)
+  const missing = parts.map((p, pi) => ({ p, pi })).filter(({ pi }) => !found.some((f) => f.pi === pi && f.kind === 'analog'));
+  if (missing.length && !cancelled()) {
+    step('prices', 'run', `не найдено в Inter Cars: ${missing.map((m) => m.p.name_pl).join(', ')} — ищу другие артикулы…`);
+    try {
+      const { data: more, usage: u2 } = await callTool({
+        system: SYSTEM + '\n\nSECOND ROUND: the article numbers below were NOT found in the Inter Cars catalogue. Propose 6–10 OTHER real cross-references for each part (other manufacturers, exact article formatting as printed by the manufacturer incl. spaces, e.g. "W 712/95", "VKMA 01121", "530 0640 10"). Do not repeat failed numbers.',
+        user: JSON.stringify({ vehicle, parts: missing.map(({ p }) => ({ key: p.key, name_pl: p.name_pl, oe: p.oe, failed: (p.analogs || []).map((a) => `${a.brand} ${a.article}`) })) }),
+        tool: TOOL, maxTokens: 4000,
+      });
+      run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u2.input_tokens || 0, u2.output_tokens || 0, jobId);
+      const t2 = [];
+      for (const mp of more.parts || []) {
+        const m = missing.find((x) => x.p.key === mp.key) || missing.find((x) => x.p.name_pl === mp.name_pl);
+        if (!m) continue;
+        for (const a of (mp.analogs || []).slice(0, 10)) if (a.article && !blackBrands.has(normBrand(a.brand))) t2.push({ pi: m.pi, kind: 'analog', brand: a.brand, article: a.article });
+      }
+      await pool(t2, 4, lookup);
+    } catch { /* второй круг не обязателен */ }
+  }
+  withDb(d, () => run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ tried: tried.slice(0, 200) }), jobId));
   const q = await quote(found.map((f) => f.prod.sku));
   step('prices', 'ok', `проверено артикулов: ${checked}, найдено в Inter Cars: ${hits}, с ценой: ${[...q.values()].filter((x) => x.priceNet > 0).length}`);
   if (cancelled()) return;
@@ -192,7 +216,7 @@ async function pick(jobId) {
     if (id) { added++; if (reasons.length) toCheck++; }
   }
   recalc(o.id);
-  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note: data.note || null }), jobId);
+  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note: data.note || null, tried: tried.slice(0, 200) }), jobId);
   step('add', 'ok', added ? `добавлено ${added}, проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене');
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length }) });
 }

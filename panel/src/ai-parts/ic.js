@@ -5,7 +5,7 @@ import { cfg } from '../integrations/index.js';
 import { round2 } from '../util.js';
 
 export const icOn = () => { const c = cfg('intercars'); return !!(c?.clientId && c.clientSecret); };
-export const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 // одинаковые бренды под разными названиями
 const BRAND_ALIAS = { MANNFILTER: 'MANN', MANN: 'MANN', VAG: 'VAG', VW: 'VAG', VOLKSWAGEN: 'VAG', AUDI: 'VAG', SKODA: 'VAG', SEAT: 'VAG', BOSCH: 'BOSCH', ROBERTBOSCH: 'BOSCH',
   LEMFORDER: 'LEMFOERDER', LEMFOERDER: 'LEMFOERDER', TRW: 'TRW', TRWAUTOMOTIVE: 'TRW', SKF: 'SKF', INA: 'INA', LUK: 'LUK', FAG: 'FAG', SCHAEFFLER: 'INA', CONTITECH: 'CONTITECH', CONTINENTAL: 'CONTITECH',
@@ -19,7 +19,8 @@ export async function findByArticle(article, brand, cache) {
   if (cache?.has(key)) return cache.get(key);
   const want = norm(article), wb = brand ? normBrand(brand) : null;
   const out = [];
-  for (const q of [...new Set([String(article).trim(), want])]) {
+  const spaced = String(article).trim().replace(/([A-Za-z])(\d)/g, '$1 $2');
+  for (const q of [...new Set([String(article).trim(), want, spaced])]) {
     if (!q) continue;
     let r = null;
     try { r = await icRead('/ic/catalog/products', { query: { index: q, pageSize: 25 } }); } catch { r = null; }
