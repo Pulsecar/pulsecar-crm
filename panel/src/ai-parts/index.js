@@ -208,7 +208,7 @@ export function mountAiParts(crm, who) {
     }
     dropJobNote(j.order_id, j.id);
     recalc(j.order_id);
-    run("UPDATE ai_jobs SET status = CASE WHEN status IN ('queued','running') THEN 'cancelled' ELSE status END WHERE id = ?", j.id);
+    run("UPDATE ai_jobs SET status = CASE WHEN status IN ('queued','running','waiting') THEN 'cancelled' ELSE status END WHERE id = ?", j.id);
     ev('undo', { n: lines.length }, { job_id: j.id, order_id: j.order_id, staff: s.name });
     log('order', j.order_id, 'update', `ИИ-подбор отменён: удалено позиций ${lines.length}`, s.name);
     res.json({ ok: true, n: lines.length });

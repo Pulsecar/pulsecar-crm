@@ -152,7 +152,7 @@ async function pick(jobId) {
   if ((req.extV || 0) >= 10602) for (const p of parts) if (p.unit === 'l' && nameQ(p).length >= 5 && oeList.length < 15) { p._q = nameQ(p); oeList.push({ q: p._q }); }
   if (req.ext && oeList.length && !cancelled()) {
     step('prices', 'run', `ищу аналоги по ${oeList.length} OE-номерам в Inter Cars e-Catalog (окно подбора не закрывайте)…`);
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ wait: 'ecat', need: oeList }), jobId));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ? AND status = 'running'", JSON.stringify({ wait: 'ecat', need: oeList }), jobId));
     let ecat = null;
     for (let i = 0; i < 100 && !ecat; i++) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -160,7 +160,8 @@ async function pick(jobId) {
       if (row.status === 'cancelled') return;
       ecat = JSON.parse(row.result || '{}').ecat || null;
     }
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ?", jobId));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ? AND status = 'waiting'", jobId));
+    if (cancelled()) return;
     if (ecat?.length) {
       // какие товары из списка e-Catalog — именно та деталь, что нужна (комплект с помпой / без, фильтр, а не корпус…)
       const byOe = new Map(ecat.map((r) => [norm(r.oe), r.items || []]));
@@ -276,7 +277,7 @@ async function pick(jobId) {
   // ожидание ответа расширения (страница CRM передаёт результаты из вкладки менеджера); null — отменено
   const waitExt = async (kind, need, rounds) => {
     const cur0 = withDb(d, () => JSON.parse(one('SELECT result FROM ai_jobs WHERE id = ?', jobId).result || '{}'));
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ ...cur0, wait: kind, [kind + 'Need']: need }), jobId));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ? AND status = 'running'", JSON.stringify({ ...cur0, wait: kind, [kind + 'Need']: need }), jobId));
     let res = null, err = null;
     for (let i = 0; i < rounds && !res; i++) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -285,7 +286,8 @@ async function pick(jobId) {
       const rr = JSON.parse(row.result || '{}');
       res = rr[kind] || null; err = rr[kind + 'Error'] || null;
     }
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ?", jobId));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ? AND status = 'waiting'", jobId));
+    if (cancelled()) return null;
     return { res: res || [], err };
   };
 
@@ -393,6 +395,7 @@ async function pick(jobId) {
     }
   } else if (noStock.length && !req.extAllegro) allegroNote = 'Поиск на Allegro работает через расширение Pulsecar 1.6+ — установите его, чтобы ассистент искал то, чего нет в Inter Cars';
 
+  if (cancelled()) return; // подбор отменён, пока ждали поставщиков — ничего не добавляем
   let added = 0, toCheck = 0, fromAllegro = 0;
   const notFound = [];
   const hist = new Set(verified.map((v) => norm(v.oe)));
@@ -438,7 +441,7 @@ async function pick(jobId) {
   if (notFound.length) withDb(d, () => addJobNote(o.id, jobId, `нет в наличии в ${['Inter Cars', (req.extV || 0) >= 10700 ? 'ProfiAuto' : null, req.extAllegro ? 'Allegro' : null].filter(Boolean).join(', ')} — подберите вручную: ${notFound.join('; ')}`));
   recalc(o.id);
   const note = [data.note, paNote, allegroNote, notFound.length ? `не найдено в наличии: ${notFound.length}` : null].filter(Boolean).join(' · ') || null;
-  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), profiauto: fromPa, allegro: fromAllegro, labor: laborAdded }), jobId);
+  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ? AND status <> 'cancelled'", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), profiauto: fromPa, allegro: fromAllegro, labor: laborAdded }), jobId);
   step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromPa ? `, из ProfiAuto ${fromPa}` : ''}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
     + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (paNote ? ' · ' + paNote : '') + (allegroNote ? ' · ' + allegroNote : ''));
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });

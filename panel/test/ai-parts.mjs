@@ -308,6 +308,17 @@ try {
     const o = await req('orders/' + q8.id);
     assert.match(o.internal_note, /ИИ-подбор — заказать в ProfiAuto: Świeca zapłonowa NGK BKR6E, закупка 12,3 zł brutto, склад WWA — https:\/\/online\.profiauto\.com\/main-article\/detail\?x=1/);
   });
+  await t('отмена подбора, пока он ждёт поставщика: позиции потом не добавляются', async () => {
+    const q9 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${q9.id}/jobs`, { body: { text: 'свечи', level: 'mid', extAllegro: true, extV: 10700 } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (j.status === 'waiting') break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'waiting');
+    await req(`ai-parts/jobs/${id}/undo`, { method: 'POST' });
+    assert.equal((await req('ai-parts/jobs/' + id)).status, 'cancelled');
+    await new Promise((x) => setTimeout(x, 2500));
+    assert.equal((await req('orders/' + q9.id)).items.length, 0);
+    assert.equal((await req('ai-parts/jobs/' + id)).status, 'cancelled');
+  });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });
     const q2 = await req('orders', { body: { kind: 'quote', customer_id: c2.id } });
