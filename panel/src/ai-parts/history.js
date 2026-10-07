@@ -12,13 +12,20 @@ export const jobKey = (name) => strip(name).replace(/[^a-z\s]/g, ' ').split(/\s+
 export const partKey = (name) => strip(name).replace(BRANDS, ' ').replace(/\S*\d\S*/g, ' ').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w)).slice(0, 4).join(' ');
 
 // категория работы для прайса — по ключевым словам названия
-const CATS = [
-  ['Hamulce', /hamul|klock|tarcz|zacisk|bebn|szczek|ręczn|reczn/i], ['Zawieszenie / układ kierowniczy', /wahacz|amortyz|sprężyn|sprezyn|łącznik|lacznik|drążk|drazk|końcówk|koncowk|sworzeń|sworzen|tulej|łożysk|lozysk|stabiliz|zbieżn|zbiezn|geometr|przekładni|przekladni|maglownic/i],
-  ['Rozrząd', /rozrz/i], ['Serwis olejowy / filtry', /olej|filtr|przegląd|przeglad|serwis/i], ['Klimatyzacja', /klima|klimat|sprężark|sprezark|osuszacz|odgrzybian/i],
-  ['Układ chłodzenia', /chłodn|chlodn|termostat|pomp[ay] wod|płyn chł|plyn chl/i], ['Układ wydechowy / DPF / EGR', /wydech|tłumik|tlumik|dpf|fap|egr|katalizator|lambda|sonda/i],
-  ['Sprzęgło / skrzynia', /sprzęg|sprzeg|skrzyn|dwumas|półoś|polos|przegub/i], ['Silnik', /silnik|uszczel|głowic|glowic|kolektor|turbo|wtrysk|świec|swiec|pokryw|miska|łańcuch|lancuch|pasek|napinacz|rolk/i],
-  ['Elektryka / diagnostyka', /diagnost|akumul|alternator|rozrusznik|elektr|kodowan|programow|czujnik|żarów|zarow|oświetl|oswietl|żarów/i],
-  ['Opony / koła', /opon|koł|kol[ao]|wyważ|wywaz|felg|ciśnien opon/i], ['Nadwozie / szyby', /szyb|lusterk|zamek|drzwi|wycieracz|błotnik|blotnik|zderzak/i],
+const CATS = [ // порядок важен: сначала узкие категории, «Serwis olejowy» — последним из общих
+  ['Klimatyzacja', /klima|klimat|r134|r1234|sprężark|sprezark|osuszacz|odgrzybian|ozonow/i],
+  ['Diagnostyka', /diagno|kontrol|sprawdz|przegląd zawiesz|przeglad zawiesz|odczyt|test /i],
+  ['Opony / koła', /opon|wyważ|wywaz|felg|koło zapas|kolo zapas|przekładka kół|przekladka kol/i],
+  ['Rozrząd', /rozrz/i],
+  ['Hamulce', /hamul|klock|tarcz|zacisk|bębn|bebn|szczęk|szczek|ręczn|reczn/i],
+  ['Geometria / zawieszenie / układ kierowniczy', /geometr|zbieżn|zbiezn|wahacz|amortyz|sprężyn|sprezyn|łącznik|lacznik|drążk|drazk|końcówk|koncowk|sworzeń|sworzen|tulej|stabiliz|przekładni|przekladni|maglownic|łożysk|lozysk|piast/i],
+  ['Układ chłodzenia', /chłodn|chlodn|termostat|pomp[ay] wod|płyn chł|plyn chl/i],
+  ['Układ wydechowy / DPF / EGR', /wydech|tłumik|tlumik|dpf|fap|egr|katalizator|lambda|sonda/i],
+  ['Sprzęgło / skrzynia', /sprzęg|sprzeg|skrzyn|dwumas|półoś|polos|przegub/i],
+  ['Silnik', /silnik|uszczel|głowic|glowic|kolektor|turbo|wtrysk|świec|swiec|pokryw|miska|łańcuch|lancuch|pasek|napinacz|rolk/i],
+  ['Elektryka', /akumul|alternator|rozrusznik|elektr|kodowan|programow|czujnik|żarów|zarow|oświetl|oswietl|żarów|lamp|reflektor/i],
+  ['Nadwozie / szyby', /szyb|lusterk|zamek|drzwi|wycieracz|błotnik|blotnik|zderzak/i],
+  ['Serwis olejowy / filtry', /olej|filtr|przegląd|przeglad|serwis/i],
 ];
 const catOf = (name) => (CATS.find(([, re]) => re.test(name)) || ['Inne'])[0];
 const stems = (key) => new Set(String(key || '').split(' ').filter((w) => w.length >= 5 && w !== 'wymiana').map((w) => w.slice(0, 5)));
