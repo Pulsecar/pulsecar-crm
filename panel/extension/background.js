@@ -1,6 +1,6 @@
 // Pulsecar: фон расширения — запросы к CRM с ключом сотрудника (без CORS), проверка обновлений,
 // сайты поставщиков, включённые пользователем, и меню по правому клику.
-if (typeof importScripts === 'function') importScripts('i18n.js', 'pl24.js', 'ecat.js', 'allegro.js');
+if (typeof importScripts === 'function') importScripts('i18n.js', 'pl24.js', 'ecat.js', 'allegro.js', 'profiauto.js');
 if (!globalThis.pcT) Object.assign(globalThis, { pcT: (s) => s, pcOnLang: () => {}, pcI18nReady: Promise.resolve() });
 const DEF_PANEL = 'https://panel.pulsecar.tech';
 const VERSION = chrome.runtime.getManifest().version;
@@ -208,6 +208,15 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel || !sender.tab?.id) return reply({ ok: false, error: 'e-Catalog доступен только из CRM ' + c.panel });
       const progress = (text, partial) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text, partial }).catch(() => {});
       try { reply(await globalThis.ecatRun(msg.job || {}, progress)); } catch (e) { reply({ ok: false, error: 'Inter Cars e-Catalog: ' + e.message }); }
+    });
+    return true;
+  }
+  // ИИ-запчастист: чего нет в наличии в Inter Cars — поиск в ProfiAuto менеджера (только чтение, без корзины)
+  if (msg?.type === 'profiauto') {
+    conf().then(async (c) => {
+      if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel || !sender.tab?.id) return reply({ ok: false, error: 'ProfiAuto-поиск доступен только из CRM ' + c.panel });
+      const progress = (text, partial) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text, partial }).catch(() => {});
+      try { reply(await globalThis.paRun(msg.job || {}, progress)); } catch (e) { reply({ ok: false, error: 'ProfiAuto: ' + e.message }); }
     });
     return true;
   }

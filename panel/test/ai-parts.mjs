@@ -39,6 +39,10 @@ const mock = createServer(async (req, res) => {
       // из списка e-Catalog берём только комплекты (не одиночный ремень)
       return json(200, { usage: { input_tokens: 500, output_tokens: 50 }, content: [{ type: 'tool_use', name: 'pick_items', input: { parts: ctx.parts.map((p) => ({ key: p.key, codes: p.items.filter((i) => /Zestaw/.test(i.name)).map((i) => i.code) })) } }] });
     }
+    if (b.tool_choice.name === 'pick_rows') {
+      const ctx = JSON.parse(b.messages[0].content);
+      return json(200, { usage: { input_tokens: 300, output_tokens: 40 }, content: [{ type: 'tool_use', name: 'pick_rows', input: { parts: ctx.parts.map((p) => ({ key: p.key, ids: p.rows.filter((r) => !/obudowa/i.test(r.name)).map((r) => r.id) })) } }] });
+    }
     if (b.tool_choice.name === 'pick_offers') {
       const ctx = JSON.parse(b.messages[0].content);
       // б/у и «do wyboru» не берём; первое — аналог, OE — помеченное
@@ -138,7 +142,7 @@ try {
     const of = d.lines.find((l) => l.group_key === 'oil_filter');
     assert.equal(of.variants.eco.sellGross, 36.9, 'нет рекомендуемой цены → наценка 50% от закупки'); assert.equal(of.confidence, 'check');
     assert.ok(!d.lines.some((l) => l.group_key === 'spark_plug'), 'нет в наличии — в выцену не добавляем');
-    assert.match(o.internal_note, /ИИ-подбор #\d+ — нет в наличии в Inter Cars, подберите вручную: Świeca zapłonowa — Проверьте калильное число/);
+    assert.match(o.internal_note, /ИИ-подбор #\d+ — нет в наличии в Inter Cars — подберите вручную: Świeca zapłonowa — Проверьте калильное число/);
     // работа с нормой часов: единица «oper» → цена = часы × ставка RBH брутто, пометка «что входит + часы»
     const lab = d.lines.find((l) => l.kind === 'labor');
     assert.equal(lab.title, 'Wymiana rozrządu'); assert.equal(lab.hours, 3.5);
@@ -280,6 +284,29 @@ try {
     const { packLitres } = await import('../src/ai-parts/pipeline.js');
     assert.equal(packLitres('8100 X-CESS GEN2 5W40 5L'), 5); assert.equal(packLitres('Castrol Edge 5W30 4 l'), 4); assert.equal(packLitres('Motul 2,5L'), 2.5);
     assert.equal(packLitres('Filtr oleju HU 6032 Z'), null);
+  });
+  await t('нет в Inter Cars → сначала ProfiAuto (только в наличии, цена детальная ProfiAuto, мин. маржа), Allegro не нужен', async () => {
+    const q8 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${q8.id}/jobs`, { body: { text: 'свечи', level: 'mid', extAllegro: true, extV: 10700 } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (j.status === 'waiting' || ['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'waiting', j.error); assert.equal(j.result.wait, 'profiauto');
+    assert.deepEqual(j.result.profiautoNeed, [{ key: 'spark_plug', q: 'XX1' }]);
+    await req(`ai-parts/jobs/${id}/profiauto`, { body: { results: [{ key: 'spark_plug', q: 'XX1', items: [
+      { index: 'BKR6E', brand: 'NGK', name: 'ŚWIECA ZAPŁONOWA', net: 10, gross: 12.3, retailNet: 20, retailGross: 24.6, stock: [{ name: 'WWA', qty: 26 }], total: 26, link: 'https://online.profiauto.com/main-article/detail?x=1' },
+      { index: 'FR7DC', brand: 'BOSCH', name: 'ŚWIECA ZAPŁONOWA', net: 20, gross: 24.6, retailNet: 22, retailGross: 27.06, stock: [{ name: 'CHW', qty: 3 }], total: 3, link: 'https://evil.example/x' },
+      { index: 'K20TT', brand: 'DENSO', name: 'ŚWIECA ZAPŁONOWA', net: 15, gross: 18.45, retailGross: 30, stock: [{ name: 'WWA', qty: 0 }], total: 0 },
+      { index: 'X1', brand: 'NGK', name: 'OBUDOWA', net: 1, gross: 1.23, retailGross: 2, stock: [{ name: 'WWA', qty: 5 }], total: 5 }] }] } });
+    for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 200)); }
+    assert.equal(j.status, 'done', j.error);
+    assert.equal(j.result.profiauto, 1); assert.equal(j.result.allegro, 0);
+    const sp = (await req(`ai-parts/orders/${q8.id}`)).lines.find((l) => l.group_key === 'spark_plug');
+    assert.equal(sp.variants.eco.supplier, 'ProfiAuto'); assert.equal(sp.variants.eco.brand, 'NGK'); assert.equal(sp.variants.eco.sellGross, 24.6, 'детальная ProfiAuto выше мин. маржи');
+    assert.equal(sp.variants.eco.delivery, 'склад WWA');
+    assert.equal(sp.variants.mid.brand, 'BOSCH'); assert.equal(sp.variants.mid.sellGross, 31.98, 'детальная ниже мин. маржи → закупка брутто + 30 %'); assert.equal(sp.variants.mid.url, null, 'чужие ссылки не принимаем');
+    assert.ok(!Object.values(sp.variants).some((v) => v.brand === 'DENSO'), 'нет на складе — не берём');
+    await req('ai-parts/lines/' + sp.id, { body: { variant: 'eco' } });
+    const o = await req('orders/' + q8.id);
+    assert.match(o.internal_note, /ИИ-подбор — заказать в ProfiAuto: Świeca zapłonowa NGK BKR6E, закупка 12,3 zł brutto, склад WWA — https:\/\/online\.profiauto\.com\/main-article\/detail\?x=1/);
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });

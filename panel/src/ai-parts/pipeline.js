@@ -16,7 +16,7 @@ export const STEPS = [
   ['history', 'Похожие прошлые выцены'],
   ['parse', 'Разбор запроса и OE-номера (ИИ)'],
   ['prices', 'Аналоги, цены и наличие (Inter Cars)'],
-  ['add', 'Allegro (чего нет в наличии) и добавление деталей и работ'],
+  ['add', 'ProfiAuto / Allegro (чего нет в наличии) и добавление деталей и работ'],
 ];
 
 // не больше двух подборов одновременно на сервер
@@ -273,7 +273,81 @@ async function pick(jobId) {
     return { variants, chosen: pickLevel(variants), oeVars, src: 'ic' };
   });
 
-  // 5а. Нет в наличии в Inter Cars → Allegro (Biznes) через расширение во вкладке менеджера: только чтение, заказывает менеджер
+  // ожидание ответа расширения (страница CRM передаёт результаты из вкладки менеджера); null — отменено
+  const waitExt = async (kind, need, rounds) => {
+    const cur0 = withDb(d, () => JSON.parse(one('SELECT result FROM ai_jobs WHERE id = ?', jobId).result || '{}'));
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ ...cur0, wait: kind, [kind + 'Need']: need }), jobId));
+    let res = null, err = null;
+    for (let i = 0; i < rounds && !res; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const row = withDb(d, () => one('SELECT status, result FROM ai_jobs WHERE id = ?', jobId));
+      if (row.status === 'cancelled') return null;
+      const rr = JSON.parse(row.result || '{}');
+      res = rr[kind] || null; err = rr[kind + 'Error'] || null;
+    }
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ?", jobId));
+    return { res: res || [], err };
+  };
+
+  // 5а. Нет в наличии в Inter Cars → ProfiAuto (каталог поставщика во вкладке менеджера, расширение 1.7+): только чтение
+  let paNote = '', fromPa = 0;
+  const noStockIc = per.map((x, pi) => ({ x, pi })).filter(({ x }) => !x.chosen);
+  if (noStockIc.length && (req.extV || 0) >= 10700 && !cancelled()) {
+    const queries = [];
+    for (const { pi } of noStockIc) {
+      const p = parts[pi];
+      const oes = p.unit === 'l' ? [] : (p.oe || []).map((x) => norm(x.number)).filter(oeOk).slice(0, 2);
+      const arts = (p.analogs || []).map((a) => String(a.article || '').trim()).filter((x) => x.length >= 3).slice(0, oes.length ? 1 : 3);
+      const qs = [...oes, ...arts];
+      if (!qs.length && p.unit === 'l') qs.push(nameQ(p));
+      for (const q of qs) if (queries.length < 20) queries.push({ key: p.key, q });
+    }
+    if (queries.length) {
+      step('add', 'run', `нет в наличии в Inter Cars: ${noStockIc.map(({ pi }) => parts[pi].name_pl).join(', ')} — ищу в ProfiAuto (окно подбора не закрывайте)…`);
+      const w = await waitExt('profiauto', queries, 160);
+      if (!w) return;
+      if (w.err) paNote = w.err;
+      const byKey = new Map();
+      for (const r of w.res) for (const it of r.items || []) {
+        if (!(it.total > 0) || !(it.net > 0 || it.gross > 0)) continue; // только в наличии и с ценой
+        const arr = byKey.get(r.key) || byKey.set(r.key, []).get(r.key);
+        if (!arr.some((x) => x.index === it.index && x.brand === it.brand)) arr.push(it);
+      }
+      const cand = noStockIc.map(({ pi }) => ({ pi, items: (byKey.get(parts[pi].key) || []).slice(0, 40) })).filter((c) => c.items.length);
+      if (cand.length) {
+        try {
+          const { data: pk, usage: u5 } = await callTool({
+            system: 'You match supplier catalogue rows (search by OE / article returns the original and cross-references) to the parts needed for a repair. For each part choose ONLY rows that are exactly that product for this vehicle/engine (right part type, complete kit when a kit is needed, not housings/brackets/other sizes). Return row ids, best first. Add a short Russian check note if fitment is uncertain.',
+            user: JSON.stringify({ vehicle, request: req.text, parts: cand.map((c) => ({ key: parts[c.pi].key, name_pl: parts[c.pi].name_pl, oe: (parts[c.pi].oe || []).map((x) => x.number),
+              rows: c.items.map((it, i) => ({ id: String(i), brand: it.brand, index: it.index, name: it.name })) })) }),
+            tool: { name: 'pick_rows', description: 'Matching rows per part', input_schema: { type: 'object', properties: { parts: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, ids: { type: 'array', items: { type: 'string' } }, check: { type: 'string' } }, required: ['key', 'ids'] } } }, required: ['parts'] } },
+            maxTokens: 3000, timeout: 90_000,
+          });
+          run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u5.input_tokens || 0, u5.output_tokens || 0, jobId);
+          const whText = (stock) => { const w = (stock || []).find((x) => /WWA/i.test(x.name) && x.qty > 0) || (stock || []).find((x) => x.qty > 0); return w ? `склад ${w.name}` : ''; };
+          for (const pp of pk.parts || []) {
+            const c = cand.find((x) => parts[x.pi].key === pp.key);
+            if (!c) continue;
+            const rows = (pp.ids || []).map((i) => c.items[Number(i)]).filter((it) => it && !blackBrands.has(normBrand(it.brand)));
+            const toV = (it) => {
+              const net = it.net || round2(it.gross / 1.23);
+              const { sellGross, src } = icSell(net, it.retailGross || 0);
+              return perLitre({ brand: it.brand, article: it.index, sku: 'pa:' + it.brand + ':' + it.index, index: it.index, priceNet: round2(net), buyGross: round2(it.gross || net * 1.23),
+                sellGross, sellNet: round2(sellGross / 1.23), sellSrc: src, availability: it.total, delivery: whText(it.stock), supplier: 'ProfiAuto', url: it.link || null }, parts[c.pi].unit, it.name, it.index);
+            };
+            const oeV = rows.filter((it) => normBrand(it.brand) === oeBrand).map(toV).sort((a, b) => a.sellGross - b.sellGross);
+            const anV = rows.filter((it) => normBrand(it.brand) !== oeBrand).map(toV).sort((a, b) => a.sellGross - b.sellGross);
+            const variants = tiers(oeV, anV, parts[c.pi].key);
+            const chosen = pickLevel(variants);
+            if (chosen) { per[c.pi] = { variants, chosen, oeVars: oeV, src: 'profiauto' }; fromPa++; }
+            if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check;
+          }
+        } catch { /* без ProfiAuto — дальше Allegro */ }
+      }
+    }
+  }
+
+  // 5б. Нет ни в Inter Cars, ни в ProfiAuto → Allegro (Biznes) через расширение во вкладке менеджера: только чтение, заказывает менеджер
   const noStock = per.map((x, pi) => ({ x, pi })).filter(({ x }) => !x.chosen);
   let allegroNote = '';
   if (noStock.length && req.extAllegro && !cancelled()) {
@@ -282,18 +356,10 @@ async function pick(jobId) {
       const oe = p.unit === 'l' ? null : (p.oe || []).map((x) => String(x.number || '').toUpperCase().replace(/[^A-Z0-9]/g, '')).find(oeOk);
       return { key: p.key, q: oe || [p.name_pl, vehicle.make, String(vehicle.model || '').split(/\s+/)[0], vehicle.capacity_ccm && (Math.round(vehicle.capacity_ccm / 100) / 10).toFixed(1)].filter(Boolean).join(' ') };
     });
-    step('add', 'run', `нет в наличии в Inter Cars: ${noStock.map(({ pi }) => parts[pi].name_pl).join(', ')} — ищу на Allegro (окно подбора не закрывайте)…`);
-    const cur0 = withDb(d, () => JSON.parse(one('SELECT result FROM ai_jobs WHERE id = ?', jobId).result || '{}'));
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ ...cur0, wait: 'allegro', allegroNeed: queries }), jobId));
-    let al = null, alErr = null;
-    for (let i = 0; i < 160 && !al; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const row = withDb(d, () => one('SELECT status, result FROM ai_jobs WHERE id = ?', jobId));
-      if (row.status === 'cancelled') return;
-      const rr = JSON.parse(row.result || '{}');
-      al = rr.allegro || null; alErr = rr.allegroError || null;
-    }
-    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ?", jobId));
+    step('add', 'run', `нет в наличии ${(req.extV || 0) >= 10700 ? 'в Inter Cars и ProfiAuto' : 'в Inter Cars'}: ${noStock.map(({ pi }) => parts[pi].name_pl).join(', ')} — ищу на Allegro (окно подбора не закрывайте)…`);
+    const w = await waitExt('allegro', queries, 160);
+    if (!w) return;
+    const al = w.res, alErr = w.err;
     if (alErr) allegroNote = alErr;
     const cand = (al || []).map((r) => ({ r, pi: noStock.find(({ pi }) => parts[pi].key === r.key)?.pi })).filter((c) => c.pi != null && c.r.items?.length);
     if (cand.length) {
@@ -344,6 +410,7 @@ async function pick(jobId) {
     else if (!oe.length) reasons.push('Нет OE-номера — проверьте применимость');
     else if (oe.every((x) => x.source === 'ИИ') && !p.oe_sure) reasons.push('OE-номер от ИИ не подтверждён историей / partslink24 — проверьте применимость');
     if (chosen && supplierSrc === 'allegro') reasons.push(`С Allegro — закажите заранее по ссылке (наценка ${variants[chosen].markup}%)`);
+    if (chosen && supplierSrc === 'profiauto') reasons.push(`Нет в наличии в Inter Cars — из ProfiAuto (${variants[chosen].delivery || 'в наличии'})`);
     if (chosen && variants[chosen].pack > 1) reasons.push(`Цена за 1 л (в упаковке ${String(variants[chosen].pack).replace('.', ',')} л по ${String(variants[chosen].packPrice).replace('.', ',')} zł) — закажите нужное число упаковок`);
     if (chosen && variants[chosen].packUnknown) reasons.push('Не удалось определить объём упаковки — проверьте, что цена указана за 1 л');
     if (chosen && variants[chosen].sellSrc === 'min') reasons.push(`Рекомендуемая цена Inter Cars ниже минимальной маржи — поднята до закупки брутто + ${minMargin()}%`);
@@ -368,12 +435,12 @@ async function pick(jobId) {
     const id = withDb(d, () => addAiLabor(jobId, o.id, { title: String(w.job).slice(0, 200), hours: Number(w.hours), src: w.source === 'history' ? 'history' : 'estimate', purpose: w.purpose || null }));
     if (id) { laborAdded++; added++; }
   }
-  if (notFound.length) withDb(d, () => addJobNote(o.id, jobId, `нет в наличии${req.extAllegro ? ' в Inter Cars и на Allegro' : ' в Inter Cars'}, подберите вручную: ${notFound.join('; ')}`));
+  if (notFound.length) withDb(d, () => addJobNote(o.id, jobId, `нет в наличии в ${['Inter Cars', (req.extV || 0) >= 10700 ? 'ProfiAuto' : null, req.extAllegro ? 'Allegro' : null].filter(Boolean).join(', ')} — подберите вручную: ${notFound.join('; ')}`));
   recalc(o.id);
-  const note = [data.note, allegroNote, notFound.length ? `не найдено в наличии: ${notFound.length}` : null].filter(Boolean).join(' · ') || null;
-  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), allegro: fromAllegro, labor: laborAdded }), jobId);
-  step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
-    + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (allegroNote ? ' · ' + allegroNote : ''));
+  const note = [data.note, paNote, allegroNote, notFound.length ? `не найдено в наличии: ${notFound.length}` : null].filter(Boolean).join(' · ') || null;
+  run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), profiauto: fromPa, allegro: fromAllegro, labor: laborAdded }), jobId);
+  step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromPa ? `, из ProfiAuto ${fromPa}` : ''}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
+    + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (paNote ? ' · ' + paNote : '') + (allegroNote ? ' · ' + allegroNote : ''));
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
 }
 

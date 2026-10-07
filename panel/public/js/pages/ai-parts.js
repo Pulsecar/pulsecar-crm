@@ -54,7 +54,7 @@ export function AiItemInfo({ line, reload, ai }) {
       return html`<button class=${'ai-var' + (k === line.chosen ? ' on' : '')} onClick=${() => pick(k)} title=${`${x.supplier === 'Allegro' ? x.title + ' · ' : ''}${x.brand} ${x.article} · закупка ${zl(x.buyGross || x.priceNet)} брутто${margin(x) != null ? ' · маржа ' + margin(x) + '%' : ''} · ${x.supplier}${x.supplier === 'Inter Cars' ? ' · в наличии ' + x.availability : ''}`}>
         <span>${label}${x.supplier === 'Allegro' ? ' · Allegro' : ''}</span><b>${x.brand || 'без марки'}</b><span>${zl(x.sellGross)}</span></button>`;
     })}</div>
-    <div class="sub">${v.brand} ${v.article} · ${v.supplier === 'Allegro' ? html`<a href=${v.url} target="_blank" rel="noopener">Allegro — открыть предложение</a>` : v.supplier || 'не найдено'}${v.delivery ? ', ' + v.delivery : ''}${v.supplier === 'Inter Cars' ? ` · в наличии ${v.availability}` : ''}${margin(v) != null ? ` · маржа ${margin(v)}%` : ''}${line.qty_note ? ' · ' + line.qty_note : ''}
+    <div class="sub">${v.brand} ${v.article} · ${v.supplier === 'Allegro' ? html`<a href=${v.url} target="_blank" rel="noopener">Allegro — открыть предложение</a>` : v.supplier === 'ProfiAuto' && v.url ? html`<a href=${v.url} target="_blank" rel="noopener">ProfiAuto — открыть товар</a>` : v.supplier || 'не найдено'}${v.delivery ? ', ' + v.delivery : ''}${v.supplier === 'Inter Cars' ? ` · в наличии ${v.availability}` : ''}${margin(v) != null ? ` · маржа ${margin(v)}%` : ''}${line.qty_note ? ' · ' + line.qty_note : ''}
       · <select class="ai-st" value=${line.status} onChange=${(e) => setSt(e.target.value)}>${Object.entries(AI_STATUS).map(([k, t]) => html`<option value=${k}>${t}</option>`)}</select></div>
   </div>`;
 }
@@ -75,8 +75,8 @@ export function AiModal({ o, ai, onClose, reload }) {
   const [ecatMsg, setEcatMsg] = useState('');
   useEffect(() => {
     if (!job || job.status !== 'waiting') return;
-    const kind = job.result?.wait === 'allegro' ? 'allegro' : 'ecat';
-    const payload = kind === 'allegro' ? job.result?.allegroNeed && { queries: job.result.allegroNeed } : job.result?.need && { oes: job.result.need };
+    const kind = ['allegro', 'profiauto'].includes(job.result?.wait) ? job.result.wait : 'ecat';
+    const payload = kind === 'ecat' ? job.result?.need && { oes: job.result.need } : job.result?.[kind + 'Need'] && { queries: job.result[kind + 'Need'] };
     const key = job.id + ':' + kind;
     if (!payload || ecatFor === key) return;
     setEcatFor(key);
@@ -94,7 +94,7 @@ export function AiModal({ o, ai, onClose, reload }) {
       if (m.type === kind + '-result') send(m.results || partial, m.ok ? null : m.error);
     };
     // расширение не ответило вовремя — отдаём то, что успело найти, подбор идёт дальше
-    const timer = setTimeout(() => send(partial, (kind === 'allegro' ? 'Allegro' : 'e-Catalog') + ' ответил не полностью — взято то, что успели найти'), kind === 'allegro' ? 225_000 : 140_000);
+    const timer = setTimeout(() => send(partial, ({ allegro: 'Allegro', profiauto: 'ProfiAuto', ecat: 'e-Catalog' })[kind] + ' ответил не полностью — взято то, что успели найти'), kind === 'ecat' ? 140_000 : 225_000);
     addEventListener('message', onMsg);
     window.postMessage({ source: 'pulsecar-crm', type: kind, reqId, job: payload }, location.origin);
   }, [job]);
@@ -114,7 +114,7 @@ export function AiModal({ o, ai, onClose, reload }) {
   // partslink24 через расширение Pulsecar (вкладка менеджера, его вход, по одной детали с паузами)
   const extV = document.documentElement.dataset.pulsecarExt || '';
   const extN = extV ? extV.split('.').map(Number).reduce((a, x, i) => a + x * [10000, 100, 1][i], 0) : 0;
-  const extOk = extN >= 10500, extAllegro = extN >= 10600; // 1.6.1+ — с таймаутами
+  const extOk = extN >= 10500, extAllegro = extN >= 10600, extPa = extN >= 10700;
   const [pl, setPl] = useState(null);
   const runPl24 = async () => {
     if (!f.text.trim()) return toast('Сначала напишите, что нужно', 'error');
@@ -168,7 +168,7 @@ export function AiModal({ o, ai, onClose, reload }) {
         <div class="row-btns" style="margin:0">${extOk
           ? html`<button class="btn sm primary" disabled=${pl?.busy || noVin} onClick=${runPl24}><${Icon} n="search" />Найти в partslink24</button>`
           : ''}
-          ${!extAllegro && html`<a class="btn sm" href="/pulsecar-extension.zip" title="Расширение Pulsecar 1.6 для Chrome: partslink24, e-Catalog Inter Cars и поиск на Allegro того, чего нет в наличии. Распакуйте и загрузите в chrome://extensions (режим разработчика)">Скачать расширение 1.6</a>`}
+          ${!extPa && html`<a class="btn sm" href="/pulsecar-extension.zip" title="Расширение Pulsecar 1.7 для Chrome: partslink24, e-Catalog Inter Cars, ProfiAuto и Allegro — поиск того, чего нет в наличии. Распакуйте и загрузите в chrome://extensions (режим разработчика)">Скачать расширение 1.7</a>`}
           <button class="btn sm" onClick=${() => setShowPaste(!showPaste)}><${Icon} n="list" />Вставить список</button></div>
       </div>
       ${pl && html`<div class=${'ai-pl24-st' + (pl.error ? ' err' : '')}>${pl.busy ? html`<span class="ai-dot run-dot"></span>` : ''}${pl.error ? pl.error + (pl.text ? ' — ' + pl.text : '') : pl.text}</div>`}
@@ -212,7 +212,7 @@ export function AiSettings() {
         <label class="f">Наценка, если Inter Cars не дал рекомендуемую цену, %<input type="number" min="0" value=${f.markup} onInput=${(e) => setF({ ...f, markup: e.target.value })} /></label>
         <label class="f">Минимальная маржа на запчасти, % от закупки брутто<input type="number" min="0" value=${f.minMargin} onInput=${(e) => setF({ ...f, minMargin: e.target.value })} /></label>
       </div>
-      <p class="sub">Inter Cars: берём рекомендуемую цену продажи IC; если она даёт меньше минимальной маржи — цена поднимается до закупки брутто + минимум. В подбор попадают только детали, которые есть в наличии. Чего нет в Inter Cars — ищется на Allegro через расширение (наценка 50% до 100 zł, 45% до 250 zł, 40% до 500 zł, 35% до 1000 zł, дороже — 30%), ссылка на предложение пишется в пометку позиции и во «Внутреннее описание» выцены.</p>
+      <p class="sub">Inter Cars: берём рекомендуемую цену продажи IC; если она даёт меньше минимальной маржи — цена поднимается до закупки брутто + минимум. В подбор попадают только детали, которые есть в наличии. Чего нет в Inter Cars — ищется в ProfiAuto, затем на Allegro через расширение (наценка 50% до 100 zł, 45% до 250 zł, 40% до 500 zł, 35% до 1000 zł, дороже — 30%), ссылка на предложение пишется в пометку позиции и во «Внутреннее описание» выцены.</p>
       <label class="f" style="margin-top:10px">Модель Claude<input value=${f.model} onInput=${(e) => setF({ ...f, model: e.target.value })} placeholder=${data.defaultModel} /></label>
       <div style="margin-top:14px"><button class="btn primary" onClick=${save}>Сохранить</button></div>
     </div>

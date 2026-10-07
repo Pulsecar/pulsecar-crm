@@ -13,7 +13,7 @@
     if ((m.type === 'fiscal' || m.type === 'fiscal-allow') && m.reqId) {
       chrome.runtime.sendMessage({ type: m.type, job: m.job, url: m.url }, (r) => say({ type: m.type + '-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));
     }
-    if ((m.type === 'ecat' || m.type === 'allegro') && m.reqId) {
+    if ((m.type === 'ecat' || m.type === 'allegro' || m.type === 'profiauto') && m.reqId) {
       chrome.runtime.sendMessage({ type: m.type, reqId: m.reqId, job: m.job }, (r) => say({ type: m.type + '-result', reqId: m.reqId, ...(r || { ok: false, error: chrome.runtime.lastError?.message || 'Расширение не ответило' }) }));
     }
     if (m.type === 'pl24' && m.reqId) {

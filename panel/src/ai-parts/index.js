@@ -106,6 +106,27 @@ export function mountAiParts(crm, who) {
     res.json({ ok: true });
   });
 
+  /** Ответ страницы: строки каталога ProfiAuto для деталей, которых нет в наличии в Inter Cars (собраны расширением, только чтение) */
+  crm.post('/ai-parts/jobs/:id/profiauto', (req, res) => {
+    gate(req, 'orders.edit');
+    const j = one('SELECT * FROM ai_jobs WHERE id = ?', Number(req.params.id));
+    if (!j) throw new HttpError(404, 'Нет такого подбора');
+    if (j.status !== 'waiting' || J(j.result, {})?.wait !== 'profiauto') return res.json({ ok: false, late: true });
+    const s2 = (v, n) => String(v ?? '').slice(0, n);
+    const n2 = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 && x < 1e6 ? Math.round(x * 100) / 100 : 0; };
+    const okLink = (u) => (/^https:\/\/online\.profiauto\.com\/main-article\/detail/.test(String(u || '')) ? s2(u, 300) : null);
+    const results = (Array.isArray(req.body?.results) ? req.body.results : []).slice(0, 20).map((r) => ({
+      key: s2(r.key, 60), q: s2(r.q, 80),
+      items: (Array.isArray(r.items) ? r.items : []).slice(0, 30).filter((it) => String(it.index || '').trim())
+        .map((it) => ({ index: s2(it.index, 40).trim(), brand: s2(it.brand, 40).trim(), name: s2(it.name, 160), net: n2(it.net), gross: n2(it.gross), retailNet: n2(it.retailNet), retailGross: n2(it.retailGross),
+          stock: (Array.isArray(it.stock) ? it.stock : []).slice(0, 10).map((w) => ({ name: s2(w.name, 20), qty: Math.max(0, Math.min(9999, Math.round(Number(w.qty) || 0))) })),
+          total: Math.max(0, Math.min(99999, Math.round(Number(it.total) || 0))), link: okLink(it.link) })),
+    }));
+    const cur = J(j.result, {}) || {};
+    run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ ...cur, profiauto: results.length ? results : [{ key: '', items: [] }], profiautoError: req.body?.error ? s2(req.body.error, 300) : null }), j.id);
+    res.json({ ok: true });
+  });
+
   /** Ответ страницы: предложения Allegro для деталей, которых нет в наличии в Inter Cars (собраны расширением, только чтение) */
   crm.post('/ai-parts/jobs/:id/allegro', (req, res) => {
     gate(req, 'orders.edit');
@@ -143,7 +164,7 @@ export function mountAiParts(crm, who) {
       if (!v) throw new HttpError(400, 'Нет такого варианта');
       if (l.order_item_id) {
         const it = one('SELECT note FROM order_items WHERE id = ?', l.order_item_id);
-        const note = withLink(it?.note, l.link, v.url);
+        const note = withLink(it?.note, l.link, v.url, v.supplier);
         run('UPDATE order_items SET name = ?, code = ?, price = ?, cost = ?, note = ? WHERE id = ?', itemName(l.title, v), v.article || null, v.sellGross, v.priceNet, note, l.order_item_id);
         recalc(l.order_id);
       }
@@ -279,7 +300,7 @@ export function addAiLine(jobId, orderId, line) {
     AND EXISTS (SELECT 1 FROM order_items i WHERE i.id = l.order_item_id)`, orderId, line.group_key)) return null;
   const v = line.variants[line.chosen];
   if (v?.article && one('SELECT 1 FROM order_items WHERE order_id = ? AND kind = ? AND code = ?', orderId, 'part', v.article)) return null;
-  const note = withLink(line.note ? String(line.note).slice(0, 500) : null, null, v?.url);
+  const note = withLink(line.note ? String(line.note).slice(0, 500) : null, null, v?.url, v?.supplier);
   const itemId = addItem(orderId, { kind: 'part', name: itemName(line.title, v), code: v?.article || null, qty: line.qty, unit: line.unit || 'szt.',
     price: round2(v?.sellGross || 0), cost: round2(v?.priceNet || 0), vat: 23, note });
   if (v?.url) addOrderLink(orderId, line.title, v);
@@ -291,18 +312,18 @@ export function addAiLine(jobId, orderId, line) {
   });
 }
 
-const LINK_TAG = 'Allegro (заказать заранее): ';
-/** Пометка позиции: ссылка на предложение Allegro отдельной строкой (при смене варианта — заменяется) */
-function withLink(note, oldUrl, url) {
-  let n = String(note || '').split('\n').filter((x) => !(oldUrl && x.includes(oldUrl)) && !x.startsWith(LINK_TAG)).join('\n').trim();
-  if (url) n = [n, LINK_TAG + url].filter(Boolean).join('\n');
+const LINK_RE = /^(Allegro|ProfiAuto) \(заказать заранее\): /;
+/** Пометка позиции: ссылка на предложение (Allegro / ProfiAuto) отдельной строкой (при смене варианта — заменяется) */
+function withLink(note, oldUrl, url, supplier = 'Allegro') {
+  let n = String(note || '').split('\n').filter((x) => !(oldUrl && x.includes(oldUrl)) && !LINK_RE.test(x)).join('\n').trim();
+  if (url) n = [n, `${supplier} (заказать заранее): ${url}`].filter(Boolean).join('\n');
   return n || null;
 }
 /** Внутреннее описание выцены (клиент не видит): строка для менеджера со ссылкой на запчасть с Allegro */
 function addOrderLink(orderId, title, v) {
   const o = one('SELECT internal_note FROM orders WHERE id = ?', orderId);
   if (!o || String(o.internal_note || '').includes(v.url)) return;
-  const row = `ИИ-подбор — заказать на Allegro: ${[title, v.brand, v.article].filter(Boolean).join(' ')}, закупка ${String(v.buyGross ?? v.sellGross).replace('.', ',')} zł brutto${v.delivery ? ', ' + v.delivery : ''} — ${v.url}`;
+  const row = `ИИ-подбор — заказать ${v.supplier === 'ProfiAuto' ? 'в ProfiAuto' : 'на Allegro'}: ${[title, v.brand, v.article].filter(Boolean).join(' ')}, закупка ${String(v.buyGross ?? v.sellGross).replace('.', ',')} zł brutto${v.delivery ? ', ' + v.delivery : ''} — ${v.url}`;
   run('UPDATE orders SET internal_note = ? WHERE id = ?', [o.internal_note, row].filter((x) => x && String(x).trim()).join('\n'), orderId);
 }
 /** Строка подбора во внутреннем описании (с номером подбора — уберётся при отмене) */

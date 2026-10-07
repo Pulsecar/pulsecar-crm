@@ -227,6 +227,31 @@
     }
   }
 
+  // ── ProfiAuto (online.profiauto.com): строки app-article-list-row — кнопка рядом с «В корзину» ──
+  const PA = /(^|\.)profiauto\.com$/.test(host);
+  const paCards = () => [...document.querySelectorAll('app-article-list-row')].filter((r) => r.querySelector('.article-title-index'));
+  function parsePaCard(r) {
+    const brand = T(r.querySelector('.article-title-index-brand'));
+    const code = T(r.querySelector('.article-title-index')).split('\n')[0].replace(brand, '').replace(/\|/g, '').trim();
+    const name = T(r.querySelector('.article-description-container')).split('\n')[0];
+    const badge = T(r.querySelector('.price-container'));
+    const pv = [...r.querySelectorAll('.article-price-value-container')].map(T);
+    const net = toNum((pv.find((x) => /netto/i.test(x)) || '').match(/([\d\s]+,\d{2})/)?.[1] || '');
+    const gross = toNum((pv.find((x) => /brutto/i.test(x)) || '').match(/([\d\s]+,\d{2})/)?.[1] || '');
+    const sell = toNum((badge.match(/([\d\s]+,\d{2})\s*PLN\s*brutto/) || [])[1] || '');
+    return { supplier: SUPPLIER, code, name, brand, qty: 1, vat: 23, price_net: net || (gross ? round2(gross / 1.23) : 0), sell_gross: sell,
+      url: r.querySelector('a[href*="/main-article/detail"]')?.href || location.href.split('#')[0] };
+  }
+  function decoratePa() {
+    for (const r of paCards()) {
+      if (r.querySelector('.pulsecar-btn')) continue;
+      const b = makeBtn(() => openModal([parsePaCard(r)]));
+      const cart = r.querySelector('button.add-to-cart-btn');
+      if (cart?.parentElement) { b.style.margin = '6px 0 0 0'; cart.parentElement.appendChild(b); }
+      else r.appendChild(b);
+    }
+  }
+
   // ── Документ на странице (фактура, WZ, корзина, заказ): тип, номер, дата ─────
   function detectDoc() {
     const head = (location.href + ' ' + document.title).toLowerCase();
@@ -265,6 +290,10 @@
       if (pg) return openModal([parseAlProduct(pg)]);
       const cards = alCards();
       if (cards.length) return openModal(cards.map(parseAlCard));
+    }
+    if (PA && mode !== 'selection') {
+      const cards = paCards();
+      if (cards.length) return openModal(cards.map(parsePaCard));
     }
     if (SUPPLIER === 'intercars' && mode !== 'selection') {
       const pg = icProductPage();
@@ -478,9 +507,9 @@
   globalThis.pcI18nReady?.then(() => { fab.title = pcT(FAB_TITLE); });
   globalThis.pcOnLang?.(() => { fab.title = pcT(FAB_TITLE); });
   if (!/pulsecar\.tech$/.test(host)) document.body.appendChild(fab);
-  if (SUPPLIER === 'intercars' || SUPPLIER === 'allegro') {
+  if (SUPPLIER === 'intercars' || SUPPLIER === 'allegro' || PA) {
     let t = null;
-    const run = () => { clearTimeout(t); t = setTimeout(SUPPLIER === 'allegro' ? decorateAl : decorateIc, 400); };
+    const run = () => { clearTimeout(t); t = setTimeout(PA ? decoratePa : SUPPLIER === 'allegro' ? decorateAl : decorateIc, 400); };
     run();
     new MutationObserver((muts) => { if (muts.some((m) => [...m.addedNodes].some((n) => n.nodeType === 1 && !n.classList?.contains('pulsecar-btn') && !n.classList?.contains('pulsecar-host')))) run(); })
       .observe(document.body, { childList: true, subtree: true });
