@@ -128,9 +128,11 @@ export function AiModal({ o, ai, onClose, reload }) {
       if (m.type === 'pl24-progress') setPl({ busy: true, text: m.text });
       if (m.type === 'pl24-result') {
         removeEventListener('message', onMsg);
-        const lines = (m.results || m.rows || []).flatMap((r) => [`# ${r.q}`, ...(r.rows || []).map((x) => [x.number, x.name, x.qty && 'szt. ' + x.qty, x.note, x.model, x.group].filter(Boolean).join(' | ')), ...(r.rows?.length ? [] : ['(nie znaleziono)'])]);
+        const fmt = (x) => [x.number, x.name, x.qty && 'szt. ' + x.qty, x.note, x.model, x.group].filter(Boolean).join(' | ');
+        const lines = (m.results || m.rows || []).flatMap((r) => [`# ${r.q}`, ...(r.rows || []).map(fmt), ...(r.rows?.length ? [] : ['(nie znaleziono)']),
+          ...(r.bom?.length ? [`## rysunek węzła (wszystkie części: uszczelki, śruby…)`, ...r.bom.map((x) => `${x.pos}. ${fmt(x)}`)] : [])]);
         if (lines.length) { setF((cur) => ({ ...cur, paste: [cur.paste, lines.join('\n')].filter(Boolean).join('\n') })); setShowPaste(true); }
-        setPl(m.ok ? { done: true, text: `partslink24: найдено по ${(m.results || []).filter((r) => r.rows?.length).length} из ${(m.results || []).length} деталей` } : { error: m.error, text: lines.length ? 'часть номеров получена' : '' });
+        setPl(m.ok ? { done: true, text: `partslink24: найдено по ${(m.results || []).filter((r) => r.rows?.length).length} из ${(m.results || []).length} деталей${(m.results || []).some((r) => r.bom?.length) ? ', со списками деталей узлов' : ''}` } : { error: m.error, text: lines.length ? 'часть номеров получена' : '' });
       }
     };
     addEventListener('message', onMsg);

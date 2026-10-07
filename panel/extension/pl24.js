@@ -7,13 +7,14 @@ const pause = () => new Promise((r) => setTimeout(r, 1000 + Math.random() * 2000
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function tabUrl(tabId) { return (await chrome.tabs.get(tabId)).url || ''; }
+const within = (p, ms, dflt) => Promise.race([p, new Promise((r) => setTimeout(() => r(dflt), ms))]);
 async function waitLoad(tabId, timeout = 20000) {
   const until = Date.now() + timeout;
-  while (Date.now() < until) { const t = await chrome.tabs.get(tabId); if (t.status === 'complete') return; await wait(300); }
+  while (Date.now() < until) { const t = await within(chrome.tabs.get(tabId).catch(() => null), 3000, null); if (!t || t.status === 'complete') return; await wait(300); }
 }
 async function run(tabId, func, args = []) {
-  const [r] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
-  return r?.result;
+  const res = await within(chrome.scripting.executeScript({ target: { tabId }, func, args }).catch(() => null), 10000, null);
+  return res?.[0]?.result;
 }
 
 // ── функции, которые выполняются на странице partslink24 ──
@@ -46,22 +47,24 @@ function readList(onlyNumber) {
     const num = r['numer czesci'] || r['numer części'] || r['part number'] || r['teilenummer'];
     if (!num) continue;
     if (onlyNumber && num.replace(/\W/g, '') !== onlyNumber.replace(/\W/g, '')) continue;
-    rows.push({ number: num, name: r['nazwa'] || r['name'] || r['benennung'] || '', note: r['oznaczenie'] || r['bemerkung'] || '', qty: r['szt.'] || r['qty'] || r['menge'] || '',
-      model: r['podanie modelu'] || r['modellangabe'] || '', group: [r['gr gl.'], r['pg'], r['nr rysunku']].filter(Boolean).join('/'), el: null });
+    rows.push({ number: num, name: r['nazwa'] || r['name'] || r['benennung'] || '', note: [r['oznaczenie'] || r['bemerkung'], r['dodatek'] || r['zusatz']].filter(Boolean).join(', '), qty: r['szt.'] || r['qty'] || r['menge'] || '',
+      model: r['podanie modelu'] || r['modellangabe'] || '', group: [r['gr gl.'], r['pg'], r['nr rysunku']].filter(Boolean).join('/'), pos: r['poz.'] || r['pos.'] || '', el: null });
   }
-  return rows.slice(0, 40);
+  return rows.slice(0, 60);
 }
 function clickBest(q) {
   // строка, где в названии больше всего слов запроса (а не первая попавшаяся)
   const words = String(q).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter((w) => w.length > 2).map((w) => w.slice(0, 5));
-  let best = null, score = -1;
+  let best = null, score = -1, hits = 0;
   for (const it of document.querySelectorAll('[class*="_listItem_"]')) {
     if ([...it.classList].some((c) => /_inactive/.test(c))) continue;
     const name = it.innerText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const sc = words.filter((w) => name.includes(w)).length - name.length / 1000;
-    if (sc > score) { score = sc; best = it; }
+    const h = words.filter((w) => name.includes(w)).length;
+    const sc = h - name.length / 1000;
+    if (sc > score) { score = sc; best = it; hits = h; }
   }
-  if (!best) return null;
+  // все слова запроса должны быть в названии (иначе «kolektor ssący» откроет «kolektor wydechowy»)
+  if (!best || hits < Math.min(words.length, 2) || !hits) return null; // ни одного слова запроса в названии — не открываем чужую деталь
   const num = [...best.querySelectorAll('[class*="_listItemColumn_"]')].map((c) => c.innerText.replace(/\s+/g, ' ').trim()).find((t) => /^Numer cz/i.test(t))?.replace(/^Numer cz\S*\s*/i, '') || null;
   best.click();
   return num;
@@ -72,45 +75,69 @@ globalThis.pl24Run = async function pl24Run({ vin, terms }, progress) {
   vin = String(vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   terms = (terms || []).slice(0, 12);
   if (vin.length !== 17 || !terms.length) return { ok: false, error: 'Нет VIN или списка деталей' };
+  // BMW / MINI в partslink24 открываются по 7 последним знакам VIN (номер кузова)
+  const key = /^(WBA|WBS|WBY|WMW|WBX|4US|5UX|5YM)/.test(vin) ? vin.slice(-7) : vin;
   // уже открытое авто с этим VIN в partslink24 — работаем в той вкладке
-  const open = (await chrome.tabs.query({ url: PL24 + '/*' })).find((t) => (t.url || '').includes('/' + vin + '/'));
+  const open = (await chrome.tabs.query({ url: PL24 + '/*' })).find((t) => (t.url || '').includes('/' + key + '/'));
   let tab = open || await chrome.tabs.create({ url: PL24 + '/portal-ui', active: true });
   let tabId = tab.id;
   await waitLoad(tabId);
   await wait(1500);
   let st = await run(tabId, pageState);
   if (st !== 'ok') return { ok: false, stop: st, error: st === 'login' ? 'Войдите в partslink24 в открытой вкладке и нажмите ещё раз' : 'partslink24 показал проверку (капча) — пройдите её сами и нажмите ещё раз' };
-  let slug = /\/pl24-app\/([^/]+)\/([A-Z0-9]{17})\//.exec(await tabUrl(tabId));
-  if (!slug || slug[2] !== vin) {
+  const SLUG = /\/pl24-app\/([^/]+)\/([A-Z0-9]{7,17})\//;
+  let slug = SLUG.exec(await tabUrl(tabId));
+  if (!slug || slug[2] !== key) {
     progress('Открываю авто по VIN…');
-    await run(tabId, enterVin, [vin]);
+    await run(tabId, enterVin, [key]);
     const until = Date.now() + 15000;
-    while (Date.now() < until && !(slug = /\/pl24-app\/([^/]+)\/([A-Z0-9]{17})\//.exec(await tabUrl(tabId)))) await wait(500);
-    if (!slug) return { ok: false, stop: 'vin', error: 'partslink24 не открыл авто по VIN. Откройте авто вручную в этой вкладке и нажмите ещё раз.' };
+    while (Date.now() < until && !((slug = SLUG.exec(await tabUrl(tabId))) && slug[2] === key)) await wait(500);
+    if (!slug || slug[2] !== key) {
+      if (key !== vin) { // на всякий случай — полный VIN
+        await run(tabId, enterVin, [vin]);
+        const u2 = Date.now() + 15000;
+        while (Date.now() < u2 && !((slug = SLUG.exec(await tabUrl(tabId))) && [vin, key].includes(slug[2]))) await wait(500);
+      }
+      if (!slug || ![vin, key].includes(slug[2])) return { ok: false, stop: 'vin', error: 'partslink24 не открыл авто по VIN. Откройте авто вручную в этой вкладке и нажмите ещё раз.' };
+    }
   }
+  const carKey = slug[2];
   const service = slug[1];
   const out = [];
   for (const [i, t] of terms.entries()) {
     await pause();
     progress(`Ищу «${t.q}» (${i + 1} из ${terms.length})…`);
-    await chrome.tabs.update(tabId, { url: `${PL24}/pl24-app/${service}/${vin}/0/search?q=${encodeURIComponent(t.q)}` });
-    await waitLoad(tabId);
-    let rows = [];
-    for (let k = 0; k < 16 && !rows.length; k++) { await wait(500); rows = (await run(tabId, readList)) || []; }
-    st = await run(tabId, pageState);
-    if (st !== 'ok') return { ok: false, stop: st, rows: out, error: 'partslink24 остановил работу (вход / капча) — продолжите вручную' };
-    // количество и примечания — из иллюстрации первой подходящей строки (один клик)
-    if (rows.length) {
+    // основное название и запасные (у разных марок деталь называется по-разному: BMW «instalacja ssąca» вместо «kolektor ssący»)
+    const qs = [t.q, ...(Array.isArray(t.alt) ? t.alt : [])].map((x) => String(x || '').trim()).filter(Boolean).slice(0, 3);
+    let rows = [], bom = [], usedQ = t.q, num = null;
+    for (const [qi, q] of qs.entries()) {
+      if (qi) { await pause(); progress(`Ищу «${q}» (${i + 1} из ${terms.length})…`); }
+      await chrome.tabs.update(tabId, { url: `${PL24}/pl24-app/${service}/${carKey}/0/search?q=${encodeURIComponent(q)}` });
+      await waitLoad(tabId);
+      rows = [];
+      for (let k = 0; k < 16 && !rows.length; k++) { await wait(500); rows = (await run(tabId, readList)) || []; }
+      st = await run(tabId, pageState);
+      if (st && st !== 'ok') return { ok: false, stop: st, rows: out, error: 'partslink24 остановил работу (вход / капча) — продолжите вручную' };
+      if (!rows.length) continue;
+      // открываем рисунок подходящей строки: количество, примечания и весь список деталей узла (прокладки, болты…)
       await pause();
-      const num = await run(tabId, clickBest, [t.q]);
-      await wait(2500);
-      const i0 = Math.max(0, rows.findIndex((r) => num && r.number.replace(/\W/g, '') === num.replace(/\W/g, '')));
-      const bom = (await run(tabId, readList, [rows[i0].number])) || [];
-      const withQty = bom.find((b) => b.qty);
-      if (withQty) Object.assign(rows[i0], { qty: withQty.qty, note: withQty.note || rows[i0].note, model: withQty.model || rows[i0].model, best: true });
-      rows.unshift(...rows.splice(i0, 1));
+      num = await run(tabId, clickBest, [q]);
+      if (!num) { rows = []; continue; } // ни одна строка не похожа на запрос — пробуем другое название
+      usedQ = q;
+      await wait(3000);
+      const all = (await run(tabId, readList)) || [];
+      bom = all.filter((b) => b.pos);
+      break;
     }
-    out.push({ key: t.key, q: t.q, rows: rows.slice(0, 8).map(({ el, ...r }) => r) });
+    if (rows.length && num) {
+      const i0 = Math.max(0, rows.findIndex((r) => r.number.replace(/\W/g, '') === num.replace(/\W/g, '')));
+      const me = bom.find((b) => b.number.replace(/\W/g, '') === rows[i0].number.replace(/\W/g, ''));
+      if (me) Object.assign(rows[i0], { qty: me.qty, note: me.note || rows[i0].note, model: me.model || rows[i0].model });
+      rows[i0].best = true;
+      rows.unshift(...rows.splice(i0, 1));
+      rows = rows.filter((r, k) => k === 0 || !bom.some((b) => b.number === r.number));
+    }
+    out.push({ key: t.key, q: usedQ, rows: rows.slice(0, 6).map(({ el, ...r }) => r), bom: bom.slice(0, 40).map(({ el, ...r }) => r) });
   }
   return { ok: true, service, results: out };
 }

@@ -81,13 +81,13 @@ export function mountAiParts(crm, who) {
     const text = String(req.body?.text || '').trim().slice(0, 2000);
     if (!text) throw new HttpError(400, 'Напишите, что нужно подобрать');
     const { data, usage } = await callTool({
-      system: 'You prepare search phrases for the partslink24 parts catalogue (Polish UI). For each part needed for the job, give ONE short Polish catalogue search phrase as the catalogue names the part (e.g. "pasek zębaty", "pompa płynu chłodzącego", "filtr oleju", "świeca zapłonowa", "klocki hamulcowe", "tarcza hamulcowa", "amortyzator"). Expand jobs into parts (timing belt job → pasek zębaty, rolka napinająca, rolka prowadząca, pompa płynu chłodzącego if driven by the belt). Max 12 phrases. No oils/fluids (not in the catalogue as numbers that matter) unless explicitly a part.',
+      system: 'You prepare search phrases for the partslink24 parts catalogue (Polish UI). For each MAIN part / assembly of the job give ONE short Polish catalogue search phrase as THIS make\'s catalogue names it, plus up to 2 alternative names in "alt" (catalogues differ: BMW ETK calls the intake manifold "instalacja ssąca" or "rura ssąca", VAG "rura ssąca", others "kolektor ssący"/"kolektor dolotowy"; exhaust manifold "kolektor wydechowy"; water pump "pompa płynu chłodzącego"/"pompa wody"). The tool opens the drawing of the main part and reads ALL parts of that assembly (gaskets, seals, bolts), so do NOT add separate phrases for gaskets/bolts of the same assembly — only for parts from OTHER assemblies that must be replaced too. Expand jobs into parts (timing belt job → pasek zębaty / zestaw, rolka napinająca, pompa płynu chłodzącego if belt-driven). Max 8 phrases. No oils/fluids.',
       user: JSON.stringify({ vehicle: { make: car.make, model: car.model, year: car.year, engine: car.engine, capacity: car.capacity, fuel: car.fuel }, request: text }),
-      tool: { name: 'pl24_terms', description: 'Search phrases', input_schema: { type: 'object', properties: { terms: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, q: { type: 'string' } }, required: ['key', 'q'] } } }, required: ['terms'] } },
+      tool: { name: 'pl24_terms', description: 'Search phrases', input_schema: { type: 'object', properties: { terms: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, q: { type: 'string' }, alt: { type: 'array', items: { type: 'string' } } }, required: ['key', 'q'] } } }, required: ['terms'] } },
       maxTokens: 1200, timeout: 60_000,
     });
     insert('ai_events', { kind: 'pl24_terms', order_id: o.id, data: JSON.stringify({ n: (data.terms || []).length, tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0) }) });
-    res.json({ vin: car.vin, terms: (data.terms || []).slice(0, 12) });
+    res.json({ vin: car.vin, terms: (data.terms || []).slice(0, 8).map((t) => ({ key: String(t.key || ''), q: String(t.q || ''), alt: (Array.isArray(t.alt) ? t.alt : []).map(String).slice(0, 2) })) });
   });
 
   /** Ответ страницы: аналоги по OE из Inter Cars e-Catalog (собраны расширением во вкладке менеджера) */
