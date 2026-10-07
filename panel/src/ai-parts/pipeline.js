@@ -8,6 +8,7 @@ import { callTool } from './claude.js';
 import { findByArticle, quote, normBrand, norm, whenText, icOn } from './ic.js';
 import { addAiLine } from './index.js';
 import { preferredBrands, blacklist } from './rules.js';
+import { similarJobs, jobKnowledge, trainOnHistory, trainedStat } from './history.js';
 
 export const STEPS = [
   ['vin', 'Расшифровка VIN'],
@@ -23,7 +24,8 @@ const waiters = [];
 const slot = () => (running < 2 ? (running++, Promise.resolve()) : new Promise((r) => waiters.push(r)).then(() => { running++; }));
 const free = () => { running--; waiters.shift()?.(); };
 
-const US = /^[1-5]/; // 1,4,5 — США, 2 — Канада, 3 — Мексика
+const US = /^[1-5]/;
+const jt2 = (terms) => terms.filter((t) => /\s/.test(t) || t.length > 5); // 1,4,5 — США, 2 — Канада, 3 — Мексика
 export const carSig = (k) => [normBrand(k.make), norm(String(k.model || '').split(/\s+/)[0]), k.capacity || '', String(k.fuel || '').slice(0, 3).toLowerCase()].join('|');
 
 /** NHTSA vPIC — бесплатная расшифровка VIN авто из США / Канады / Мексики */
@@ -77,6 +79,7 @@ async function pick(jobId) {
 
   // 2. История: что этот сервис ставил на такие же авто (без данных клиентов)
   step('history', 'run');
+  if (!trainedStat()) { try { trainOnHistory(); } catch (e) { console.error('ai train', e.message); } }
   const sig = carSig(car);
   const verified = all('SELECT group_key, oe, brand, article, name, weight FROM ai_verified WHERE car_sig = ? ORDER BY weight DESC, id DESC LIMIT 60', sig);
   const model0 = String(car.model || '').split(/\s+/)[0];
@@ -85,7 +88,21 @@ async function pick(jobId) {
     FROM orders o JOIN cars k ON k.id = o.car_id
     WHERE o.id <> ? AND k.make = ? AND k.model LIKE ? AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.kind = 'part')
     ORDER BY (k.capacity = ?) DESC, o.id DESC LIMIT 25`, o.id, car.make, model0 + '%', car.capacity || -1) : [];
-  step('history', 'ok', `похожих выцен/заказов: ${past.length}${verified.length ? `, проверенных номеров: ${verified.length}` : ''}`);
+  // похожие работы по всей истории сервиса (любые авто): что разбирали, какие прокладки / уплотнения меняли, сколько часов
+  let jobTerms = [];
+  try {
+    const { data: jt, usage: u0 } = await callTool({
+      system: 'Translate the repair request into short POLISH workshop job names as used on Polish repair orders (e.g. "Wymiana rozrządu", "Wymiana uszczelki pokrywy zaworów", "Wymiana klocków hamulcowych przód") plus Polish part keywords. Max 8 job names, max 12 keywords.',
+      user: JSON.stringify({ vehicle: { make: vehicle.make, model: vehicle.model, engine: vehicle.engine_code, fuel: vehicle.fuel }, request: req.text }),
+      tool: { name: 'job_terms', description: 'Polish job names and keywords', input_schema: { type: 'object', properties: { jobs: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } } }, required: ['jobs'] } },
+      maxTokens: 600, timeout: 45_000,
+    });
+    run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u0.input_tokens || 0, u0.output_tokens || 0, jobId);
+    jobTerms = [...(jt.jobs || []), ...(jt.keywords || [])].slice(0, 20);
+  } catch { jobTerms = [req.text]; }
+  const similar = similarJobs(jobTerms, car, 15).filter((x) => x.work.length || x.parts.length);
+  const know = jobKnowledge(jt2(jobTerms));
+  step('history', 'ok', `похожих выцен на эту модель: ${past.length}, похожих работ в истории: ${similar.length}${know.parts.length ? `, связанных деталей: ${know.parts.length}` : ''}${verified.length ? `, проверенных номеров: ${verified.length}` : ''}`);
   if (cancelled()) return;
 
   // 3. Claude: позиции, количество, OE, кандидаты-аналоги
@@ -99,6 +116,9 @@ async function pick(jobId) {
       partslink24_rows: req.paste ? req.paste.slice(0, 12000) : null,
       workshop_history_same_model: past.map((p) => ({ date: p.created_at?.slice(0, 10), engine: [p.engine, p.capacity, p.fuel].filter(Boolean).join(' '), parts: p.parts })).slice(0, 25),
       workshop_verified_numbers: verified,
+      workshop_similar_jobs_any_car: similar,
+      workshop_parts_usually_with_these_jobs: know.parts,
+      workshop_labor_hours_median: know.hours,
       workshop_kits: kits, workshop_brand_rules: brandRules,
     }),
     tool: TOOL,
@@ -256,6 +276,8 @@ async function pick(jobId) {
     if (chosen && variants[chosen].sellSrc === 'markup') reasons.push(`Inter Cars не дал рекомендуемую цену — цена продажи по наценке ${markup}%`);
     if (vinWarn) reasons.push(vinWarn);
     const line = {
+      purpose: p.purpose || null, hours: Number(p.labor_hours) || null,
+      note: [p.purpose, p.job ? `${p.job}${Number(p.labor_hours) ? ` ~${String(Math.round(Number(p.labor_hours) * 10) / 10).replace('.', ',')} h${p.hours_source === 'history' ? ' (история сервиса)' : ' (оценка ИИ)'}` : ''}` : null].filter(Boolean).join(' · ') || null,
       group_key: String(p.key || p.name_pl).toLowerCase().slice(0, 60), title: p.name_pl, qty: Number(p.qty) || 1, unit: p.unit || 'szt.', qty_note: p.qty_note || null,
       oe, variants, chosen, confidence: reasons.length ? 'check' : 'high', reason: reasons.join(' · ') || null,
     };
@@ -280,7 +302,8 @@ Rules:
 - If a part depends on equipment the VIN may not distinguish (engine code variants, brake disc size, gearbox) or you are unsure — fill "check" with a short Russian explanation instead of guessing.
 - name_pl: short Polish part name as on a Polish invoice (e.g. "Zestaw paska rozrządu z pompą wody", "Filtr oleju", "Olej silnikowy 5W-30 VW 504.00").
 - key: short English snake_case group (timing_kit, water_pump, engine_oil, oil_filter, spark_plug, glow_plug, brake_pads_front, ...).
-- Add ONLY what the request asks for plus consumables strictly required by that job (e.g. coolant when the water pump is replaced, drain plug washer with an oil change). Do NOT add optional extras (engine mounts, seals, belts, fluids "just in case") — mention them briefly in note as suggestions instead.
+- Think like an experienced workshop: which ASSEMBLIES must be disassembled to do the requested job, and add the parts that must be renewed because of that disassembly — gaskets, seals, O-rings, one-time (stretch) bolts, clips, fluids that get drained (coolant when the cooling system is opened, oil when the sump comes off). Use workshop_similar_jobs_any_car and workshop_parts_usually_with_these_jobs (share = % of past jobs where this workshop also replaced that part) as the main guide. Do NOT add unrelated optional replacements (engine mounts, extra belts, "just in case" parts) — mention them in note as suggestions.
+- For EVERY part fill "purpose": a short explanation in the SAME LANGUAGE as the manager's request — why this part is needed (e.g. "прокладка крышки клапанов — снимается при замене свечей" / "uszczelka pokrywy — demontaż przy wymianie świec"); fill "job" with the labour operation it belongs to (Polish name, as on a repair order) and "labor_hours" — hours for that operation on THIS vehicle: take workshop_labor_hours_median / hours in similar jobs when available (hours_source "history"), otherwise your estimate (hours_source "estimate"). Parts of the same job share the same job and hours.
 - Do not duplicate parts. If the request is not about parts at all, return an empty list with a note.`;
 
 const TOOL = {
@@ -300,6 +323,9 @@ const TOOL = {
             oe_sure: { type: 'boolean' },
             analogs: { type: 'array', items: { type: 'object', properties: { brand: { type: 'string' }, article: { type: 'string' }, tier: { type: 'string', enum: ['economy', 'middle', 'premium'] } }, required: ['brand', 'article'] } },
             check: { type: 'string', description: 'Russian: why the manager must verify; empty if confident' },
+            purpose: { type: 'string', description: 'why this part is needed (same language as request)' },
+            job: { type: 'string', description: 'labour operation it belongs to (Polish)' },
+            labor_hours: { type: 'number' }, hours_source: { type: 'string', enum: ['history', 'estimate'] },
           },
           required: ['key', 'name_pl', 'qty', 'unit', 'oe', 'analogs'],
         },

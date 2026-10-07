@@ -103,8 +103,9 @@ app.listen(config.port, () => console.log(`Pulsecar panel: http://localhost:${co
 if (process.env.NODE_ENV !== 'test') startJobs();
 // ключи интеграций — в зашифрованном виде (если задан SECRETS_KEY); незавершённые ИИ-подборы после перезапуска — ошибка
 import { encryptStoredSecrets } from './integrations/index.js';
-import { resetStaleJobs } from './ai-parts/index.js';
+import { resetStaleJobs, nightlyTrain } from './ai-parts/index.js';
 forEachDb(() => { const n = encryptStoredSecrets(); if (n) console.log(`Зашифровано ключей интеграций: ${n}`); resetStaleJobs(); });
+if (process.env.NODE_ENV !== 'test') setInterval(() => forEachDb(nightlyTrain), 3 * 3600_000).unref();
 
 // ── Ежедневная резервная копия базы: data/backups/pulsecar-ГГГГ-ММ-ДД.db (хранится 30 дней) ──
 import { mkdirSync, readdirSync, rmSync, existsSync } from 'node:fs';

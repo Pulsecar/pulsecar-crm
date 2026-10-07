@@ -1112,3 +1112,5 @@ tr.ai-sub td { background: color-mix(in srgb, var(--accent) 4%, transparent); pa
 @media (max-width: 640px) { .grid3 { grid-template-columns: 1fr; } }
 .ai-pl24-st { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: -2px 0 8px; } .ai-pl24-st.err { color: var(--danger); }
 .ai-dot.run-dot { width: 14px; height: 14px; border-color: var(--accent); border-top-color: transparent; animation: ai-spin .8s linear infinite; }
+.mw-items .inote { display: block; width: 100%; min-width: 230px; margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--muted); resize: vertical; min-height: 34px; }
+.ai-kit.draft { border-style: dashed; opacity: .85; }

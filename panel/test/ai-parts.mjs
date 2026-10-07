@@ -11,6 +11,7 @@ const BASE = `http://localhost:${PORT}`, M = `http://localhost:${MOCK}`;
 const DB = './data/test-ai.db';
 for (const s of ['', '-wal', '-shm']) rmSync(DB + s, { force: true });
 const calls = [];
+let lastCtx = null;
 
 // каталог IC: артикул → товар; цены: sku → закупка нетто и рекомендуемая брутто
 const CATALOG = {
@@ -32,6 +33,7 @@ const mock = createServer(async (req, res) => {
   if (u.pathname === '/v1/messages') {
     const b = JSON.parse(body);
     assert.equal(b.model, 'claude-sonnet-5');
+    if (b.tool_choice.name === 'job_terms') return json(200, { usage: { input_tokens: 100, output_tokens: 20 }, content: [{ type: 'tool_use', name: 'job_terms', input: { jobs: ['Wymiana rozrządu'], keywords: ['rozrząd', 'uszczelka'] } }] });
     if (b.tool_choice.name === 'pick_items') {
       const ctx = JSON.parse(b.messages[0].content);
       // из списка e-Catalog берём только комплекты (не одиночный ремень)
@@ -39,10 +41,12 @@ const mock = createServer(async (req, res) => {
     }
     assert.equal(b.tool_choice.name, 'parts_plan');
     const ctx = JSON.parse(b.messages[0].content);
+    if (ctx.request !== undefined) lastCtx = ctx;
     assert.equal(ctx.vehicle.vin, 'WVWZZZAUZGW123456');
     assert.ok(!JSON.stringify(ctx).includes('Kowalski'), 'данные клиента не уходят в Claude');
     return json(200, { usage: { input_tokens: 1200, output_tokens: 400 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
       { key: 'timing_kit', name_pl: 'Zestaw paska rozrządu', qty: 1, unit: 'kpl.', qty_note: '1 комплект', oe: [{ number: '04E 198 119 A', from: 'knowledge' }], oe_sure: true,
+        purpose: 'основная деталь замены ГРМ', job: 'Wymiana rozrządu', labor_hours: 3.5, hours_source: 'history',
         analogs: [{ brand: 'SKF', article: 'VKMA 01121' }, { brand: 'INA', article: '530 0640 10' }, { brand: 'Contitech', article: 'CT1168K2' }, { brand: 'Gates', article: 'K015688XS' }, { brand: 'Fake', article: 'NOPE1' }] },
       { key: 'oil_filter', name_pl: 'Filtr oleju', qty: 1, unit: 'szt.', oe: [], analogs: [{ brand: 'MANN', article: 'W 712/95' }] },
       { key: 'spark_plug', name_pl: 'Świeca zapłonowa', qty: 4, unit: 'szt.', qty_note: '4 цилиндра', oe: [], analogs: [{ brand: 'NGK', article: 'XX1' }], check: 'Проверьте калильное число' },
@@ -165,6 +169,29 @@ try {
     // INA и Gates в правилах → средний — середина из них (по цене: Gates 640, INA 700 → Gates); Contitech в чёрном списке не проверялся
     assert.equal(tk.variants.mid.brand, 'GATES'); assert.ok(!calls.some((x) => x.includes('CT1168K2')) || true);
     assert.ok(Array.isArray((await req('ai-parts/rules/suggest')).brands));
+  });
+  await t('обучение на истории: типовые детали к работе, часы, пометка «для чего + часы» в позиции', async () => {
+    // две прошлые выцены «Wymiana rozrządu» с одной и той же прокладкой и нормой часов
+    for (let i = 0; i < 2; i++) {
+      const old = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+      await req(`orders/${old.id}/items`, { body: { kind: 'labor', name: 'Wymiana rozrządu', qty: 3.5, unit: 'rbh', price: 100 } });
+      await req(`orders/${old.id}/items`, { body: { kind: 'part', name: 'Uszczelka pokrywy rozrządu ELRING 123.456', qty: 1, price: 30 } });
+    }
+    const st = await req('ai-parts/train', { method: 'POST' });
+    assert.ok(st.indexed >= 2 && st.jobs >= 1 && st.hours >= 1, JSON.stringify(st));
+    const q5 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${q5.id}/jobs`, { body: { text: 'ГРМ', level: 'mid' } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'done', j.error);
+    assert.ok(lastCtx.workshop_parts_usually_with_these_jobs.some((x) => /uszczelka pokrywy rozrzadu/.test(x.part) && x.share === 100), JSON.stringify(lastCtx.workshop_parts_usually_with_these_jobs));
+    assert.ok(lastCtx.workshop_labor_hours_median.some((x) => x.hours === 3.5));
+    assert.ok(lastCtx.workshop_similar_jobs_any_car.length >= 2);
+    assert.ok(!JSON.stringify(lastCtx).includes('Kowalski'));
+    const o = await req('orders/' + q5.id);
+    const tk = (await req(`ai-parts/orders/${q5.id}`)).lines.find((l) => l.group_key === 'timing_kit');
+    const item = o.items.find((i) => i.id === tk.order_item_id);
+    assert.match(item.note, /основная деталь замены ГРМ · Wymiana rozrządu ~3,5 h \(история сервиса\)/);
+    assert.equal(tk.hours, 3.5);
   });
   await t('аналоги по OE из Inter Cars e-Catalog (через расширение): подбор ждёт страницу, Claude выбирает нужный тип', async () => {
     const q4 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });

@@ -10,6 +10,7 @@ import { STEPS, startPick, carSig } from './pipeline.js';
 import { aiModel, DEFAULT_MODEL, callTool } from './claude.js';
 import { icOn } from './ic.js';
 import { getRules, saveRules, suggestFromHistory, GROUPS } from './rules.js';
+import { trainOnHistory, trainedStat, kitDraftsFromHistory } from './history.js';
 import { cfg } from '../integrations/index.js';
 
 export const aiParts = express.Router();
@@ -178,6 +179,10 @@ export function mountAiParts(crm, who) {
   crm.put('/ai-parts/rules', (req, res) => { who(req, 'settings.manage'); saveRules(req.body || {}); res.json({ ok: true }); });
   crm.get('/ai-parts/rules/suggest', (req, res) => { who(req, 'settings.manage'); res.json({ brands: suggestFromHistory() }); });
 
+  /** Обучение на истории выцен и заказов сервиса (админ) */
+  crm.post('/ai-parts/train', (req, res) => { who(req, 'settings.manage'); res.json(trainOnHistory()); });
+  crm.get('/ai-parts/kit-drafts', (req, res) => { who(req, 'settings.manage'); if (!trainedStat()) trainOnHistory(); res.json({ kits: kitDraftsFromHistory() }); });
+
   /** Настройки модуля (только администратор сервиса) */
   crm.get('/ai-parts/settings', (req, res) => {
     who(req, 'settings.manage');
@@ -186,7 +191,7 @@ export function mountAiParts(crm, who) {
       enabled: getSetting('ai_parts_enabled') === '1', limit: Number(getSetting('ai_parts_limit') || 0), model: aiModel(), defaultModel: DEFAULT_MODEL,
       markup: Number(getSetting('ai_parts_markup') || 40),
       ready: { claude: !!cfg('assistant', { ignoreEnabled: true })?.apiKey, intercars: icOn() },
-      month: { jobs: month.n, tokensIn: month.ti, tokensOut: month.tout },
+      month: { jobs: month.n, tokensIn: month.ti, tokensOut: month.tout }, trained: trainedStat(),
       kpi: kpi(),
     });
   });
@@ -224,6 +229,14 @@ function kpi() {
     lines: lines.n, accepted: lines.accepted || 0, removed: lines.removed || 0, returned: lines.returned || 0, edited };
 }
 
+/** Ночное дообучение: раз в сутки пересобираем знания из истории (только где модуль включён) */
+export function nightlyTrain() {
+  if (getSetting('ai_parts_enabled') !== '1') return;
+  const st = trainedStat();
+  if (st && Date.now() - Date.parse(st.at) < 20 * 3600_000) return;
+  try { trainOnHistory(); } catch (e) { console.error('ai train', e.message); }
+}
+
 /** После перезапуска сервера незавершённые подборы помечаем ошибкой */
 export function resetStaleJobs() {
   run("UPDATE ai_jobs SET status = 'error', error = 'Подбор прерван перезапуском сервера — запустите ещё раз', finished_at = datetime('now') WHERE status IN ('queued','running')");
@@ -238,9 +251,10 @@ export function addAiLine(jobId, orderId, line) {
   const v = line.variants[line.chosen];
   if (v?.article && one('SELECT 1 FROM order_items WHERE order_id = ? AND kind = ? AND code = ?', orderId, 'part', v.article)) return null;
   const itemId = addItem(orderId, { kind: 'part', name: itemName(line.title, v), code: v?.article || null, qty: line.qty, unit: line.unit || 'szt.',
-    price: round2(v?.sellGross || 0), cost: round2(v?.priceNet || 0), vat: 23 });
+    price: round2(v?.sellGross || 0), cost: round2(v?.priceNet || 0), vat: 23, note: line.note ? String(line.note).slice(0, 500) : null });
   return insert('ai_lines', {
     job_id: jobId, order_id: orderId, order_item_id: itemId, group_key: line.group_key, title: line.title, qty: line.qty, qty_note: line.qty_note || null,
     oe: JSON.stringify(line.oe || []), variants: JSON.stringify(line.variants), chosen: line.chosen, confidence: line.confidence || 'high', reason: line.reason || null,
+    purpose: line.purpose || null, hours: line.hours || null,
   });
 }

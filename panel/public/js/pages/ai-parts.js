@@ -211,6 +211,7 @@ export function AiSettings() {
       </div>
       <p class="sub">Расход Claude в этом месяце: ${Math.round(data.month.tokensIn / 1000)}k входящих и ${Math.round(data.month.tokensOut / 1000)}k исходящих токенов.</p>
     </div>
+    <${AiTrain} trained=${data.trained} />
     <${AiRules} />`;
 }
 
@@ -265,14 +266,35 @@ export function AiRules() {
 
     <h3 class="ai-h3">Стандартные комплекты</h3>
     <p class="sub" style="margin-top:0">Как раскрывать короткие запросы. Например «ТО» → масло, масляный, воздушный и салонный фильтры, шайба сливной пробки.</p>
-    ${r.kits.map((k, i) => html`<div class="ai-kit">
+    ${r.kits.map((k, i) => html`<div class=${'ai-kit' + (k.draft ? ' draft' : '')}>
       <div class="grid3"><label class="f">Название<input value=${k.name} onInput=${(e) => upd('kits', i, { name: e.target.value })} placeholder="ТО" /></label>
         <label class="f">Другие названия<input value=${k.aliases || ''} onInput=${(e) => upd('kits', i, { aliases: e.target.value })} placeholder="przegląd, сервис, замена масла" /></label>
         <label class="f">Двигатель<select value=${k.fuel || ''} onChange=${(e) => upd('kits', i, { fuel: e.target.value })}><option value="">любой</option><option value="petrol">бензин</option><option value="diesel">дизель</option></select></label></div>
       <label class="f">Состав<textarea rows="2" value=${k.items || ''} onInput=${(e) => upd('kits', i, { items: e.target.value })} placeholder="olej silnikowy, filtr oleju, filtr powietrza, filtr kabinowy, podkładka korka spustowego"></textarea></label>
-      <button class="btn sm danger" onClick=${() => del('kits', i)}><${Icon} n="trash" />Удалить комплект</button></div>`)}
-    <div class="row-btns"><button class="btn sm" onClick=${() => setR({ ...r, kits: [...r.kits, { name: '', aliases: '', fuel: '', items: '' }] })}><${Icon} n="plus" />Добавить комплект</button></div>
+      <div class="row-btns" style="margin:0"><label class="check"><input type="checkbox" checked=${!k.draft} onChange=${(e) => upd('kits', i, { draft: e.target.checked ? 0 : 1 })} /> Использовать при подборе${k.source === 'history' ? ' (из истории)' : ''}</label>
+      <button class="btn sm danger" onClick=${() => del('kits', i)}><${Icon} n="trash" />Удалить комплект</button></div></div>`)}
+    <div class="row-btns"><button class="btn sm" onClick=${() => setR({ ...r, kits: [...r.kits, { name: '', aliases: '', fuel: '', items: '' }] })}><${Icon} n="plus" />Добавить комплект</button>
+      <button class="btn sm" onClick=${async () => { const d = await act(() => api('ai-parts/kit-drafts')); if (!d) return; const have = new Set(r.kits.map((k) => k.name.toLowerCase()));
+        const add = d.kits.filter((k) => !have.has(k.name.toLowerCase())).map((k) => ({ name: k.name, aliases: '', fuel: '', items: k.items, draft: 1, source: 'history' }));
+        setR({ ...r, kits: [...r.kits, ...add] }); toast(add.length ? `Добавлено черновиков: ${add.length} — проверьте и отметьте «Использовать»` : 'Новых комплектов в истории не найдено'); }}><${Icon} n="history" />Черновики из истории выцен</button></div>
 
     <div style="margin-top:16px"><button class="btn primary" onClick=${save}>Сохранить правила</button></div>
+  </div>`;
+}
+
+/** Обучение на выценах сервиса */
+function AiTrain({ trained }) {
+  const [st, setSt] = useState(trained);
+  const [busy, setBusy] = useState(false);
+  const train = async () => { setBusy(true); const r = await act(() => api('ai-parts/train', { method: 'POST' }), 'Обучение завершено'); if (r) setSt(r); setBusy(false); };
+  return html`<div class="card" style="max-width:760px">
+    <h2 style="margin-top:0">Обучение на ваших выценах</h2>
+    <p class="sub">Ассистент изучает прошлые выцены и заказы сервиса: какие работы вы делали, какие детали меняли вместе с ними (прокладки и уплотнения узлов, которые разбираются), сколько часов занимала работа. Перед каждым подбором он опирается на похожие прошлые работы. Данные клиентов не используются. Знания обновляются автоматически раз в сутки.</p>
+    ${st ? html`<div class="ai-kpi">
+        <div><b>${st.indexed}</b><span>выцен и заказов изучено</span></div>
+        <div><b>${st.jobs}</b><span>видов работ с типовыми деталями</span></div>
+        <div><b>${st.hours}</b><span>работ с нормой часов</span></div></div>
+      <p class="sub">Последнее обучение: ${fdt(st.at.replace('T', ' ').slice(0, 16))}</p>` : html`<p class="sub">Ещё не обучался.</p>`}
+    <button class="btn primary" disabled=${busy} onClick=${train}><${Icon} n="spark" />${busy ? 'Обучаю…' : 'Обучить сейчас'}</button>
   </div>`;
 }

@@ -64,7 +64,7 @@ export function createOrder(data, staffName) {
   });
 }
 
-const ITEM_FIELDS = ['kind', 'name', 'code', 'product_id', 'mechanic_id', 'qty', 'unit', 'price', 'cost', 'discount', 'vat', 'done', 'pos', 'task_id', 'norm_src'];
+const ITEM_FIELDS = ['kind', 'name', 'code', 'product_id', 'mechanic_id', 'qty', 'unit', 'price', 'cost', 'discount', 'vat', 'done', 'pos', 'task_id', 'norm_src', 'note'];
 export function addItem(orderId, it) {
   if (!it.name) throw new HttpError(400, 'Название позиции обязательно');
   const row = {};
