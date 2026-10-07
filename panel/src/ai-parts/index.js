@@ -7,8 +7,9 @@ import { HttpError, round2 } from '../util.js';
 import { addItem, recalc, getOrder } from '../orders.js';
 import { mockPick } from './mock.js';
 import { STEPS, startPick, carSig } from './pipeline.js';
-import { aiModel, DEFAULT_MODEL } from './claude.js';
+import { aiModel, DEFAULT_MODEL, callTool } from './claude.js';
 import { icOn } from './ic.js';
+import { getRules, saveRules, suggestFromHistory, GROUPS } from './rules.js';
 import { cfg } from '../integrations/index.js';
 
 export const aiParts = express.Router();
@@ -67,6 +68,24 @@ export function mountAiParts(crm, who) {
     if (process.env.AI_PARTS_MOCK === '1') mockPick(id);
     else startPick(id);
     res.json({ id });
+  });
+
+  /** Что искать в partslink24: польские названия деталей из каталога (для расширения) */
+  crm.post('/ai-parts/orders/:id/pl24-terms', async (req, res) => {
+    gate(req, 'orders.edit');
+    const o = getOrder(Number(req.params.id));
+    const car = o.car_id ? one('SELECT make, model, year, engine, capacity, fuel, vin FROM cars WHERE id = ?', o.car_id) : null;
+    if (!car?.vin || car.vin.length !== 17) throw new HttpError(400, 'Добавьте VIN в выцену');
+    const text = String(req.body?.text || '').trim().slice(0, 2000);
+    if (!text) throw new HttpError(400, 'Напишите, что нужно подобрать');
+    const { data, usage } = await callTool({
+      system: 'You prepare search phrases for the partslink24 parts catalogue (Polish UI). For each part needed for the job, give ONE short Polish catalogue search phrase as the catalogue names the part (e.g. "pasek zębaty", "pompa płynu chłodzącego", "filtr oleju", "świeca zapłonowa", "klocki hamulcowe", "tarcza hamulcowa", "amortyzator"). Expand jobs into parts (timing belt job → pasek zębaty, rolka napinająca, rolka prowadząca, pompa płynu chłodzącego if driven by the belt). Max 12 phrases. No oils/fluids (not in the catalogue as numbers that matter) unless explicitly a part.',
+      user: JSON.stringify({ vehicle: { make: car.make, model: car.model, year: car.year, engine: car.engine, capacity: car.capacity, fuel: car.fuel }, request: text }),
+      tool: { name: 'pl24_terms', description: 'Search phrases', input_schema: { type: 'object', properties: { terms: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, q: { type: 'string' } }, required: ['key', 'q'] } } }, required: ['terms'] } },
+      maxTokens: 1200, timeout: 60_000,
+    });
+    insert('ai_events', { kind: 'pl24_terms', order_id: o.id, data: JSON.stringify({ n: (data.terms || []).length, tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0) }) });
+    res.json({ vin: car.vin, terms: (data.terms || []).slice(0, 12) });
   });
 
   crm.get('/ai-parts/jobs/:id', (req, res) => {
@@ -137,6 +156,11 @@ export function mountAiParts(crm, who) {
     const q = await quote(found.map((f) => f.sku));
     res.json(found.map((f) => ({ ...f, ...(q.get(f.sku) || {}) })));
   });
+
+  /** Правила подбора (админ) */
+  crm.get('/ai-parts/rules', (req, res) => { who(req, 'settings.manage'); res.json({ ...getRules(), groups: GROUPS }); });
+  crm.put('/ai-parts/rules', (req, res) => { who(req, 'settings.manage'); saveRules(req.body || {}); res.json({ ok: true }); });
+  crm.get('/ai-parts/rules/suggest', (req, res) => { who(req, 'settings.manage'); res.json({ brands: suggestFromHistory() }); });
 
   /** Настройки модуля (только администратор сервиса) */
   crm.get('/ai-parts/settings', (req, res) => {

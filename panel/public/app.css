@@ -1100,3 +1100,15 @@ tr.ai-sub td { background: color-mix(in srgb, var(--accent) 4%, transparent); pa
 .ai-kpi > div { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: grid; gap: 2px; } .ai-kpi b { font-size: 20px; } .ai-kpi span { font-size: 12px; color: var(--muted); }
 .ai-info .ai-st { width: auto; }
 @media (max-width: 640px) { .ai-kpi { grid-template-columns: 1fr 1fr; } }
+.ai-h3 { font-size: 14px; margin: 18px 0 8px; }
+.ai-rules select, .ai-rules input { width: 100%; }
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ai-sug { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--border2); border-radius: var(--radius); display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-sug > .sub:first-child { flex-basis: 100%; }
+.ai-sug-b { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+.btn.xs { padding: 2px 8px; font-size: 11px; min-height: 0; }
+.ai-kit { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; display: grid; gap: 8px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1.4fr 0.8fr; gap: 10px; }
+@media (max-width: 640px) { .grid3 { grid-template-columns: 1fr; } }
+.ai-pl24-st { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin: -2px 0 8px; } .ai-pl24-st.err { color: var(--danger); }
+.ai-dot.run-dot { width: 14px; height: 14px; border-color: var(--accent); border-top-color: transparent; animation: ai-spin .8s linear infinite; }

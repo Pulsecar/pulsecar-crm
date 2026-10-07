@@ -9,12 +9,12 @@ import { encrypt, decrypt, secretsOn, isEnc } from '../secrets.js';
 export const DEFS = [
   {
     key: 'intercars', group: 'Поставщики', title: 'Inter Cars (IC API)',
-    about: 'Поставки и фактуры Inter Cars → приход на склад одной кнопкой. Поиск цен и наличия по индексу прямо из заказа, заказ деталей в IC.',
+    about: 'Полный доступ к Inter Cars по API: поиск по каталогу, цены (закупка и рекомендуемая цена продажи) и наличие — для поиска из заказа и ИИ-запчастиста. Дополнительно: поставки и фактуры → приход на склад одной кнопкой.',
     howto: 'ClientId и ClientSecret выдаёт Inter Cars (icapi@intercars.eu) — это те же данные, что сейчас вписаны в Motowarsztat → Integracje → Hurtownie → InterCars.',
     fields: [
       { k: 'clientId', label: 'ClientId', required: true },
       { k: 'clientSecret', label: 'ClientSecret', secret: true, required: true },
-      { k: 'source', label: 'Что загружать', type: 'select', options: [['delivery', 'Поставки / WZ (рекомендуется)'], ['invoice', 'Фактуры']], def: 'delivery' },
+      { k: 'source', label: 'Какие документы загружать на склад (поиск, цены и наличие работают всегда)', type: 'select', options: [['delivery', 'Поставки / WZ (рекомендуется)'], ['invoice', 'Фактуры'], ['none', 'Не загружать документы — только поиск, цены и наличие']], def: 'delivery' },
       { k: 'autoSync', label: 'Проверять новые документы автоматически (каждые 30 мин)', type: 'bool', def: true },
       { k: 'autoReceive', label: 'Сразу приходовать на склад без подтверждения', type: 'bool', def: false },
       { k: 'markup', label: 'Наценка для цены продажи, % (если IC не даёт розничную)', type: 'number', def: 40 },

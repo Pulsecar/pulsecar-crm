@@ -7,6 +7,7 @@ import { decodeVin } from '../integrations/services.js';
 import { callTool } from './claude.js';
 import { findByArticle, quote, normBrand, norm, whenText, icOn } from './ic.js';
 import { addAiLine } from './index.js';
+import { preferredBrands, blacklist } from './rules.js';
 
 export const STEPS = [
   ['vin', 'Расшифровка VIN'],
@@ -94,7 +95,7 @@ async function pick(jobId) {
   const { data, usage } = await callTool({
     system: SYSTEM,
     user: JSON.stringify({
-      vehicle, request: req.text, manager_comment: req.comment || null, wanted_level: req.level,
+      vehicle, request: req.text, manager_comment: req.comment || null, workshop_rules_text: getSetting('ai_parts_notes') || null, wanted_level: req.level,
       partslink24_rows: req.paste ? req.paste.slice(0, 12000) : null,
       workshop_history_same_model: past.map((p) => ({ date: p.created_at?.slice(0, 10), engine: [p.engine, p.capacity, p.fuel].filter(Boolean).join(' '), parts: p.parts })).slice(0, 25),
       workshop_verified_numbers: verified,
@@ -111,7 +112,7 @@ async function pick(jobId) {
   // 4. Inter Cars: проверяем кандидатов в каталоге, берём цены и наличие
   step('prices', 'run');
   const cache = new Map();
-  const blackBrands = new Set(all("SELECT value FROM ai_rules WHERE draft = 0 AND kind = 'blacklist_brand'").map((r) => normBrand(r.value)));
+  const blackBrands = blacklist();
   const oeBrand = normBrand(vehicle.make);
   const found = [];
   let checked = 0, hits = 0;
@@ -159,9 +160,14 @@ async function pick(jobId) {
       .sort((a, b) => a.sellGross - b.sellGross);
     // уровни по цене продажи клиенту: Эконом — самый дешёвый аналог, Средний — средний по цене производитель, OE — оригинал
     const variants = {};
-    if (analogs.length) variants.eco = analogs[0];
-    if (analogs.length >= 3) variants.mid = analogs[Math.floor(analogs.length / 2)];
+    // правила сервиса: если для уровня заданы бренды и среди найденных они есть — берём из них
+    const prefer = (level) => { const pb = preferredBrands(level, p.key); const m = pb.length ? analogs.filter((v) => pb.includes(normBrand(v.brand))) : []; return m; };
+    const ecoPref = prefer('eco'), midPref = prefer('mid');
+    if (analogs.length) variants.eco = (ecoPref.length ? ecoPref : analogs)[0];
+    if (midPref.length) variants.mid = midPref[Math.floor((midPref.length - 1) / 2)];
+    else if (analogs.length >= 3) variants.mid = analogs[Math.floor(analogs.length / 2)];
     else if (analogs.length === 2) variants.mid = analogs[1];
+    if (variants.mid && variants.eco && variants.mid.sku === variants.eco.sku && analogs.length > 1) variants.mid = analogs.find((v) => v.sku !== variants.eco.sku && v.sellGross >= variants.eco.sellGross) || variants.mid;
     if (oeVars.length) variants.oe = oeVars[0];
     const order = req.level === 'eco' ? ['eco', 'mid', 'oe'] : req.level === 'oe' ? ['oe', 'mid', 'eco'] : ['mid', 'eco', 'oe'];
     const chosen = order.find((k) => variants[k]) || null;
@@ -198,7 +204,7 @@ Rules:
 - Expand standard jobs into parts (e.g. "rozrząd/ГРМ" → timing belt kit (+ water pump if the engine's pump is driven by the belt), "ТО/service" → oil, oil filter, air filter, cabin filter, drain plug washer...). Use workshop_kits when given.
 - Quantities from the engine: engine oil = factory capacity with filter in litres (unit "l"), spark plugs = number of cylinders, glow plugs for diesels instead of spark plugs (always with a check note). Explain each quantity in qty_note (Russian).
 - OE numbers: take them from partslink24_rows, workshop_verified_numbers and workshop_history_same_model first (from: "partslink24" / "history"). Add OE numbers from your own knowledge only when you are reasonably sure for this exact engine/model (from: "knowledge"); set oe_sure=true only if you are certain. Never invent numbers.
-- Analogs: for every part list 4–10 real aftermarket cross-references of that OE (exact catalogue article numbers as printed by the manufacturer / TecDoc) from DIFFERENT manufacturers and price tiers that are sold in Poland by Inter Cars (e.g. economy: Hepu, Filtron, Maxgear, Febi; middle: SKF, Gates, Contitech, Mann, Bosch, NGK, Mahle, TRW, Lemförder; premium: INA, LuK, Sachs, Brembo, Denso, Bilstein). Only numbers you actually know; they will be verified in the Inter Cars catalogue and non-existing ones dropped. Respect manager_comment (e.g. "oil only Castrol" → only Castrol oils as analogs) and workshop_brand_rules.
+- Analogs: for every part list 4–10 real aftermarket cross-references of that OE (exact catalogue article numbers as printed by the manufacturer / TecDoc) from DIFFERENT manufacturers and price tiers that are sold in Poland by Inter Cars (e.g. economy: Hepu, Filtron, Maxgear, Febi; middle: SKF, Gates, Contitech, Mann, Bosch, NGK, Mahle, TRW, Lemförder; premium: INA, LuK, Sachs, Brembo, Denso, Bilstein). Only numbers you actually know; they will be verified in the Inter Cars catalogue and non-existing ones dropped. Respect manager_comment and workshop_rules_text (e.g. "oil only Castrol" → only Castrol oils as analogs) and workshop_brand_rules (preferred brands per level eco/mid; never propose blacklisted brands).
 - If a part depends on equipment the VIN may not distinguish (engine code variants, brake disc size, gearbox) or you are unsure — fill "check" with a short Russian explanation instead of guessing.
 - name_pl: short Polish part name as on a Polish invoice (e.g. "Zestaw paska rozrządu z pompą wody", "Filtr oleju", "Olej silnikowy 5W-30 VW 504.00").
 - key: short English snake_case group (timing_kit, water_pump, engine_oil, oil_filter, spark_plug, glow_plug, brake_pads_front, ...).

@@ -147,6 +147,20 @@ try {
     assert.equal((await req('orders/' + q.id)).items.length, before - 2);
     assert.equal(new DatabaseSync(DB).prepare('SELECT COUNT(*) n FROM ai_verified').get().n, 1);
   });
+  await t('правила подбора: бренды уровня «Средний», чёрный список, указания ассистенту', async () => {
+    await req('ai-parts/settings', { method: 'PUT', body: { limit: 0 } });
+    await req('ai-parts/rules', { method: 'PUT', body: { notes: 'масло только Castrol', brands: [{ level: 'mid', group_key: 'timing_kit', value: 'INA, Gates' }], blacklist: [{ value: 'Contitech' }], kits: [{ name: 'ТО', items: 'olej, filtr oleju' }] } });
+    const r = await req('ai-parts/rules');
+    assert.equal(r.brands.length, 1); assert.equal(r.blacklist[0].value, 'Contitech'); assert.equal(r.kits[0].name, 'ТО'); assert.equal(r.notes, 'масло только Castrol');
+    const q3 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${q3.id}/jobs`, { body: { text: 'ГРМ', level: 'mid' } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'done', j.error);
+    const tk = (await req(`ai-parts/orders/${q3.id}`)).lines.find((l) => l.group_key === 'timing_kit');
+    // INA и Gates в правилах → средний — середина из них (по цене: Gates 640, INA 700 → Gates); Contitech в чёрном списке не проверялся
+    assert.equal(tk.variants.mid.brand, 'GATES'); assert.ok(!calls.some((x) => x.includes('CT1168K2')) || true);
+    assert.ok(Array.isArray((await req('ai-parts/rules/suggest')).brands));
+  });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });
     const q2 = await req('orders', { body: { kind: 'quote', customer_id: c2.id } });

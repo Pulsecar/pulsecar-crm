@@ -67,6 +67,7 @@ export async function testIntercars() {
 /** Загрузка новых документов за последние N дней (API разрешает окна по 2 дня) */
 export async function fetchDocs(daysBack = 7) {
   const c = conf();
+  if (c.source === 'none') return { created: 0, kind: 'none' };
   const kind = c.source === 'invoice' ? 'invoice' : 'delivery';
   let created = 0;
   const end = new Date();

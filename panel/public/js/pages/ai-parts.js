@@ -77,6 +77,31 @@ export function AiModal({ o, ai, onClose, reload }) {
     return () => clearTimeout(t);
   }, [job]);
 
+  // partslink24 через расширение Pulsecar (вкладка менеджера, его вход, по одной детали с паузами)
+  const extV = document.documentElement.dataset.pulsecarExt || '';
+  const extOk = extV && extV.split('.').map(Number).reduce((a, x, i) => a + x * [10000, 100, 1][i], 0) >= 10500;
+  const [pl, setPl] = useState(null);
+  const runPl24 = async () => {
+    if (!f.text.trim()) return toast('Сначала напишите, что нужно', 'error');
+    setPl({ busy: true, text: 'Готовлю список деталей для поиска…' });
+    let job;
+    try { job = await api(`ai-parts/orders/${o.id}/pl24-terms`, { body: { text: f.text } }); } catch (e) { setPl({ error: e.message }); return; }
+    const reqId = Math.random().toString(36).slice(2);
+    const onMsg = (e) => {
+      const m = e.data;
+      if (e.source !== window || m?.source !== 'pulsecar-ext' || m.reqId !== reqId) return;
+      if (m.type === 'pl24-progress') setPl({ busy: true, text: m.text });
+      if (m.type === 'pl24-result') {
+        removeEventListener('message', onMsg);
+        const lines = (m.results || m.rows || []).flatMap((r) => [`# ${r.q}`, ...(r.rows || []).map((x) => [x.number, x.name, x.qty && 'szt. ' + x.qty, x.note, x.model, x.group].filter(Boolean).join(' | ')), ...(r.rows?.length ? [] : ['(nie znaleziono)'])]);
+        if (lines.length) { setF((cur) => ({ ...cur, paste: [cur.paste, lines.join('\n')].filter(Boolean).join('\n') })); setShowPaste(true); }
+        setPl(m.ok ? { done: true, text: `partslink24: найдено по ${(m.results || []).filter((r) => r.rows?.length).length} из ${(m.results || []).length} деталей` } : { error: m.error, text: lines.length ? 'часть номеров получена' : '' });
+      }
+    };
+    addEventListener('message', onMsg);
+    window.postMessage({ source: 'pulsecar-crm', type: 'pl24', reqId, job: { vin: job.vin, terms: job.terms } }, location.origin);
+  };
+
   const start = async () => {
     const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: f }));
     if (r) setJob({ id: r.id, status: 'queued', steps: d.steps.map((s) => ({ key: s.key, state: 'wait' })) });
@@ -105,8 +130,12 @@ export function AiModal({ o, ai, onClose, reload }) {
       <div class="ai-pl24">
         <div class="grow"><b>OE-номера из partslink24</b> <span class="sub">(необязательно)</span>
           <div class="sub">Работает с вашим аккаунтом partslink24 через расширение Pulsecar — или вставьте строки вручную.</div></div>
-        <button class="btn sm" onClick=${() => setShowPaste(!showPaste)}><${Icon} n="list" />Вставить список</button>
+        <div class="row-btns" style="margin:0">${extOk
+          ? html`<button class="btn sm primary" disabled=${pl?.busy || noVin} onClick=${runPl24}><${Icon} n="search" />Найти в partslink24</button>`
+          : html`<a class="btn sm" href="/pulsecar-extension.zip" title="Расширение Pulsecar 1.5+ для Chrome: распакуйте и загрузите в chrome://extensions (режим разработчика)">Скачать расширение 1.5</a>`}
+          <button class="btn sm" onClick=${() => setShowPaste(!showPaste)}><${Icon} n="list" />Вставить список</button></div>
       </div>
+      ${pl && html`<div class=${'ai-pl24-st' + (pl.error ? ' err' : '')}>${pl.busy ? html`<span class="ai-dot run-dot"></span>` : ''}${pl.error ? pl.error + (pl.text ? ' — ' + pl.text : '') : pl.text}</div>`}
       ${showPaste && html`<textarea rows="4" value=${f.paste} onInput=${set('paste')} placeholder="Скопируйте строки таблицы деталей из partslink24 и вставьте сюда"></textarea>`}
     ` : html`
       <div class="ai-req"><span class="sub">Запрос:</span> ${f.text}</div>
@@ -159,5 +188,69 @@ export function AiSettings() {
         <div><b>${data.month.jobs}${data.limit ? ' / ' + data.limit : ''}</b><span>подборов в этом месяце</span></div>
       </div>
       <p class="sub">Расход Claude в этом месяце: ${Math.round(data.month.tokensIn / 1000)}k входящих и ${Math.round(data.month.tokensOut / 1000)}k исходящих токенов.</p>
-    </div>`;
+    </div>
+    <${AiRules} />`;
+}
+
+/** Настройки → ИИ-запчастист → Правила подбора */
+export function AiRules() {
+  const { data, error, reload } = useData('ai-parts/rules');
+  const [r, setR] = useState(null);
+  const [sug, setSug] = useState(null);
+  useEffect(() => {
+    if (!data) return;
+    setR({ notes: data.notes, brands: data.brands.map((b) => ({ ...b })), black: data.blacklist.map((b) => b.value).join(', '), kits: data.kits.map((k) => ({ ...k })) });
+  }, [data]);
+  if (error) return html`<${ErrorBox} error=${error} />`;
+  if (!data || !r) return html`<${Loading} />`;
+  const G = data.groups;
+  const upd = (k, i, patch) => setR({ ...r, [k]: r[k].map((x, n) => (n === i ? { ...x, ...patch } : x)) });
+  const del = (k, i) => setR({ ...r, [k]: r[k].filter((_, n) => n !== i) });
+  const save = async () => {
+    await act(() => api('ai-parts/rules', { method: 'PUT', body: { notes: r.notes, brands: r.brands, kits: r.kits,
+      blacklist: r.black.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean).map((value) => ({ value })) } }), 'Правила сохранены');
+    reload();
+  };
+  const suggest = async () => setSug((await act(() => api('ai-parts/rules/suggest'))).brands);
+  const addBrand = (level, brand) => {
+    const i = r.brands.findIndex((b) => b.level === level && !b.group_key);
+    if (i >= 0) { const cur = r.brands[i].value.split(',').map((x) => x.trim()).filter(Boolean); if (!cur.includes(brand)) upd('brands', i, { value: [...cur, brand].join(', ') }); }
+    else setR({ ...r, brands: [...r.brands, { level, group_key: '', value: brand }] });
+  };
+  return html`<div class="card" style="max-width:980px">
+    <h2 style="margin-top:0">Правила подбора</h2>
+    <p class="sub">Ассистент соблюдает эти правила при каждом подборе. Если для уровня указаны бренды и они есть в Inter Cars — вариант берётся из них, иначе — по цене продажи (Эконом — самый дешёвый, Средний — середина).</p>
+
+    <label class="f">Указания ассистенту (как вы работаете)<textarea rows="3" value=${r.notes} onInput=${(e) => setR({ ...r, notes: e.target.value })}
+      placeholder="напр. масло ставим только Castrol или Mobil; на ГРМ всегда комплект с помпой; колодки не дешевле TRW"></textarea></label>
+
+    <h3 class="ai-h3">Бренды по уровням</h3>
+    <table class="tbl ai-rules"><thead><tr><th style="width:130px">Уровень</th><th style="width:220px">Детали</th><th>Бренды (через запятую, по порядку)</th><th style="width:40px"></th></tr></thead><tbody>
+      ${r.brands.map((b, i) => html`<tr class=${b.draft ? 'faint' : ''}>
+        <td><select value=${b.level} onChange=${(e) => upd('brands', i, { level: e.target.value })}>${LEVELS.map(([k, t]) => html`<option value=${k}>${t}</option>`)}</select></td>
+        <td><select value=${b.group_key || ''} onChange=${(e) => upd('brands', i, { group_key: e.target.value })}><option value="">Все детали</option>${G.map(([k, t]) => html`<option value=${k}>${t}</option>`)}</select></td>
+        <td><input value=${b.value} onInput=${(e) => upd('brands', i, { value: e.target.value, draft: 0 })} placeholder="напр. Febi, Maxgear, Hepu" /></td>
+        <td><button class="icon-btn" title="Удалить" onClick=${() => del('brands', i)}><${Icon} n="trash" /></button></td></tr>`)}
+    </tbody></table>
+    <div class="row-btns"><button class="btn sm" onClick=${() => setR({ ...r, brands: [...r.brands, { level: 'mid', group_key: '', value: '' }] })}><${Icon} n="plus" />Добавить правило</button>
+      <button class="btn sm" onClick=${suggest}><${Icon} n="history" />Подсказать из истории выцен</button></div>
+    ${sug && html`<div class="ai-sug"><div class="sub">Бренды, которые вы ставили (по названиям позиций): сколько раз и средняя цена. Нажмите уровень, чтобы добавить.</div>
+      ${sug.length ? sug.map((s) => html`<span class="ai-sug-b"><b>${s.brand}</b> <span class="sub">${s.count}× · ~${zl(s.avgPrice)}</span>
+        ${LEVELS.filter(([k]) => k !== 'oe').map(([k, t]) => html`<button class="btn xs" onClick=${() => addBrand(k, s.brand)}>${t}</button>`)}</span>`) : html`<span class="sub">В истории не найдено известных брендов.</span>`}</div>`}
+
+    <h3 class="ai-h3">Не использовать бренды</h3>
+    <input value=${r.black} onInput=${(e) => setR({ ...r, black: e.target.value })} placeholder="через запятую, напр. Stark, Ridex" style="width:100%" />
+
+    <h3 class="ai-h3">Стандартные комплекты</h3>
+    <p class="sub" style="margin-top:0">Как раскрывать короткие запросы. Например «ТО» → масло, масляный, воздушный и салонный фильтры, шайба сливной пробки.</p>
+    ${r.kits.map((k, i) => html`<div class="ai-kit">
+      <div class="grid3"><label class="f">Название<input value=${k.name} onInput=${(e) => upd('kits', i, { name: e.target.value })} placeholder="ТО" /></label>
+        <label class="f">Другие названия<input value=${k.aliases || ''} onInput=${(e) => upd('kits', i, { aliases: e.target.value })} placeholder="przegląd, сервис, замена масла" /></label>
+        <label class="f">Двигатель<select value=${k.fuel || ''} onChange=${(e) => upd('kits', i, { fuel: e.target.value })}><option value="">любой</option><option value="petrol">бензин</option><option value="diesel">дизель</option></select></label></div>
+      <label class="f">Состав<textarea rows="2" value=${k.items || ''} onInput=${(e) => upd('kits', i, { items: e.target.value })} placeholder="olej silnikowy, filtr oleju, filtr powietrza, filtr kabinowy, podkładka korka spustowego"></textarea></label>
+      <button class="btn sm danger" onClick=${() => del('kits', i)}><${Icon} n="trash" />Удалить комплект</button></div>`)}
+    <div class="row-btns"><button class="btn sm" onClick=${() => setR({ ...r, kits: [...r.kits, { name: '', aliases: '', fuel: '', items: '' }] })}><${Icon} n="plus" />Добавить комплект</button></div>
+
+    <div style="margin-top:16px"><button class="btn primary" onClick=${save}>Сохранить правила</button></div>
+  </div>`;
 }
