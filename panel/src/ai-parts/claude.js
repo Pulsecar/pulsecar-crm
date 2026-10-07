@@ -30,7 +30,7 @@ export async function callTool({ system, user, tool, maxTokens = 8000, timeout =
       if (!r.ok) throw new HttpError(502, `Claude API ${r.status}: ${j.error?.message || 'ошибка'}`);
       const block = (j.content || []).find((b) => b.type === 'tool_use');
       if (!block) throw new HttpError(502, 'Claude не вернул результат');
-      return { data: block.input, usage: j.usage || {} };
+      return { data: block.input, usage: j.usage || {}, stop: j.stop_reason || null };
     } catch (e) {
       if (e instanceof HttpError) throw e;
       last = e;

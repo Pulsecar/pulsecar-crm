@@ -110,9 +110,7 @@ async function pick(jobId) {
   step('parse', 'run');
   const kits = all('SELECT name, aliases, fuel, items FROM ai_kits WHERE draft = 0').map((k) => `${k.name}${k.aliases ? ' (' + k.aliases + ')' : ''}${k.fuel ? ' [' + k.fuel + ']' : ''}: ${k.items}`);
   const brandRules = all("SELECT kind, group_key, level, value FROM ai_rules WHERE draft = 0 AND kind IN ('brand','blacklist_brand')");
-  const { data, usage } = await callTool({
-    system: SYSTEM,
-    user: JSON.stringify({
+  const planUser = JSON.stringify({
       vehicle, request: req.text, manager_comment: req.comment || null, workshop_rules_text: getSetting('ai_parts_notes') || null, wanted_level: req.level,
       partslink24_rows: req.paste ? req.paste.slice(0, 12000) : null,
       workshop_history_same_model: past.map((p) => ({ date: p.created_at?.slice(0, 10), engine: [p.engine, p.capacity, p.fuel].filter(Boolean).join(' '), parts: p.parts })).slice(0, 25),
@@ -121,11 +119,17 @@ async function pick(jobId) {
       workshop_parts_usually_with_these_jobs: know.parts,
       workshop_labor_hours_median: know.hours,
       workshop_kits: kits, workshop_brand_rules: brandRules,
-    }),
-    tool: TOOL,
-  });
-  run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', usage.input_tokens || 0, usage.output_tokens || 0, jobId);
-  const parts = (data.parts || []).slice(0, 25);
+    });
+  // Claude иногда отдаёт вложенный список строкой JSON или под другим ключом — приводим к виду; пусто → ещё одна попытка
+  let data = {};
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await callTool({ system: SYSTEM + (attempt ? '\n\nIMPORTANT: return "parts" as a JSON ARRAY of objects (not a string). The previous answer had no parts.' : ''), user: planUser, tool: TOOL });
+    run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', r.usage.input_tokens || 0, r.usage.output_tokens || 0, jobId);
+    data = normPlan(r.data);
+    if (data.parts.length || data.labor.length) break;
+    insert('ai_events', { kind: 'parse_empty', job_id: jobId, order_id: o.id, data: JSON.stringify({ attempt, stop: r.stop || null, raw: JSON.stringify(r.data).slice(0, 6000) }) });
+  }
+  const parts = data.parts.slice(0, 25);
   if (!parts.length && !(data.labor || []).length) throw new Error(data.note || 'Не удалось разобрать запрос — уточните, какие детали нужны');
   step('parse', 'ok', `${parts.map((p) => p.name_pl).join(', ') || 'без деталей'} — ${parts.length} поз.${(data.labor || []).length ? `, работ ${data.labor.length}` : ''}${data.note ? ' · ' + data.note : ''}`);
   if (cancelled()) return;
@@ -215,7 +219,7 @@ async function pick(jobId) {
       });
       run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u2.input_tokens || 0, u2.output_tokens || 0, jobId);
       const t2 = [];
-      for (const mp of more.parts || []) {
+      for (const mp of normPlan(more).parts) {
         const m = missing.find((x) => x.p.key === mp.key) || missing.find((x) => x.p.name_pl === mp.name_pl);
         if (!m) continue;
         for (const a of (mp.analogs || []).slice(0, 10)) if (a.article && !blackBrands.has(normBrand(a.brand))) t2.push({ pi: m.pi, kind: 'analog', brand: a.brand, article: a.article });
@@ -358,6 +362,20 @@ async function pick(jobId) {
   run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), allegro: fromAllegro, labor: laborAdded }), jobId);
   step('add', 'ok', added ? `добавлено ${added} (работ ${laborAdded}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}${allegroNote ? ' · ' + allegroNote : ''}` : 'новых позиций нет — всё уже в выцене');
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
+}
+
+/** Ответ parts_plan → { parts: [], labor: [], note } (строки JSON разбираем, массивы под другими ключами тоже берём) */
+export function normPlan(d) {
+  const arr = (v) => {
+    if (typeof v === 'string') { try { v = JSON.parse(v); } catch { const m = v.match(/\[[\s\S]*\]/); try { v = m ? JSON.parse(m[0]) : []; } catch { v = []; } } }
+    if (v && !Array.isArray(v) && typeof v === 'object') v = Array.isArray(v.parts) ? v.parts : Object.values(v).find(Array.isArray) || [];
+    return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : [];
+  };
+  d = d && typeof d === 'object' ? d : {};
+  let parts = arr(d.parts);
+  if (!parts.length) for (const k of ['items', 'part_list', 'parts_list', 'positions']) if (d[k]) { parts = arr(d[k]); if (parts.length) break; }
+  parts = parts.filter((p) => p.name_pl || p.name).map((p) => ({ ...p, name_pl: p.name_pl || p.name, key: p.key || String(p.name_pl || p.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40), oe: arr(p.oe), analogs: arr(p.analogs) }));
+  return { ...d, parts, labor: arr(d.labor), note: typeof d.note === 'string' ? d.note : null };
 }
 
 const SYSTEM = `You are an experienced auto-parts specialist (części samochodowe) in a car repair workshop in Warsaw, Poland.
