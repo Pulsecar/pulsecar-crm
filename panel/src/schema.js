@@ -417,6 +417,16 @@ db.exec(`CREATE TABLE IF NOT EXISTS cash_registers (
 )`);
 addColumn('payments', 'register_id', 'INTEGER');
 addColumn('payments', 'transfer_id', 'INTEGER');    // пара KW/KP при переносе между кассами (не выручка)
+// статьи платежей (как в P&L), контрагенты; у документа кассы: статья, месяц в отчётности, получатель / плательщик (клиент / контрагент / сотрудник)
+db.exec(`CREATE TABLE IF NOT EXISTS cash_articles (id INTEGER PRIMARY KEY, code TEXT, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'out', section TEXT NOT NULL DEFAULT 'opex',
+  pos INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1)`);
+db.exec(`CREATE TABLE IF NOT EXISTS counterparties (id INTEGER PRIMARY KEY, name TEXT NOT NULL, nip TEXT, phone TEXT, email TEXT, note TEXT, active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+addColumn('payments', 'article_id', 'INTEGER');
+addColumn('payments', 'report_month', 'TEXT');       // ГГГГ-ММ — месяц разнесения в отчётности (P&L)
+addColumn('payments', 'party_type', 'TEXT');         // client | counterparty | staff
+addColumn('payments', 'counterparty_id', 'INTEGER');
+addColumn('payments', 'staff_id', 'INTEGER');
 // чеки (paragony) с фискального кассового аппарата
 db.exec(`CREATE TABLE IF NOT EXISTS receipts (
   id INTEGER PRIMARY KEY, order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL, number TEXT, nip TEXT,
@@ -605,6 +615,24 @@ function seedMotowarsztat() {
   if (!one('SELECT 1 FROM expense_categories')) {
     ['Energia elektryczna', 'Ogrzewanie', 'Czynsz', 'Paliwo', 'Materiały biurowe', 'Transport', 'Usługi', 'Inne', 'Części i materiały']
       .forEach((n, i) => run('INSERT INTO expense_categories (name, pos) VALUES (?, ?)', n, i));
+  }
+  if (!one('SELECT 1 FROM cash_articles')) {
+    // разделы: revenue — выручка, cogs — себестоимость, payroll — зарплата, opex — операционные расходы, tax — налоги, owner — собственник (вне P&L), neutral — вне P&L
+    [['100', 'Przychód z usług (zlecenia)', 'in', 'revenue'], ['110', 'Sprzedaż części i towarów', 'in', 'revenue'], ['120', 'Przechowanie opon / parking', 'in', 'revenue'],
+      ['190', 'Inne przychody', 'in', 'revenue'], ['195', 'Wpłata właściciela', 'in', 'owner'], ['198', 'Zwrot od dostawcy', 'in', 'cogs'],
+      ['200', 'Części i materiały do zleceń (koszt własny)', 'out', 'cogs'], ['210', 'Materiały eksploatacyjne warsztatu', 'out', 'opex'],
+      ['300', 'Wynagrodzenia', 'out', 'payroll'], ['310', 'Zaliczki dla pracowników', 'out', 'payroll'], ['320', 'ZUS', 'out', 'payroll'],
+      ['400', 'Czynsz', 'out', 'opex'], ['410', 'Energia elektryczna', 'out', 'opex'], ['420', 'Ogrzewanie / gaz', 'out', 'opex'], ['430', 'Woda i ścieki', 'out', 'opex'],
+      ['440', 'Internet i telefon', 'out', 'opex'], ['450', 'Paliwo', 'out', 'opex'], ['460', 'Transport / dostawy', 'out', 'opex'], ['470', 'Marketing i reklama', 'out', 'opex'],
+      ['480', 'Oprogramowanie i subskrypcje', 'out', 'opex'], ['490', 'Materiały biurowe', 'out', 'opex'], ['500', 'Narzędzia i wyposażenie', 'out', 'opex'],
+      ['510', 'Naprawy i serwis wyposażenia', 'out', 'opex'], ['520', 'Usługi obce (księgowość, prawne)', 'out', 'opex'], ['530', 'Opłaty bankowe i terminal', 'out', 'opex'],
+      ['590', 'Inne koszty', 'out', 'opex'], ['600', 'Podatki (VAT, PIT/CIT)', 'out', 'tax'], ['700', 'Wypłata właściciela', 'out', 'owner'],
+      ['800', 'Przeniesienie między kasami', 'any', 'neutral'], ['810', 'Opłata faktury dostawcy (już w zakupach)', 'out', 'neutral']]
+      .forEach(([code, name, kind, section], i) => run('INSERT INTO cash_articles (code, name, kind, section, pos) VALUES (?, ?, ?, ?, ?)', code, name, kind, section, i));
+  }
+  if (!one('SELECT 1 FROM counterparties')) {
+    const names = new Set(['Inter Cars', 'ProfiAuto (Moto-Profil)', 'Allegro', ...all("SELECT DISTINCT supplier FROM purchases WHERE COALESCE(supplier,'') <> ''").map((r) => r.supplier)]);
+    for (const n of names) run('INSERT INTO counterparties (name) VALUES (?)', String(n).trim().slice(0, 200));
   }
   if (!one('SELECT 1 FROM price_groups')) {
     [['Detal', 40], ['Stały klient', 30], ['Firmy / flota', 20]].forEach(([n, m], i) => run('INSERT INTO price_groups (name, markup_pct, pos) VALUES (?, ?, ?)', n, m, i));

@@ -61,7 +61,7 @@ export async function forEachDb(fn) {
 }
 
 // что копируем из главного сервиса в новый
-const COPY_TABLES = ['order_statuses', 'order_types', 'service_catalog', 'expense_categories', 'price_groups', 'order_templates', 'checklists', 'integrations', 'doc_numbering', 'cash_registers'];
+const COPY_TABLES = ['order_statuses', 'order_types', 'service_catalog', 'expense_categories', 'cash_articles', 'counterparties', 'price_groups', 'order_templates', 'checklists', 'integrations', 'doc_numbering', 'cash_registers'];
 const SKIP_SETTINGS = /(_seeded|_migrated|^bal_|token|^branch_)/;
 
 export function createBranch({ name, code, address }, ownerStaff) {

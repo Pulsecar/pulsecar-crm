@@ -132,12 +132,12 @@ function Pnl({ q }) {
   if (error) return html`<${ErrorBox} error=${error} />`;
   if (!data) return html`<${Loading} />`;
   const tot = (k) => data.reduce((s, r) => s + (r[k] || 0), 0);
-  const cols = [['orders', 'Заказов', (x) => num(x)], ['revenue', 'Выручка брутто'], ['revenueNet', 'Выручка нетто'], ['labor', 'Работы'], ['parts', 'Запчасти'], ['cogs', '− Себест. запчастей'], ['payroll', '− Зарплата механиков'], ['grossProfit', '= Валовая прибыль'], ['opex', '− Расходы'], ['operatingProfit', '= Операционная прибыль']];
+  const cols = [['orders', 'Заказов', (x) => num(x)], ['revenue', 'Выручка брутто'], ['revenueNet', 'Выручка нетто'], ['labor', 'Работы'], ['parts', 'Запчасти'], ['cogs', '− Себест. запчастей'], ['payroll', '− Зарплата механиков'], ['grossProfit', '= Валовая прибыль'], ['opexDocs', '− Расходы (счета)'], ['opexCash', '− Расходы (касса KW)'], ['operatingProfit', '= Операционная прибыль']];
   const revNet = tot('revenueNet');
   return html`<div class="card tight"><div class="tbl-wrap"><table class="tbl pnl"><thead><tr><th>Месяц</th>${cols.map(([, l]) => html`<th class="r">${l}</th>`)}<th class="r">Рентаб.</th></tr></thead>
     <tbody>${data.map((r) => html`<tr><td class="nowrap"><b>${r.month}</b></td>${cols.map(([k, , f]) => html`<td class=${'r nowrap' + (k.endsWith('Profit') ? (r[k] < 0 ? ' neg' : ' strong') : '')}>${(f || zl)(r[k])}</td>`)}<td class="r">${pctf(r.marginPct)}</td></tr>`)}</tbody>
     <tfoot><tr><td><b>Итого</b></td>${cols.map(([k, , f]) => html`<td class=${'r nowrap strong' + (k.endsWith('Profit') && tot(k) < 0 ? ' neg' : '')}>${(f || zl)(tot(k))}</td>`)}<td class="r">${pctf(revNet ? (tot('operatingProfit') / revNet) * 100 : null)}</td></tr></tfoot></table></div>
-    <div class="muted small" style="padding:10px 14px">Суммы нетто, кроме «Выручка брутто». Себестоимость — закупочная цена запчастей в заказах. Зарплата — % от работ по настройкам сотрудников. Расходы — закупки и счета за период, кроме закупки запчастей (она уже в себестоимости).</div></div>`;
+    <div class="muted small" style="padding:10px 14px">Суммы нетто, кроме «Выручка брутто». Себестоимость — закупочная цена запчастей в заказах. Зарплата — % от работ по настройкам сотрудников. Расходы (счета) — закупки и счета за период, кроме закупки запчастей (она уже в себестоимости). Расходы (касса) — KW со статьёй «Операционные расходы» или «Налоги» по месяцу в отчётности; если расход оплачен из кассы и одновременно внесён как счёт в «Закупки», выберите для KW статью «810 Opłata faktury dostawcy (już w zakupach)», чтобы не посчитать дважды.</div></div>`;
 }
 
 function Builder({ q, setDrill }) {

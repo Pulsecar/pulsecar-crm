@@ -1293,8 +1293,10 @@ crm.get('/cash', (req, res) => {
   const from = String(req.query.from || today().slice(0, 8) + '01');
   const to = String(req.query.to || today());
   const reg = Number(req.query.register) || null;
-  const rows = all(`SELECT p.*, o.number order_number, c.name customer_name, r.name register_name FROM payments p LEFT JOIN orders o ON o.id = p.order_id
-    LEFT JOIN customers c ON c.id = p.customer_id LEFT JOIN cash_registers r ON r.id = p.register_id
+  const rows = all(`SELECT p.*, o.number order_number, c.name customer_name, r.name register_name, a.name article_name, a.code article_code,
+      cp.name counterparty_name, sf.name staff_party_name FROM payments p LEFT JOIN orders o ON o.id = p.order_id
+    LEFT JOIN customers c ON c.id = p.customer_id LEFT JOIN cash_registers r ON r.id = p.register_id LEFT JOIN cash_articles a ON a.id = p.article_id
+    LEFT JOIN counterparties cp ON cp.id = p.counterparty_id LEFT JOIN staff sf ON sf.id = p.staff_id
     WHERE substr(p.created_at,1,10) BETWEEN ? AND ? ${reg ? 'AND p.register_id = ?' : ''} ORDER BY p.id DESC LIMIT 2000`, ...[from, to, ...(reg ? [reg] : [])]);
   const sum = (dir, method) => one(`SELECT COALESCE(SUM(amount),0) s FROM payments WHERE direction = ? AND transfer_id IS NULL ${method ? 'AND method = ?' : ''} AND substr(created_at,1,10) BETWEEN ? AND ?`,
     ...[dir, ...(method ? [method] : []), from, to]).s;
@@ -1305,18 +1307,84 @@ crm.get('/cash', (req, res) => {
     period: { cashIn: sum('in', 'cash'), cashOut: sum('out', 'cash'), card: sum('in', 'card'), blik: sum('in', 'blik'), transfer: sum('in', 'transfer'), points: sum('in', 'points') },
   });
 });
+/** Способ оплаты — по кассе: наличные → наличные, терминал → карта (или BLIK), счёт → перевод */
+const methodOf = (r, want) => (r.kind === 'cash' ? 'cash' : r.kind === 'card' ? (want === 'blik' ? 'blik' : 'card') : 'transfer');
+const ymOk = (v) => /^\d{4}-\d{2}$/.test(String(v || ''));
+const dtNorm = (v) => {
+  const x = String(v || '').replace('T', ' ').slice(0, 19);
+  if (!/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(x)) throw new HttpError(400, 'Неверная дата операции');
+  return x.length === 10 ? x + ' 00:00:00' : x.length === 16 ? x + ':00' : x;
+};
+/** Получатель / плательщик: клиент, контрагент или сотрудник (проверка, что есть в справочнике) */
+function partyOf(b) {
+  const t = ['client', 'counterparty', 'staff'].includes(b.party_type) ? b.party_type : null;
+  const out = { party_type: t, customer_id: null, counterparty_id: null, staff_id: null };
+  if (t === 'client' && b.customer_id) { if (!one('SELECT 1 FROM customers WHERE id = ?', Number(b.customer_id))) throw new HttpError(400, 'Клиент не найден'); out.customer_id = Number(b.customer_id); }
+  if (t === 'counterparty' && b.counterparty_id) { if (!one('SELECT 1 FROM counterparties WHERE id = ?', Number(b.counterparty_id))) throw new HttpError(400, 'Контрагент не найден'); out.counterparty_id = Number(b.counterparty_id); }
+  if (t === 'staff' && b.staff_id) { if (!one('SELECT 1 FROM staff WHERE id = ?', Number(b.staff_id))) throw new HttpError(400, 'Сотрудник не найден'); out.staff_id = Number(b.staff_id); }
+  if (!t && b.customer_id) { out.party_type = 'client'; out.customer_id = Number(b.customer_id); }
+  return out;
+}
+function articleOf(id, direction) {
+  if (!id) return null;
+  const a = one('SELECT * FROM cash_articles WHERE id = ?', Number(id));
+  if (!a) throw new HttpError(400, 'Статья платежа не найдена');
+  if (a.kind !== 'any' && a.kind !== direction) throw new HttpError(400, `Статья «${a.name}» — для ${a.kind === 'in' ? 'прихода' : 'расхода'}`);
+  return a.id;
+}
 crm.post('/cash', (req, res) => {
   const s = who(req, 'cash.edit');
-  const direction = req.body?.direction === 'out' ? 'out' : 'in';
-  const amount = round2(req.body?.amount);
+  const b = req.body || {};
+  const direction = b.direction === 'out' ? 'out' : 'in';
+  const amount = round2(b.amount);
   if (!(amount > 0)) throw new HttpError(400, 'Укажите сумму');
-  const note = String(req.body?.note || '').trim();
-  if (!note) throw new HttpError(400, 'Укажите назначение');
-  const r = req.body?.register_id ? one('SELECT * FROM cash_registers WHERE id = ? AND active = 1', Number(req.body.register_id)) : one(`SELECT * FROM cash_registers WHERE kind = 'cash' AND active = 1 ORDER BY is_default DESC, pos LIMIT 1`);
+  const note = String(b.note || '').trim().slice(0, 500);
+  const article_id = articleOf(b.article_id, direction);
+  if (!note && !article_id) throw new HttpError(400, 'Выберите статью платежа или напишите назначение');
+  const r = b.register_id ? one('SELECT * FROM cash_registers WHERE id = ? AND active = 1', Number(b.register_id)) : one(`SELECT * FROM cash_registers WHERE kind = 'cash' AND active = 1 ORDER BY is_default DESC, pos LIMIT 1`);
   if (!r) throw new HttpError(400, 'Касса не найдена');
-  const method = r.kind === 'cash' ? 'cash' : r.kind === 'card' ? 'card' : 'transfer';
-  insert('payments', { number: nextNumber(direction === 'in' ? 'KP' : 'KW'), direction, method, amount, note, staff: s.name, customer_id: req.body?.customer_id || null, register_id: r.id });
-  res.json({ ok: true });
+  const created_at = b.created_at ? dtNorm(b.created_at) : undefined;
+  const report_month = ymOk(b.report_month) ? b.report_month : (created_at || new Date().toISOString()).slice(0, 7);
+  const art = article_id ? one('SELECT name FROM cash_articles WHERE id = ?', article_id).name : null;
+  const id = insert('payments', { number: nextNumber(direction === 'in' ? 'KP' : 'KW'), direction, method: methodOf(r, b.method), amount, note: note || art, staff: s.name,
+    register_id: r.id, article_id, report_month, ...partyOf(b), ...(created_at ? { created_at } : {}) });
+  log('payment', id, 'create', { amount, direction }, s.name);
+  res.json({ ok: true, id });
+});
+/** Справочники для документов кассы: статьи платежей и контрагенты */
+crm.get('/cash/meta', (req, res) => {
+  who(req, 'cash.view');
+  res.json({ articles: all('SELECT * FROM cash_articles ORDER BY active DESC, pos, code, name'), counterparties: all('SELECT * FROM counterparties ORDER BY active DESC, name COLLATE NOCASE') });
+});
+/** Контрагент: новый или правка (поставщики, арендодатель, бухгалтерия…) */
+crm.post('/cash/counterparties', (req, res) => {
+  const s = who(req, 'cash.edit');
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 200);
+  if (!name) throw new HttpError(400, 'Название контрагента обязательно');
+  const d = { name, nip: String(b.nip || '').replace(/[^0-9A-Za-z]/g, '').slice(0, 20) || null, phone: String(b.phone || '').trim().slice(0, 40) || null,
+    email: String(b.email || '').trim().slice(0, 120) || null, note: String(b.note || '').trim().slice(0, 500) || null, active: b.active === undefined ? 1 : b.active ? 1 : 0 };
+  let id = Number(b.id);
+  if (id) update('counterparties', id, d);
+  else {
+    const ex = one('SELECT id FROM counterparties WHERE lower(name) = lower(?)', name);
+    id = ex ? ex.id : insert('counterparties', d);
+  }
+  log('counterparty', id, b.id ? 'update' : 'create', { name }, s.name);
+  res.json({ ok: true, id });
+});
+/** Статьи платежей (настройки): код, название, приход / расход, раздел P&L */
+crm.post('/cash/articles', (req, res) => {
+  const s = who(req, 'settings.manage');
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 200);
+  if (!name) throw new HttpError(400, 'Название статьи обязательно');
+  const d = { name, code: String(b.code || '').trim().slice(0, 20) || null, kind: ['in', 'out', 'any'].includes(b.kind) ? b.kind : 'out',
+    section: ['revenue', 'cogs', 'payroll', 'opex', 'tax', 'owner', 'neutral'].includes(b.section) ? b.section : 'opex', pos: Number(b.pos) || 0, active: b.active === undefined ? 1 : b.active ? 1 : 0 };
+  let id = Number(b.id);
+  if (id) update('cash_articles', id, d); else id = insert('cash_articles', d);
+  log('cash_article', id, b.id ? 'update' : 'create', { name }, s.name);
+  res.json({ ok: true, id });
 });
 /** Перенос денег между кассами: KW в одной, KP в другой (не выручка и не расход) */
 crm.post('/cash/transfer', (req, res) => {
@@ -1342,9 +1410,11 @@ crm.get('/cash/registers', (req, res) => { who(req, 'cash.view'); res.json(regis
 crm.get('/cash/:id', (req, res) => {
   who(req, 'cash.view');
   const p = one(`SELECT p.*, r.name register_name, r.kind register_kind, c.name customer_name, c.phone customer_phone, o.number order_number, o.kind order_kind,
+      a.name article_name, a.code article_code, cp.name counterparty_name, cp.nip counterparty_nip, sf.name staff_party_name,
       st.name order_status, st.is_final order_final, t.number pair_number, tr.name pair_register
     FROM payments p LEFT JOIN cash_registers r ON r.id = p.register_id LEFT JOIN customers c ON c.id = p.customer_id LEFT JOIN orders o ON o.id = p.order_id
-    LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN payments t ON t.id = p.transfer_id LEFT JOIN cash_registers tr ON tr.id = t.register_id WHERE p.id = ?`, Number(req.params.id));
+    LEFT JOIN order_statuses st ON st.id = o.status_id LEFT JOIN payments t ON t.id = p.transfer_id LEFT JOIN cash_registers tr ON tr.id = t.register_id
+    LEFT JOIN cash_articles a ON a.id = p.article_id LEFT JOIN counterparties cp ON cp.id = p.counterparty_id LEFT JOIN staff sf ON sf.id = p.staff_id WHERE p.id = ?`, Number(req.params.id));
   if (!p) throw new HttpError(404, 'Документ не найден');
   const storage = /^(Парковка|Хранение шин|Parking|Przechowanie opon) (\S+)/.exec(p.note || '');
   const st = storage ? one('SELECT id, number, kind FROM storage WHERE number = ?', storage[2]) : null;
@@ -1364,7 +1434,14 @@ crm.put('/cash/:id', (req, res) => {
     if (!note) throw new HttpError(400, 'Напишите назначение / комментарий');
     if (note !== (p.note || '')) ch.note = note;
   }
-  const adminKeys = ['amount', 'created_at', 'register_id', 'method', 'customer_id', 'order_number'].filter((k) => b[k] !== undefined);
+  // классификация (статья, месяц в отчётности, получатель) — сотрудник с правом «касса»
+  if (b.article_id !== undefined) { const v = b.article_id ? articleOf(b.article_id, p.direction) : null; if (v !== p.article_id) ch.article_id = v; }
+  if (b.report_month !== undefined) { if (b.report_month && !ymOk(b.report_month)) throw new HttpError(400, 'Месяц в отчётности — ГГГГ-ММ'); const v = b.report_month || null; if (v !== p.report_month) ch.report_month = v; }
+  if (b.party_type !== undefined) {
+    const pt = partyOf(b);
+    for (const k of ['party_type', 'customer_id', 'counterparty_id', 'staff_id']) if ((pt[k] ?? null) !== (p[k] ?? null)) ch[k] = pt[k];
+  }
+  const adminKeys = ['amount', 'created_at', 'register_id', 'method', 'order_number'].filter((k) => b[k] !== undefined);
   if (adminKeys.length) {
     if (s.role !== 'admin') throw new HttpError(403, 'Сумму, дату, кассу, способ, клиента и заказ меняет только администратор');
     if (p.method === 'points') throw new HttpError(400, 'Списание баллов меняется корректировкой баллов у клиента');
@@ -1373,7 +1450,7 @@ crm.put('/cash/:id', (req, res) => {
       const v = String(b.created_at || '').replace('T', ' ').slice(0, 19);
       if (!/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(v)) throw new HttpError(400, 'Неверная дата');
       const full = v.length === 10 ? v + ' 00:00:00' : v.length === 16 ? v + ':00' : v;
-      if (full !== p.created_at) ch.created_at = full;
+      if (full !== p.created_at) { ch.created_at = full; if (b.report_month === undefined && (!p.report_month || p.report_month === String(p.created_at).slice(0, 7))) ch.report_month = full.slice(0, 7); }
     }
     if (b.register_id !== undefined && Number(b.register_id) !== p.register_id) {
       if (p.transfer_id) throw new HttpError(400, 'У переноса между кассами кассы не меняются — удалите и сделайте перенос заново');
@@ -1381,23 +1458,19 @@ crm.put('/cash/:id', (req, res) => {
       if (!r) throw new HttpError(400, 'Касса не найдена');
       ch.register_id = r.id;
     }
-    if (b.method !== undefined && b.method !== p.method) {
-      if (!PAY_METHODS.includes(b.method)) throw new HttpError(400, 'Неизвестный способ оплаты');
-      ch.method = b.method;
-      if (b.method === 'cash' && !p.number) ch.number = nextNumber(p.direction === 'in' ? 'KP' : 'KW');
-    }
-    if (b.customer_id !== undefined) {
-      const v = b.customer_id ? Number(b.customer_id) : null;
-      if (v && !one('SELECT 1 FROM customers WHERE id = ?', v)) throw new HttpError(400, 'Клиент не найден');
-      if (v !== p.customer_id) ch.customer_id = v;
-    }
+    // способ — автоматически по кассе (у терминала можно выбрать карту или BLIK)
+    const reg = one('SELECT * FROM cash_registers WHERE id = ?', ch.register_id ?? p.register_id);
+    if (reg && !p.transfer_id) {
+      const m = methodOf(reg, b.method ?? p.method);
+      if (m !== p.method) { ch.method = m; if (m === 'cash' && !p.number) ch.number = nextNumber(p.direction === 'in' ? 'KP' : 'KW'); }
+    } else if (b.method !== undefined && b.method !== p.method && PAY_METHODS.includes(b.method)) ch.method = b.method;
     if (b.order_number !== undefined) {
       if (p.transfer_id) throw new HttpError(400, 'Перенос между кассами нельзя привязать к заказу');
       const num = String(b.order_number || '').trim();
       const o = num ? one('SELECT id, customer_id FROM orders WHERE number = ? COLLATE NOCASE', num) : null;
       if (num && !o) throw new HttpError(400, `Заказ ${num} не найден`);
       const v = o ? o.id : null;
-      if (v !== p.order_id) { ch.order_id = v; if (o?.customer_id && b.customer_id === undefined) ch.customer_id = o.customer_id; }
+      if (v !== p.order_id) { ch.order_id = v; if (o?.customer_id && b.party_type === undefined) { ch.customer_id = o.customer_id; ch.party_type = 'client'; ch.counterparty_id = null; ch.staff_id = null; } }
     }
   }
   if (!Object.keys(ch).length) return res.json({ ok: true, changed: 0 });
@@ -1554,7 +1627,7 @@ crm.put('/me', (req, res) => {
 crm.get('/audit', (req, res) => {
   const me = who(req);
   // своя история объекта (заказ, клиент, авто) доступна всем, кто видит объект; общий журнал — по праву audit.view
-  const own = req.query.entity && req.query.id && ['orders', 'customers', 'cars'].includes(req.query.entity);
+  const own = req.query.entity && req.query.id && (['orders', 'customers', 'cars'].includes(req.query.entity) || (req.query.entity === 'payments' && can(me, 'cash.view')));
   if (!own && !can(me, 'audit.view')) throw new HttpError(403, 'Недостаточно прав: журнал изменений');
   res.json({ ...listAudit(req.query), entities: entityList(), staff: all('SELECT id, name FROM staff ORDER BY name') });
 });

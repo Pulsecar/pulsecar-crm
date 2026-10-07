@@ -188,13 +188,19 @@ export function pivot(q) {
 export function pnl(q) {
   const piv = pivot({ ...q, group: 'month', group2: '' });
   const exp = all(`SELECT substr(doc_date,1,7) m, COALESCE(category,'') category, COALESCE(SUM(net),0) net FROM purchases WHERE doc_date BETWEEN ? AND ? GROUP BY m, category`, q.from, q.to);
-  const months = [...new Set([...piv.rows.map((r) => r.key), ...exp.map((e) => e.m)])].sort();
+  // расходы из кассы (KW со статьёй «операционные расходы» / «налоги») — в месяц разнесения (report_month), а не по дате операции
+  const kw = all(`SELECT COALESCE(p.report_month, substr(p.created_at,1,7)) m, ROUND(SUM(CASE WHEN p.direction = 'out' THEN p.amount ELSE -p.amount END),2) s
+    FROM payments p JOIN cash_articles a ON a.id = p.article_id WHERE a.section IN ('opex','tax') AND p.transfer_id IS NULL
+    AND COALESCE(p.report_month, substr(p.created_at,1,7)) BETWEEN substr(?,1,7) AND substr(?,1,7) GROUP BY m`, q.from, q.to);
+  const months = [...new Set([...piv.rows.map((r) => r.key), ...exp.map((e) => e.m), ...kw.map((e) => e.m)])].sort();
   return months.map((m) => {
     const r = piv.rows.find((x) => x.key === m) || {};
-    const opex = r2(exp.filter((e) => e.m === m && !INVENTORY_CAT.test(e.category)).reduce((s, e) => s + e.net, 0));
+    const opexDocs = r2(exp.filter((e) => e.m === m && !INVENTORY_CAT.test(e.category)).reduce((s, e) => s + e.net, 0));
+    const opexCash = r2(kw.find((e) => e.m === m)?.s || 0);
+    const opex = r2(opexDocs + opexCash);
     const gp = r.grossProfit || 0;
     return { month: m, orders: r.orders || 0, revenue: r.revenue || 0, revenueNet: r.revenueNet || 0, labor: r.labor || 0, parts: r.parts || 0, cogs: r.cogs || 0,
-      payroll: r.payroll || 0, grossProfit: r2(gp), opex, operatingProfit: r2(gp - opex), marginPct: pct(gp - opex, r.revenueNet) };
+      payroll: r.payroll || 0, grossProfit: r2(gp), opexDocs, opexCash, opex, operatingProfit: r2(gp - opex), marginPct: pct(gp - opex, r.revenueNet) };
   });
 }
 

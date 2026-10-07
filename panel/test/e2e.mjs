@@ -435,16 +435,52 @@ try {
   assert.equal(ok(await req('/crm-api/cash/' + payRow.id), 'pay get').source, 'order');
   // правка документа (админ): сумма → оплата заказа пересчитывается; дата, способ, касса
   const paidBefore = ok(await req('/crm-api/orders/' + po.id), 'po before').paid;
-  ok(await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { amount: payRow.amount + 10, created_at: '2026-10-05 09:30', method: 'card' } }), 'pay edit');
-  const payE = ok(await req('/crm-api/cash/' + payRow.id), 'pay edited');
-  assert.equal(payE.amount, payRow.amount + 10); assert.equal(payE.created_at, '2026-10-05 09:30:00'); assert.equal(payE.method, 'card');
+  const cardReg = cashL.registers.find((r) => r.kind === 'card' && r.active);
+  ok(await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { amount: payRow.amount + 10, created_at: '2026-10-05 09:30', method: 'cash' } }), 'pay edit');
+  let payE = ok(await req('/crm-api/cash/' + payRow.id), 'pay edited');
+  assert.equal(payE.amount, payRow.amount + 10); assert.equal(payE.created_at, '2026-10-05 09:30:00'); assert.equal(payE.method, 'cash', 'способ — по кассе');
+  assert.equal(payE.report_month, '2026-10', 'месяц в отчётности идёт за датой');
+  if (cardReg) {
+    ok(await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { register_id: cardReg.id, method: 'blik' } }), 'pay to terminal');
+    payE = ok(await req('/crm-api/cash/' + payRow.id), 'pay edited 2');
+    assert.equal(payE.method, 'blik', 'терминал: карта или BLIK');
+    ok(await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { register_id: payRow.register_id } }), 'pay back to cash');
+    assert.equal(ok(await req('/crm-api/cash/' + payRow.id), 'pay edited 3').method, 'cash');
+  }
   assert.equal(ok(await req('/crm-api/orders/' + po.id), 'po after').paid, paidBefore + 10, 'оплата заказа пересчитана после правки суммы');
   assert.equal((await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { amount: 0 } })).status, 400);
   assert.equal((await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { order_number: 'NIE-MA-TAKIEGO' } })).status, 400);
   ok(await req('/crm-api/cash/' + payRow.id, { method: 'DELETE' }), 'pay delete');
   assert.equal(ok(await req('/crm-api/orders/' + po.id), 'po get').paid, 300, 'заказ пересчитан после удаления KP');
   ok(await req('/crm-api/cash/' + kwRow.id, { method: 'DELETE' }), 'kw delete');
+  // KW: статья платежа, получатель (контрагент / сотрудник / клиент), дата операции и месяц в отчётности, P&L
+  const cmeta = ok(await req('/crm-api/cash/meta'), 'cash meta');
+  const rent = cmeta.articles.find((a) => a.code === '400');
+  const revenueArt = cmeta.articles.find((a) => a.kind === 'in');
+  assert.ok(rent && rent.section === 'opex' && cmeta.counterparties.some((c) => c.name === 'Inter Cars'));
+  const cpX = ok(await req('/crm-api/cash/counterparties', { body: { name: 'Wynajmujący Sp. z o.o.', nip: '525-000-00-00' } }), 'new counterparty');
+  assert.equal(ok(await req('/crm-api/cash/counterparties', { body: { name: 'wynajmujący sp. z o.o.' } }), 'dup cpX').id, cpX.id, 'контрагент без дублей');
+  assert.equal((await req('/crm-api/cash', { body: { direction: 'out', amount: 10, article_id: revenueArt.id } })).status, 400, 'статья прихода в KW нельзя');
+  assert.equal((await req('/crm-api/cash', { body: { direction: 'out', amount: 10 } })).status, 400, 'нужна статья или назначение');
+  const k2 = ok(await req('/crm-api/cash', { body: { direction: 'out', amount: 1500, article_id: rent.id, party_type: 'counterparty', counterparty_id: cpX.id,
+    created_at: '2026-11-02T10:15', report_month: '2026-10', method: 'card' } }), 'kw rent');
+  const k2d = ok(await req('/crm-api/cash/' + k2.id), 'kw rent get');
+  assert.equal(k2d.created_at, '2026-11-02 10:15:00'); assert.equal(k2d.report_month, '2026-10'); assert.equal(k2d.method, 'cash', 'касса наличных → наличные');
+  assert.equal(k2d.counterparty_name, 'Wynajmujący Sp. z o.o.'); assert.equal(k2d.counterparty_nip, '5250000000'); assert.equal(k2d.article_name, rent.name); assert.equal(k2d.note, rent.name);
+  const pnlOct = ok(await req('/crm-api/finance/pnl?from=2026-10-01&to=2026-10-31'), 'pnl oct');
+  assert.equal(pnlOct.find((r) => r.month === '2026-10').opexCash, 1500, 'расход из кассы — в месяц разнесения');
+  const pnlNov = ok(await req('/crm-api/finance/pnl?from=2026-11-01&to=2026-11-30'), 'pnl nov');
+  assert.ok(!pnlNov.find((r) => r.month === '2026-11')?.opexCash, 'не в месяц операции');
+  const stf = ok(await req('/crm-api/staff'), 'staff').rows.find((x) => x.active);
+  ok(await req('/crm-api/cash/' + k2.id, { method: 'PUT', body: { party_type: 'staff', staff_id: stf.id, report_month: '2026-11' } }), 'kw to staff');
+  const k2e = ok(await req('/crm-api/cash/' + k2.id), 'kw rent get 2');
+  assert.equal(k2e.party_type, 'staff'); assert.equal(k2e.staff_id, stf.id); assert.equal(k2e.counterparty_id, null); assert.equal(k2e.report_month, '2026-11');
+  assert.equal((await req('/crm-api/cash/' + k2.id, { method: 'PUT', body: { party_type: 'counterparty', counterparty_id: 999999 } })).status, 400);
+  const khist = ok(await req('/crm-api/audit?entity=payments&id=' + k2.id), 'kw history');
+  assert.ok(khist.rows.some((h) => h.action === 'update' && h.changes.some((c) => c.field === 'Месяц в отчётности')), 'история изменений документа');
+  ok(await req('/crm-api/cash/' + k2.id, { method: 'DELETE' }), 'kw rent delete');
   console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
+  console.log('✓ KP/KW: статья платежа, получатель (контрагент / сотрудник / клиент), способ по кассе, дата операции и месяц в отчётности, P&L');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
 
   // 10. удаление аккаунта в приложении

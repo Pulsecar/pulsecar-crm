@@ -29,6 +29,8 @@ export const TABLES = {
   orders: { label: 'Заказ', ignore: ['total', 'total_net', 'cost', 'paid', 'review_sent', 'card_token', 'accept_code', 'accept_code_exp', 'pay_link', 'pay_ext_id'] },
   order_items: { label: 'Позиция заказа', parent: "'orders:' || X.order_id" },
   payments: { label: 'Оплата / касса', parent: "CASE WHEN X.order_id IS NOT NULL THEN 'orders:' || X.order_id END" },
+  counterparties: { label: 'Контрагент' },
+  cash_articles: { label: 'Статья платежа' },
   appointments: { label: 'Визит (терминарз)', ignore: ['reminded'], parent: "CASE WHEN X.order_id IS NOT NULL THEN 'orders:' || X.order_id END" },
   sales_docs: { label: 'Документ продажи', exclude: ['ksef_xml', 'ksef_session', 'ksef_hash', 'ksef_ref', 'items'], parent: "CASE WHEN X.order_id IS NOT NULL THEN 'orders:' || X.order_id END" },
   receipts: { label: 'Чек (paragon)', exclude: ['items'], parent: "CASE WHEN X.order_id IS NOT NULL THEN 'orders:' || X.order_id END" },
@@ -103,7 +105,7 @@ const F = {
   accepted_at: 'Принят клиентом', accepted_via: 'Как принят', invoice_no: 'Фактура',
   media_done: 'Фото/видео до/после загружены', media_done_by: 'Фото/видео отметил', followup: 'Обзвон (выцена)', followup_reason: 'Причина', followup_at: 'Связаться',
   qty: 'Кол-во', unit: 'Ед.', price: 'Цена', cost: 'Себестоимость', discount: 'Скидка %', vat: 'VAT %', done: 'Выполнено', code: 'Код', product_id: 'Товар', task_id: 'К работе',
-  amount: 'Сумма', method: 'Способ', direction: 'Направление', register_id: 'Касса',
+  amount: 'Сумма', method: 'Способ', direction: 'Направление', register_id: 'Касса', article_id: 'Статья платежа', report_month: 'Месяц в отчётности', party_type: 'Получатель', counterparty_id: 'Контрагент', staff_id: 'Сотрудник (получатель)',
   station_id: 'Пост', start_at: 'Начало', duration_min: 'Длительность, мин', title: 'Название', status: 'Статус', contact_name: 'Имя (заявка)',
   total_gross: 'Сумма брутто', total_net: 'Сумма нетто', paid: 'Оплачено', issue_date: 'Дата', buyer: 'Покупатель', ksef_status: 'Статус KSeF', ksef_number: 'Номер KSeF',
   stock: 'Остаток', purchase_price: 'Цена закупки', sell_price: 'Цена продажи', location: 'Место', active: 'Активен', role: 'Роль', permissions: 'Права', login: 'Логин',
@@ -118,6 +120,7 @@ const lookups = () => {
     customer_id: m("SELECT id, COALESCE(CASE WHEN kind = 'company' THEN company END, name, phone) n FROM customers"), car_id: m("SELECT id, TRIM(COALESCE(plate,'') || ' ' || COALESCE(make,'') || ' ' || COALESCE(model,'')) n FROM cars"),
     order_id: m('SELECT id, number n FROM orders'), default_car_id: null, status_id: m('SELECT id, name n FROM order_statuses'), type_id: m('SELECT id, name n FROM order_types'), mechanic_id: m('SELECT id, name n FROM staff'),
     station_id: m('SELECT id, name n FROM stations'), register_id: m('SELECT id, name n FROM cash_registers'), product_id: m('SELECT id, name n FROM products'),
+    article_id: m("SELECT id, TRIM(COALESCE(code,'') || ' ' || name) n FROM cash_articles"), counterparty_id: m('SELECT id, name n FROM counterparties'), staff_id: m('SELECT id, name n FROM staff'),
   };
 };
 const DOCK = { vat: 'фактура VAT', proforma: 'Pro forma', correction: 'корректа', order: 'заказ', quote: 'выцена', labor: 'работа', part: 'товар' };
@@ -130,6 +133,7 @@ function fmt(k, v, L, secret) {
   if (map) return map[String(v)] || '#' + v;
   if (k === 'method' || k === 'payment_method') return METHOD[v] || v;
   if (k === 'direction') return v === 'in' ? 'приход' : 'расход';
+  if (k === 'party_type') return { client: 'клиент', counterparty: 'контрагент', staff: 'сотрудник' }[v] || v;
   if (k === 'kind' && (v === 'company' || v === 'person')) return v === 'company' ? 'фирма' : 'частное лицо';
   if (['marketing_consent', 'done', 'active', 'enabled', 'is_mechanic'].includes(k)) return v ? 'да' : 'нет';
   if (k === 'buyer') { try { const b = JSON.parse(v); return [b.name, b.nip && 'NIP ' + b.nip].filter(Boolean).join(', ') || '—'; } catch { return v; } }
