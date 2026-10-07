@@ -280,6 +280,7 @@ Rules:
 - If a part depends on equipment the VIN may not distinguish (engine code variants, brake disc size, gearbox) or you are unsure — fill "check" with a short Russian explanation instead of guessing.
 - name_pl: short Polish part name as on a Polish invoice (e.g. "Zestaw paska rozrządu z pompą wody", "Filtr oleju", "Olej silnikowy 5W-30 VW 504.00").
 - key: short English snake_case group (timing_kit, water_pump, engine_oil, oil_filter, spark_plug, glow_plug, brake_pads_front, ...).
+- Add ONLY what the request asks for plus consumables strictly required by that job (e.g. coolant when the water pump is replaced, drain plug washer with an oil change). Do NOT add optional extras (engine mounts, seals, belts, fluids "just in case") — mention them briefly in note as suggestions instead.
 - Do not duplicate parts. If the request is not about parts at all, return an empty list with a note.`;
 
 const TOOL = {
