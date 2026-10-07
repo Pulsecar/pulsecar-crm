@@ -111,7 +111,7 @@ function DocFields({ v, set, direction, regs, meta, onMeta, lock = {} }) {
       <label class="f">Способ оплаты
         ${reg?.kind === 'card' && !lock.register
           ? html`<select value=${m} onChange=${(e) => set({ method: e.target.value })}><option value="card">${METHOD.card}</option><option value="blik">${METHOD.blik}</option></select>`
-          : html`<input value=${m ? METHOD[m] : '—'} disabled title="Выбирается автоматически по кассе" />`}</label>
+          : html`<select disabled title="Выбирается автоматически по кассе"><option>${m ? METHOD[m] : '—'}</option></select>`}</label>
     </div>
     <div class="f">${direction === 'out' ? 'Получатель' : 'Плательщик'}
       <div class="row" style="gap:14px;margin:4px 0 6px">${PARTY.map(([k, l]) => html`<label class="check" style="margin:0"><input type="radio" name="party" checked=${v.party_type === k}
