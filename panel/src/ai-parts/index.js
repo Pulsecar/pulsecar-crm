@@ -10,7 +10,8 @@ import { STEPS, startPick, carSig } from './pipeline.js';
 import { aiModel, DEFAULT_MODEL, callTool } from './claude.js';
 import { icOn } from './ic.js';
 import { getRules, saveRules, suggestFromHistory, GROUPS } from './rules.js';
-import { trainOnHistory, trainedStat, kitDraftsFromHistory, jobKey } from './history.js';
+import { trainOnHistory, trainedStat, kitDraftsFromHistory, jobKey, laborPrice, historyPriceList } from './history.js';
+import { startDistill, distillState } from './knowledge.js';
 import { minMargin } from './pricing.js';
 import { cfg } from '../integrations/index.js';
 
@@ -229,7 +230,29 @@ export function mountAiParts(crm, who) {
   crm.get('/ai-parts/rules/suggest', (req, res) => { who(req, 'settings.manage'); res.json({ brands: suggestFromHistory() }); });
 
   /** Обучение на истории выцен и заказов сервиса (админ) */
-  crm.post('/ai-parts/train', (req, res) => { who(req, 'settings.manage'); res.json(trainOnHistory()); });
+  crm.post('/ai-parts/train', (req, res) => {
+    who(req, 'settings.manage');
+    const st = trainOnHistory();
+    // deep — ИИ проходит типовые работы и пишет знания по узлам (прокладки, уплотнения, что разбирается); идёт в фоне
+    res.json({ ...st, distill: req.body?.deep ? startDistill() : distillState() });
+  });
+  /** Прайс из истории выцен и заказов + сравнение с «Прайсом работ» */
+  crm.get('/ai-parts/price-list', (req, res) => { who(req, 'settings.manage'); if (!trainedStat()) trainOnHistory(); res.json({ rows: historyPriceList() }); });
+  /** Перенести цены из истории в «Прайс работ»: новые работы добавить, у существующих — обновить цену (только выбранные) */
+  crm.post('/ai-parts/price-list/apply', (req, res) => {
+    const s = who(req, 'catalog.edit');
+    const keys = new Set((Array.isArray(req.body?.keys) ? req.body.keys : []).map(String).slice(0, 2000));
+    const useRecent = req.body?.recent !== false;
+    let added = 0, updated = 0;
+    for (const r of historyPriceList(5000)) {
+      if (!keys.has(r.job_key)) continue;
+      const price = Math.round((useRecent && r.recent ? r.recent : r.price) * 100) / 100;
+      if (r.catalog) { run('UPDATE service_catalog SET price = ? WHERE id = ?', price, r.catalog.id); updated++; }
+      else { insert('service_catalog', { category: r.category, name: r.job_name, unit: r.unit === 'rbh' ? 'rbh' : 'oper', qty: r.unit === 'rbh' ? (r.qty || 1) : 1, price, vat: 23, active: 1, source: 'history' }); added++; }
+    }
+    log('settings', 0, 'update', `Прайс работ из истории: добавлено ${added}, обновлено цен ${updated}`, s.name);
+    res.json({ ok: true, added, updated });
+  });
   crm.get('/ai-parts/kit-drafts', (req, res) => { who(req, 'settings.manage'); if (!trainedStat()) trainOnHistory(); res.json({ kits: kitDraftsFromHistory() }); });
 
   /** Настройки модуля (только администратор сервиса) */
@@ -240,7 +263,7 @@ export function mountAiParts(crm, who) {
       enabled: getSetting('ai_parts_enabled') === '1', limit: Number(getSetting('ai_parts_limit') || 0), model: aiModel(), defaultModel: DEFAULT_MODEL,
       markup: Number(getSetting('ai_parts_markup') || 40), minMargin: minMargin(),
       ready: { claude: !!cfg('assistant', { ignoreEnabled: true })?.apiKey, intercars: icOn() },
-      month: { jobs: month.n, tokensIn: month.ti, tokensOut: month.tout }, trained: trainedStat(),
+      month: { jobs: month.n, tokensIn: month.ti, tokensOut: month.tout }, trained: trainedStat(), distill: distillState(),
       kpi: kpi(),
     });
   });
@@ -356,11 +379,15 @@ export function addAiLabor(jobId, orderId, w) {
   const rate = Number(getSetting('rbh_rate', '250')) || 0;
   const rbh = String(getSetting('labor_unit_default', 'oper') || 'oper').toLowerCase() === 'rbh';
   const hTxt = String(hours).replace('.', ',');
+  // цена: ваш «Прайс работ» → цена этой работы в ваших прошлых выценах → часы × ставка
+  const lp = laborPrice(w.title);
+  const priced = lp && !(lp.unit === 'rbh' && rbh);
   const itemId = addItem(orderId, {
     kind: 'labor', name: w.title, vat,
-    ...(rbh ? { unit: 'rbh', qty: hours } : { unit: 'oper', qty: 1, price: round2(hours * rate * (1 + vat / 100)) }),
-    norm_src: `ИИ: ~${hTxt} h (${w.src === 'history' ? 'история сервиса' : 'оценка ИИ'})`,
-    note: [w.purpose, `~${hTxt} h${rbh ? '' : ` × ${rate} zł/h нетто`} · ${w.src === 'history' ? 'по вашим прошлым выценам' : 'оценка ИИ — проверьте'}`].filter(Boolean).join(' · ').slice(0, 500),
+    ...(priced ? { unit: lp.unit || 'oper', qty: lp.unit === 'rbh' ? (lp.qty || hours) : 1, price: round2(lp.price) }
+      : rbh ? { unit: 'rbh', qty: hours } : { unit: 'oper', qty: 1, price: round2(hours * rate * (1 + vat / 100)) }),
+    norm_src: `ИИ: ~${hTxt} h (${w.src === 'history' ? 'история сервиса' : 'оценка ИИ'})${priced ? ' · цена: ' + lp.src : ''}`,
+    note: [w.purpose, `~${hTxt} h${priced ? ` · цена по: ${lp.src}` : rbh ? '' : ` × ${rate} zł/h нетто`} · ${w.src === 'history' ? 'по вашим прошлым выценам' : 'оценка ИИ — проверьте'}`].filter(Boolean).join(' · ').slice(0, 500),
   });
   return insert('ai_lines', { job_id: jobId, order_id: orderId, order_item_id: itemId, kind: 'labor', group_key: 'job:' + jk, title: w.title, qty: rbh ? hours : 1,
     oe: '[]', variants: '{}', chosen: null, confidence: w.src === 'history' ? 'high' : 'check', reason: w.src === 'history' ? null : 'Норма часов — оценка ИИ, проверьте', purpose: w.purpose || null, hours });

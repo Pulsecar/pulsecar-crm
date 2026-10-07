@@ -832,6 +832,10 @@ addColumn('ai_lines', 'link', 'TEXT');                             // ссылк
 // знания из истории сервиса: какие детали ставят вместе с работой и сколько часов она занимает
 db.exec(`CREATE TABLE IF NOT EXISTS ai_job_parts (job_key TEXT NOT NULL, job_name TEXT, part_name TEXT NOT NULL, n INTEGER NOT NULL, jobs INTEGER NOT NULL, PRIMARY KEY (job_key, part_name))`);
 db.exec(`CREATE TABLE IF NOT EXISTS ai_job_hours (job_key TEXT PRIMARY KEY, job_name TEXT, hours REAL, n INTEGER NOT NULL)`);
+// прайс из истории: цена работы (брутто за ед.), сколько раз, разброс, свежая цена; знания по узлам (выжимка ИИ по истории)
+db.exec(`CREATE TABLE IF NOT EXISTS ai_job_prices (job_key TEXT PRIMARY KEY, job_name TEXT, category TEXT, unit TEXT, qty REAL, price REAL, price_min REAL, price_max REAL,
+  recent REAL, n INTEGER NOT NULL, orders INTEGER NOT NULL DEFAULT 0, last_at TEXT)`);
+db.exec(`CREATE TABLE IF NOT EXISTS ai_knowledge (job_key TEXT PRIMARY KEY, job_name TEXT, data TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now')))`);
 if (getSetting('mw_internal_comments') === null) {
   db.exec(`INSERT INTO order_comments (order_id, at, staff, text, mw_id)
   SELECT o.id, COALESCE(o.created_at, datetime('now','localtime')), 'Motowarsztat', o.internal_note, 'ic:' || o.mw_id FROM orders o

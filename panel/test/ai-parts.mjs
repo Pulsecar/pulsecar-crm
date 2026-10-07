@@ -39,6 +39,12 @@ const mock = createServer(async (req, res) => {
       // из списка e-Catalog берём только комплекты (не одиночный ремень)
       return json(200, { usage: { input_tokens: 500, output_tokens: 50 }, content: [{ type: 'tool_use', name: 'pick_items', input: { parts: ctx.parts.map((p) => ({ key: p.key, codes: p.items.filter((i) => /Zestaw/.test(i.name)).map((i) => i.code) })) } }] });
     }
+    if (b.tool_choice.name === 'job_knowledge') {
+      const ctx = JSON.parse(b.messages[0].content);
+      assert.ok(!JSON.stringify(ctx).includes('Kowalski'), 'данные клиента не уходят в Claude');
+      return json(200, { usage: { input_tokens: 900, output_tokens: 300 }, content: [{ type: 'tool_use', name: 'job_knowledge', input: { jobs: ctx.jobs.map((j) => ({ key: j.key, assemblies: ['osłona rozrządu'],
+        always: ['zestaw paska rozrządu'], seals: [{ part: 'uszczelka pokrywy rozrządu', why: 'снимается крышка ГРМ' }], often: ['pompa wody'], not_parts: ['czyszczenie'], tips: 'проверить натяжитель' })) } }] });
+    }
     if (b.tool_choice.name === 'pick_rows') {
       const ctx = JSON.parse(b.messages[0].content);
       return json(200, { usage: { input_tokens: 300, output_tokens: 40 }, content: [{ type: 'tool_use', name: 'pick_rows', input: { parts: ctx.parts.map((p) => ({ key: p.key, ids: p.rows.filter((r) => !/obudowa/i.test(r.name)).map((r) => r.id) })) } }] });
@@ -209,6 +215,27 @@ try {
     const item = o.items.find((i) => i.id === tk.order_item_id);
     assert.match(item.note, /основная деталь замены ГРМ · Wymiana rozrządu ~3,5 h \(история сервиса\)/);
     assert.equal(tk.hours, 3.5);
+    // прайс из истории: «Wymiana rozrządu» 2 раза по 100 zł → в «Прайс работ» по кнопке
+    const pl = await req('ai-parts/price-list');
+    const roz = pl.rows.find((r) => r.job_name === 'Wymiana rozrządu');
+    assert.ok(roz && roz.n >= 2 && roz.price === 100 && roz.category === 'Rozrząd', JSON.stringify(roz));
+    const ap = await req('ai-parts/price-list/apply', { body: { keys: [roz.job_key] } });
+    assert.ok(ap.added + ap.updated === 1);
+    assert.ok((await req('ai-parts/price-list')).rows.find((r) => r.job_key === roz.job_key).catalog);
+    // глубокое обучение: знания по узлам (в фоне) → попадают в подбор
+    const tr = await req('ai-parts/train', { body: { deep: true } });
+    assert.ok(['running', 'done'].includes(tr.distill.state));
+    let sset; for (let i = 0; i < 60; i++) { sset = await req('ai-parts/settings'); if (sset.distill?.state !== 'running') break; await new Promise((x) => setTimeout(x, 200)); }
+    assert.equal(sset.distill.state, 'done', JSON.stringify(sset.distill)); assert.ok(sset.distill.knowledge >= 1);
+    const q6b = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id: id6 } = await req(`ai-parts/orders/${q6b.id}/jobs`, { body: { text: 'ГРМ', level: 'mid' } });
+    let j6; for (let i = 0; i < 80; i++) { j6 = await req('ai-parts/jobs/' + id6); if (['done', 'error'].includes(j6.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j6.status, 'done', j6.error);
+    assert.ok(lastCtx.workshop_knowledge_by_job.some((k) => k.seals?.[0]?.part === 'uszczelka pokrywy rozrządu'), JSON.stringify(lastCtx.workshop_knowledge_by_job));
+    assert.ok(lastCtx.workshop_job_prices.some((x) => x.price === 100));
+    // цена работы — из «Прайса работ»
+    const lab6 = (await req('orders/' + q6b.id)).items.find((i) => i.kind === 'labor');
+    assert.equal(lab6.price, 100); assert.match(lab6.norm_src, /цена: прайс работ/);
   });
   await t('аналоги по OE из Inter Cars e-Catalog (через расширение): подбор ждёт страницу, Claude выбирает нужный тип', async () => {
     const q4 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });

@@ -103,7 +103,7 @@ async function pick(jobId) {
   } catch { jobTerms = [req.text]; }
   const similar = similarJobs(jobTerms, car, 15).filter((x) => x.work.length || x.parts.length);
   const know = jobKnowledge(jt2(jobTerms));
-  step('history', 'ok', `похожих выцен на эту модель: ${past.length}, похожих работ в истории: ${similar.length}${know.parts.length ? `, связанных деталей: ${know.parts.length}` : ''}${verified.length ? `, проверенных номеров: ${verified.length}` : ''}`);
+  step('history', 'ok', `похожих выцен на эту модель: ${past.length}, похожих работ в истории: ${similar.length}${know.parts.length ? `, связанных деталей: ${know.parts.length}` : ''}${know.knowledge.length ? `, знаний по узлам: ${know.knowledge.length}` : ''}${verified.length ? `, проверенных номеров: ${verified.length}` : ''}`);
   if (cancelled()) return;
 
   // 3. Claude: позиции, количество, OE, кандидаты-аналоги
@@ -118,6 +118,8 @@ async function pick(jobId) {
       workshop_similar_jobs_any_car: similar,
       workshop_parts_usually_with_these_jobs: know.parts,
       workshop_labor_hours_median: know.hours,
+      workshop_job_prices: know.prices,
+      workshop_knowledge_by_job: know.knowledge,
       workshop_kits: kits, workshop_brand_rules: brandRules,
     });
   // Claude иногда отдаёт вложенный список строкой JSON или под другим ключом — приводим к виду; пусто → ещё одна попытка
@@ -501,7 +503,7 @@ Rules:
 - If a part depends on equipment the VIN may not distinguish (engine code variants, brake disc size, gearbox) or you are unsure — fill "check" with a short Russian explanation instead of guessing.
 - name_pl: short Polish part name as on a Polish invoice (e.g. "Zestaw paska rozrządu z pompą wody", "Filtr oleju", "Olej silnikowy 5W-30 VW 504.00").
 - key: short English snake_case group (timing_kit, water_pump, engine_oil, oil_filter, spark_plug, glow_plug, brake_pads_front, ...).
-- Think like an experienced workshop: which ASSEMBLIES must be disassembled to do the requested job, and add the parts that must be renewed because of that disassembly — gaskets, seals, O-rings, one-time (stretch) bolts, clips, fluids that get drained (coolant when the cooling system is opened, oil when the sump comes off). Use workshop_similar_jobs_any_car and workshop_parts_usually_with_these_jobs (share = % of past jobs where this workshop also replaced that part) as the main guide. Do NOT add unrelated optional replacements (engine mounts, extra belts, "just in case" parts) — mention them in note as suggestions.
+- Think like an experienced workshop: which ASSEMBLIES must be disassembled to do the requested job, and add the parts that must be renewed because of that disassembly — gaskets, seals, O-rings, one-time (stretch) bolts, clips, fluids that get drained (coolant when the cooling system is opened, oil when the sump comes off). Use workshop_knowledge_by_job (the workshop's own distilled knowledge per job: assemblies removed, parts always replaced, seals/gaskets needed because of disassembly with reasons, often-added parts, things that are NOT parts), workshop_similar_jobs_any_car and workshop_parts_usually_with_these_jobs (share = % of past jobs where this workshop also replaced that part) as the main guide. Do NOT add unrelated optional replacements (engine mounts, extra belts, "just in case" parts) — mention them in note as suggestions.
 - For EVERY part fill "purpose": a short explanation in the SAME LANGUAGE as the manager's request — why this part is needed (e.g. "прокладка крышки клапанов — снимается при замене свечей" / "uszczelka pokrywy — demontaż przy wymianie świec"); fill "job" with the labour operation it belongs to (Polish name, as on a repair order) and "labor_hours" — hours for that operation on THIS vehicle: take workshop_labor_hours_median / hours in similar jobs when available (hours_source "history"), otherwise your estimate (hours_source "estimate"). Parts of the same job share the same job and hours.
 - labor: every labour operation the request needs, as ONE line per operation the way this workshop writes them on repair orders (Polish, e.g. "Wymiana rozrządu z pompą wody", "Wymiana świec zapłonowych", "Geometria kół"); include operations without parts (diagnostics, alignment, coolant bleeding) only if they are clearly part of the job. hours = time for THIS vehicle for the whole operation (all pieces, e.g. both sides); prefer workshop_labor_hours_median / similar jobs (source "history"), otherwise your estimate (source "estimate"). purpose: short note in the request's language what the operation includes. Do not split one job into many small operations; operations already done as part of another (e.g. removing the valve cover for spark plugs) are included in that operation, not separate.
 - "parts" are ONLY physical parts / materials that are bought (never operations, services, cleaning, diagnostics, coding — those are labour). Do not add parts or labour for operations the advisor did not ask for (e.g. carbon cleaning, EGR cleaning, injector coding): put such recommendations into "note" as a suggestion for the advisor.

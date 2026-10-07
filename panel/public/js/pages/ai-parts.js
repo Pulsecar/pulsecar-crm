@@ -301,19 +301,70 @@ export function AiRules() {
   </div>`;
 }
 
-/** Обучение на выценах сервиса */
+/** Обучение на выценах сервиса: быстрое (статистика) и глубокое (ИИ пишет знания по узлам) */
 function AiTrain({ trained }) {
   const [st, setSt] = useState(trained);
   const [busy, setBusy] = useState(false);
-  const train = async () => { setBusy(true); const r = await act(() => api('ai-parts/train', { method: 'POST' }), 'Обучение завершено'); if (r) setSt(r); setBusy(false); };
-  return html`<div class="card" style="max-width:760px">
-    <h2 style="margin-top:0">Обучение на ваших выценах</h2>
-    <p class="sub">Ассистент изучает прошлые выцены и заказы сервиса: какие работы вы делали, какие детали меняли вместе с ними (прокладки и уплотнения узлов, которые разбираются), сколько часов занимала работа. Перед каждым подбором он опирается на похожие прошлые работы. Данные клиентов не используются. Знания обновляются автоматически раз в сутки.</p>
+  const [ds, setDs] = useState(null);
+  const train = async (deep) => { setBusy(true); const r = await act(() => api('ai-parts/train', { body: { deep } }), deep ? 'Обучение запущено' : 'Обучение завершено'); if (r) { setSt(r); setDs(r.distill); } setBusy(false); };
+  useEffect(() => { api('ai-parts/settings').then((x) => setDs(x.distill)).catch(() => {}); }, []);
+  useEffect(() => {
+    if (ds?.state !== 'running') return;
+    const t = setTimeout(async () => { try { const x = await api('ai-parts/settings'); setDs(x.distill); if (x.distill?.state !== 'running') setSt(x.trained); } catch {} }, 3000);
+    return () => clearTimeout(t);
+  }, [ds]);
+  const run = ds?.state === 'running';
+  return html`<div class="card" style="max-width:860px">
+    <h2 style="margin-top:0">Обучение на ваших выценах и заказах</h2>
+    <p class="sub">Ассистент изучает все выцены и заказы сервиса (перенесённые из Motowarsztat и созданные в CRM): какие работы вы делали, какие детали меняли вместе с ними, сколько стоила и длилась работа. <b>Знания по узлам</b> — ИИ проходит каждую типовую работу и записывает, какие узлы разбираются и какие прокладки, уплотнения и одноразовые болты из-за этого нужны. Данные клиентов не используются.</p>
     ${st ? html`<div class="ai-kpi">
-        <div><b>${st.indexed}</b><span>выцен и заказов изучено</span></div>
+        <div><b>${st.indexed}</b><span>документов изучено${st.orders != null ? ` (заказов ${st.orders}, выцен ${st.quotes})` : ''}</span></div>
         <div><b>${st.jobs}</b><span>видов работ с типовыми деталями</span></div>
-        <div><b>${st.hours}</b><span>работ с нормой часов</span></div></div>
-      <p class="sub">Последнее обучение: ${fdt(st.at.replace('T', ' ').slice(0, 16))}</p>` : html`<p class="sub">Ещё не обучался.</p>`}
-    <button class="btn primary" disabled=${busy} onClick=${train}><${Icon} n="spark" />${busy ? 'Обучаю…' : 'Обучить сейчас'}</button>
+        <div><b>${st.prices ?? '—'}</b><span>работ в прайсе из истории</span></div>
+        <div><b>${st.hours}</b><span>работ с нормой часов</span></div>
+        <div><b>${ds?.knowledge ?? st.knowledge ?? 0}</b><span>работ со знаниями по узлам</span></div></div>
+      <p class="sub">Последнее обучение: ${fdt(String(st.at).replace('T', ' ').slice(0, 16))}</p>` : html`<p class="sub">Ещё не обучался.</p>`}
+    ${run && html`<div class="ai-pl24-st"><span class="ai-dot run-dot"></span>Знания по узлам: ${ds.done} из ${ds.total} работ…</div>`}
+    ${ds?.state === 'done' && html`<p class="sub">Знания по узлам обновлены ${fdt(String(ds.finished).replace('T', ' ').slice(0, 16))}${ds.errors ? ` (с ошибками: ${ds.errors})` : ''}.</p>`}
+    <div class="row-btns"><button class="btn" disabled=${busy || run} onClick=${() => train(false)}><${Icon} n="history" />Обновить статистику</button>
+      <button class="btn primary" disabled=${busy || run} onClick=${() => train(true)}><${Icon} n="spark" />${run ? 'Обучаю…' : 'Глубокое обучение (знания по узлам)'}</button></div>
+  </div>
+  <${AiPriceList} />`;
+}
+
+/** Прайс из истории: цена каждой работы в ваших выценах и заказах, сравнение с «Прайсом работ», перенос выбранных */
+function AiPriceList() {
+  const [d, setD] = useState(null);
+  const [sel, setSel] = useState(new Set());
+  const [q, setQ] = useState('');
+  const [onlyNew, setOnlyNew] = useState(false);
+  const load = async () => { try { setD(await api('ai-parts/price-list')); } catch (e) { setD({ error: e.message }); } };
+  useEffect(() => { load(); }, []);
+  if (!d) return html`<div class="card" style="max-width:860px"><${Loading} /></div>`;
+  if (d.error) return html`<${ErrorBox} error=${d.error} />`;
+  const ql = q.trim().toLowerCase();
+  const rows = d.rows.filter((r) => (!onlyNew || !r.catalog) && (!ql || (r.job_name + ' ' + r.category).toLowerCase().includes(ql)));
+  const toggle = (k) => { const s2 = new Set(sel); s2.has(k) ? s2.delete(k) : s2.add(k); setSel(s2); };
+  const apply = async () => {
+    const r = await act(() => api('ai-parts/price-list/apply', { body: { keys: [...sel] } }));
+    if (r) { toast(`Прайс работ: добавлено ${r.added}, обновлено цен ${r.updated}`); setSel(new Set()); load(); }
+  };
+  const diff = (r) => (r.catalog?.price ? Math.round(((r.recent || r.price) / r.catalog.price - 1) * 100) : null);
+  return html`<div class="card" style="max-width:1100px">
+    <h2 style="margin-top:0">Прайс из истории</h2>
+    <p class="sub">Цена каждой работы в ваших выценах и заказах (брутто за единицу): обычная (медиана), за последние 6 месяцев, разброс и сколько раз делали. Ассистент берёт цену работы из «Прайса работ», а если её там нет — отсюда. Отметьте работы и перенесите в «Прайс работ»: новые добавятся, у существующих обновится цена (по последним 6 месяцам).</p>
+    <div class="row-btns" style="margin:0 0 8px"><input placeholder="Поиск работы" value=${q} onInput=${(e) => setQ(e.target.value)} style="max-width:260px" />
+      <label class="ai-chk"><input type="checkbox" checked=${onlyNew} onChange=${(e) => setOnlyNew(e.target.checked)} /> Только которых нет в прайсе</label>
+      <button class="btn sm" onClick=${() => setSel(new Set(rows.map((r) => r.job_key)))}>Отметить все (${rows.length})</button>
+      <button class="btn sm primary" disabled=${!sel.size} onClick=${apply}><${Icon} n="check" />В прайс работ (${sel.size})</button></div>
+    <div class="tbl-wrap" style="max-height:520px;overflow:auto"><table class="tbl"><thead><tr><th style="width:28px"></th><th>Работа</th><th>Категория</th><th class="r">Раз</th>
+      <th class="r">Обычно</th><th class="r">6 мес.</th><th class="r">Мин–макс</th><th class="r">В прайсе работ</th></tr></thead><tbody>
+      ${rows.map((r) => { const df = diff(r); return html`<tr class="click" onClick=${() => toggle(r.job_key)}>
+        <td><input type="checkbox" checked=${sel.has(r.job_key)} onClick=${(e) => e.stopPropagation()} onChange=${() => toggle(r.job_key)} /></td>
+        <td>${r.job_name}<div class="sub">${r.unit}${r.qty && r.qty !== 1 ? ' × ' + String(r.qty).replace('.', ',') : ''} · последний раз ${r.last_at || '—'}</div></td>
+        <td class="sub">${r.category}</td><td class="r">${r.n}</td><td class="r nowrap">${zl(r.price)}</td><td class="r nowrap">${r.recent ? zl(r.recent) : '—'}</td>
+        <td class="r nowrap sub">${zl(r.price_min)} – ${zl(r.price_max)}</td>
+        <td class="r nowrap">${r.catalog ? html`${zl(r.catalog.price)}${df != null && Math.abs(df) >= 10 ? html`<div class=${'sub ' + (df > 0 ? 'ai-warn' : '')}>история ${df > 0 ? '+' : ''}${df}%</div>` : ''}` : html`<span class="sub">нет</span>`}</td></tr>`; })}
+    </tbody></table></div>
   </div>`;
 }

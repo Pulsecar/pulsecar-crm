@@ -19,11 +19,13 @@
     return [...out.values()];
   }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // спокойный темп (≈2,5 с между запросами); Motowarsztat ограничил запросы (403 / 429) — сразу стоп
   async function get(path) {
-    for (let a = 0; a < 4; a++) {
+    for (let a = 0; a < 3; a++) {
+      await sleep(2500);
       const r = await fetch('/api-v2/' + path, { headers: { Accept: 'application/ld+json' } });
+      if (r.status === 403 || r.status === 429) throw new Error('Motowarsztat ограничил запросы (' + r.status + ') — перенос остановлен, повторите позже');
       if (r.ok) return r.json();
-      await sleep(1500 * (a + 1));
     }
     throw new Error('MW ' + path);
   }
@@ -68,7 +70,6 @@
           st.sent += items.length; st.created += r.created; st.updated += r.updated; st.skipped += r.skipped; st.failed += r.failed;
           if (r.errors?.length && st.errors.length < 10) st.errors.push(...r.errors.slice(0, 10 - st.errors.length));
           if (items.length < per) break;
-          await sleep(150);
         }
       }
     } catch (e) { log.error = String(e.message || e); }
