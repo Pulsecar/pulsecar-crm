@@ -269,6 +269,13 @@ try {
     assert.equal((await req('orders/' + q7.id)).internal_note, 'Клиент просит позвонить');
     assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
   });
+  await t('разбор ответа Claude: обёртка { parts_plan: {...} }, список строкой', async () => {
+    const { normPlan } = await import('../src/ai-parts/pipeline.js');
+    assert.equal(normPlan({ parts_plan: { parts: [{ key: 'a', name_pl: 'Tarcza', oe: [], analogs: [] }], labor: [{ job: 'W', hours: 1 }] } }).parts[0].name_pl, 'Tarcza');
+    assert.equal(normPlan({ parts_plan: JSON.stringify({ parts: [{ name_pl: 'X' }] }) }).parts.length, 1);
+    assert.equal(normPlan({ parts: '[{"name_pl":"Y","analogs":"[]"}]' }).parts[0].name_pl, 'Y');
+    assert.equal(normPlan({}).parts.length, 0);
+  });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });
     const q2 = await req('orders', { body: { kind: 'quote', customer_id: c2.id } });

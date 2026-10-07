@@ -372,6 +372,13 @@ export function normPlan(d) {
     return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : [];
   };
   d = d && typeof d === 'object' ? d : {};
+  // ответ, обёрнутый ещё раз: { parts_plan: { parts: [...] } } / { input: {...} } / строка JSON
+  for (let i = 0; i < 3 && !d.parts && !d.labor; i++) {
+    const inner = Object.values(d).map((v) => { if (typeof v === 'string') { try { return JSON.parse(v); } catch { return null; } } return v; })
+      .find((v) => v && typeof v === 'object' && !Array.isArray(v) && (v.parts || v.labor));
+    if (!inner) break;
+    d = inner;
+  }
   let parts = arr(d.parts);
   if (!parts.length) for (const k of ['items', 'part_list', 'parts_list', 'positions']) if (d[k]) { parts = arr(d[k]); if (parts.length) break; }
   parts = parts.filter((p) => p.name_pl || p.name).map((p) => ({ ...p, name_pl: p.name_pl || p.name, key: p.key || String(p.name_pl || p.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40), oe: arr(p.oe), analogs: arr(p.analogs) }));

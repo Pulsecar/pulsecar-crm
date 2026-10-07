@@ -30,7 +30,15 @@ export async function callTool({ system, user, tool, maxTokens = 8000, timeout =
       if (!r.ok) throw new HttpError(502, `Claude API ${r.status}: ${j.error?.message || 'ошибка'}`);
       const block = (j.content || []).find((b) => b.type === 'tool_use');
       if (!block) throw new HttpError(502, 'Claude не вернул результат');
-      return { data: block.input, usage: j.usage || {}, stop: j.stop_reason || null };
+      // модель иногда оборачивает ответ ещё раз: { <имя инструмента>: {...} } или кладёт его строкой JSON
+      let data = block.input || {};
+      const keys = Object.keys(data);
+      if (keys.length === 1 && (keys[0] === tool.name || !(keys[0] in (tool.input_schema?.properties || {})))) {
+        let v = data[keys[0]];
+        if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+        if (v && typeof v === 'object' && !Array.isArray(v)) data = v;
+      }
+      return { data, usage: j.usage || {}, stop: j.stop_reason || null };
     } catch (e) {
       if (e instanceof HttpError) throw e;
       last = e;
