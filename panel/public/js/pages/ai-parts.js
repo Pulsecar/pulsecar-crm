@@ -81,16 +81,20 @@ export function AiModal({ o, ai, onClose, reload }) {
     if (!payload || ecatFor === key) return;
     setEcatFor(key);
     const reqId = Math.random().toString(36).slice(2);
-    const onMsg = async (e) => {
+    let partial = [], sent = false;
+    const send = async (results, error) => {
+      if (sent) return; sent = true; clearTimeout(timer); removeEventListener('message', onMsg);
+      setEcatMsg(error || '');
+      await api(`ai-parts/jobs/${job.id}/${kind}`, { body: { results, error } }).catch(() => {});
+    };
+    const onMsg = (e) => {
       const m = e.data;
       if (e.source !== window || m?.source !== 'pulsecar-ext' || m.reqId !== reqId) return;
-      if (m.type === 'pl24-progress') setEcatMsg(m.text);
-      if (m.type === kind + '-result') {
-        removeEventListener('message', onMsg);
-        setEcatMsg(m.ok ? '' : m.error || '');
-        await api(`ai-parts/jobs/${job.id}/${kind}`, { body: { results: m.results || [], error: m.ok ? null : m.error } }).catch(() => {});
-      }
+      if (m.type === 'pl24-progress') { setEcatMsg(m.text); if (Array.isArray(m.partial)) partial = m.partial; }
+      if (m.type === kind + '-result') send(m.results || partial, m.ok ? null : m.error);
     };
+    // расширение не ответило вовремя — отдаём то, что успело найти, подбор идёт дальше
+    const timer = setTimeout(() => send(partial, (kind === 'allegro' ? 'Allegro' : 'e-Catalog') + ' ответил не полностью — взято то, что успели найти'), kind === 'allegro' ? 225_000 : 140_000);
     addEventListener('message', onMsg);
     window.postMessage({ source: 'pulsecar-crm', type: kind, reqId, job: payload }, location.origin);
   }, [job]);
@@ -110,7 +114,7 @@ export function AiModal({ o, ai, onClose, reload }) {
   // partslink24 через расширение Pulsecar (вкладка менеджера, его вход, по одной детали с паузами)
   const extV = document.documentElement.dataset.pulsecarExt || '';
   const extN = extV ? extV.split('.').map(Number).reduce((a, x, i) => a + x * [10000, 100, 1][i], 0) : 0;
-  const extOk = extN >= 10500, extAllegro = extN >= 10600;
+  const extOk = extN >= 10500, extAllegro = extN >= 10600; // 1.6.1+ — с таймаутами
   const [pl, setPl] = useState(null);
   const runPl24 = async () => {
     if (!f.text.trim()) return toast('Сначала напишите, что нужно', 'error');

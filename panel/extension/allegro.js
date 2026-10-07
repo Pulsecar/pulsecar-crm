@@ -7,11 +7,12 @@
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   async function waitLoad(tabId, timeout = 25000) {
     const until = Date.now() + timeout;
-    while (Date.now() < until) { const t = await chrome.tabs.get(tabId); if (t.status === 'complete') return; await wait(300); }
+    while (Date.now() < until) { const t = await within(chrome.tabs.get(tabId).catch(() => null), 3000, null); if (!t || t.status === 'complete') return; await wait(300); }
   }
+  const within = (p, ms, dflt) => Promise.race([p, new Promise((r) => setTimeout(() => r(dflt), ms))]);
   async function run(tabId, func, args = []) {
-    const [r] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
-    return r?.result;
+    const res = await within(chrome.scripting.executeScript({ target: { tabId }, func, args }).catch(() => null), 10000, null);
+    return res?.[0]?.result;
   }
   function pageState() {
     const txt = (document.body?.innerText || '').slice(0, 4000);
@@ -55,14 +56,14 @@
     const results = [];
     for (const [i, x] of queries.entries()) {
       if (i) await pause();
-      progress(`Allegro: ${x.q} (${i + 1} из ${queries.length})…`);
+      progress(`Allegro: ${x.q} (${i + 1} из ${queries.length})…`, results);
       await chrome.tabs.update(tabId, { url: `https://allegro.pl/listing?string=${encodeURIComponent(x.q)}&stan=nowe` });
       await waitLoad(tabId);
       let r = { items: [] };
       for (let k = 0; k < 16; k++) {
         await wait(600);
         const st = await run(tabId, pageState);
-        if (st !== 'ok') return { ok: false, stop: st, results, error: 'Allegro показал проверку «я не робот» — пройдите её в открытой вкладке и запустите подбор ещё раз' };
+        if (st && st !== 'ok') return { ok: false, stop: st, results, error: 'Allegro показал проверку «я не робот» — пройдите её в открытой вкладке и запустите подбор ещё раз' };
         r = (await run(tabId, readAllegro, [30])) || { items: [] };
         if (r.items.length || r.empty) break;
       }

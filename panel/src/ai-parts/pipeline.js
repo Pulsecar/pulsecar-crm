@@ -144,7 +144,9 @@ async function pick(jobId) {
   const pool = async (items, n, fn) => { let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; await fn(items[k]); } })); };
   // 4а. Аналоги по OE из Inter Cars e-Catalog (через расширение во вкладке менеджера): ждём ответа страницы до 150 с
   const ecatParts = new Set();
-  const oeList = [...new Set(parts.flatMap((p) => (p.oe || []).map((x) => norm(x.number)).filter((x) => x.length >= 5)))].slice(0, 15);
+  // OE — номер производителя (есть цифры, не название масла); масла и жидкости ищем по артикулам, не по OE
+  const oeOk = (x) => x.length >= 5 && (x.match(/\d/g) || []).length >= 4 && !/\d+W\d+/.test(x);
+  const oeList = [...new Set(parts.filter((p) => p.unit !== 'l').flatMap((p) => (p.oe || []).map((x) => norm(x.number)).filter(oeOk)))].slice(0, 15);
   if (req.ext && oeList.length && !cancelled()) {
     step('prices', 'run', `ищу аналоги по ${oeList.length} OE-номерам в Inter Cars e-Catalog (окно подбора не закрывайте)…`);
     withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ wait: 'ecat', need: oeList }), jobId));
@@ -272,7 +274,7 @@ async function pick(jobId) {
   if (noStock.length && req.extAllegro && !cancelled()) {
     const queries = noStock.slice(0, 12).map(({ pi }) => {
       const p = parts[pi];
-      const oe = (p.oe || []).map((x) => String(x.number || '').toUpperCase().replace(/[^A-Z0-9]/g, '')).find((x) => x.length >= 5);
+      const oe = p.unit === 'l' ? null : (p.oe || []).map((x) => String(x.number || '').toUpperCase().replace(/[^A-Z0-9]/g, '')).find(oeOk);
       return { key: p.key, q: oe || [p.name_pl, vehicle.make, String(vehicle.model || '').split(/\s+/)[0], vehicle.capacity_ccm && (Math.round(vehicle.capacity_ccm / 100) / 10).toFixed(1)].filter(Boolean).join(' ') };
     });
     step('add', 'run', `нет в наличии в Inter Cars: ${noStock.map(({ pi }) => parts[pi].name_pl).join(', ')} — ищу на Allegro (окно подбора не закрывайте)…`);
@@ -410,6 +412,7 @@ A service advisor describes the job for a specific vehicle. Produce the list of 
 
 Rules:
 - Expand standard jobs into parts (e.g. "rozrząd/ГРМ" → timing belt kit (+ water pump if the engine's pump is driven by the belt), "ТО/service" → oil, oil filter, air filter, cabin filter, drain plug washer...). Use workshop_kits when given.
+- Oils and fluids (unit "l"): leave "oe" EMPTY unless there is a real OE part number of the fluid (e.g. "83 21 2 365 946"); never put a product name or viscosity there. List the oil products themselves in "analogs" with their exact manufacturer article numbers (e.g. MOTUL "109474" / "17603", CASTROL "15F0FB"), several package sizes when you know them.
 - Quantities from the engine: engine oil = factory capacity with filter in litres (unit "l"), spark plugs = number of cylinders, glow plugs for diesels instead of spark plugs (always with a check note). Explain each quantity in qty_note (Russian).
 - OE numbers: take them from partslink24_rows, workshop_verified_numbers and workshop_history_same_model first (from: "partslink24" / "history"). Add OE numbers from your own knowledge only when you are reasonably sure for this exact engine/model (from: "knowledge"); set oe_sure=true only if you are certain. Never invent numbers.
 - Analogs: for every part list 4–10 real aftermarket cross-references of that OE (exact catalogue article numbers as printed by the manufacturer / TecDoc) from DIFFERENT manufacturers and price tiers that are sold in Poland by Inter Cars (e.g. economy: Hepu, Filtron, Maxgear, Febi; middle: SKF, Gates, Contitech, Mann, Bosch, NGK, Mahle, TRW, Lemförder; premium: INA, LuK, Sachs, Brembo, Denso, Bilstein). Only numbers you actually know; they will be verified in the Inter Cars catalogue and non-existing ones dropped. Respect manager_comment and workshop_rules_text (e.g. "oil only Castrol" → only Castrol oils as analogs) and workshop_brand_rules (preferred brands per level eco/mid; never propose blacklisted brands).

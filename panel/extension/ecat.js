@@ -6,11 +6,12 @@
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   async function waitLoad(tabId, timeout = 20000) {
     const until = Date.now() + timeout;
-    while (Date.now() < until) { const t = await chrome.tabs.get(tabId); if (t.status === 'complete') return; await wait(300); }
+    while (Date.now() < until) { const t = await within(chrome.tabs.get(tabId).catch(() => null), 3000, null); if (!t || t.status === 'complete') return; await wait(300); }
   }
+  const within = (p, ms, dflt) => Promise.race([p, new Promise((r) => setTimeout(() => r(dflt), ms))]);
   async function run(tabId, func, args = []) {
-    const [r] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
-    return r?.result;
+    const res = await within(chrome.scripting.executeScript({ target: { tabId }, func, args }).catch(() => null), 10000, null);
+    return res?.[0]?.result;
   }
   function pageState() {
     const txt = (document.body?.innerText || '').slice(0, 4000);
@@ -47,14 +48,14 @@
     const results = [];
     for (const [i, oe] of oes.entries()) {
       if (i) await pause();
-      progress(`Inter Cars: аналоги для OE ${oe} (${i + 1} из ${oes.length})…`);
+      progress(`Inter Cars: аналоги для OE ${oe} (${i + 1} из ${oes.length})…`, results);
       await chrome.tabs.update(tabId, { url: `${base}/pl/Pe%C5%82na-oferta/c/tecdoc?q=${encodeURIComponent(oe)}%3Adefault&initialSearch=true` });
       await waitLoad(tabId);
       let r = { items: [] };
       for (let k = 0; k < 16; k++) {
         await wait(500);
         const st = await run(tabId, pageState);
-        if (st !== 'ok') return { ok: false, stop: st, results, error: st === 'login' ? 'Войдите в Inter Cars e-Catalog в открытой вкладке и запустите подбор ещё раз' : 'e-Catalog показал проверку (капча) — пройдите её и запустите ещё раз' };
+        if (st && st !== 'ok') return { ok: false, stop: st, results, error: st === 'login' ? 'Войдите в Inter Cars e-Catalog в открытой вкладке и запустите подбор ещё раз' : 'e-Catalog показал проверку (капча) — пройдите её и запустите ещё раз' };
         r = (await run(tabId, readEcat, [25])) || { items: [] };
         if (r.items.length || r.empty) break;
       }

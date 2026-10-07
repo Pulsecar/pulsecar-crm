@@ -206,7 +206,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'ecat') {
     conf().then(async (c) => {
       if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel || !sender.tab?.id) return reply({ ok: false, error: 'e-Catalog доступен только из CRM ' + c.panel });
-      const progress = (text) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text }).catch(() => {});
+      const progress = (text, partial) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text, partial }).catch(() => {});
       try { reply(await globalThis.ecatRun(msg.job || {}, progress)); } catch (e) { reply({ ok: false, error: 'Inter Cars e-Catalog: ' + e.message }); }
     });
     return true;
@@ -215,7 +215,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'allegro') {
     conf().then(async (c) => {
       if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel || !sender.tab?.id) return reply({ ok: false, error: 'Allegro-поиск доступен только из CRM ' + c.panel });
-      const progress = (text) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text }).catch(() => {});
+      const progress = (text, partial) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text, partial }).catch(() => {});
       try { reply(await globalThis.allegroRun(msg.job || {}, progress)); } catch (e) { reply({ ok: false, error: 'Allegro: ' + e.message }); }
     });
     return true;
