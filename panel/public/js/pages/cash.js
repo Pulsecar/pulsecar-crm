@@ -78,34 +78,69 @@ export default function Cash() {
 }
 
 const SOURCE = { order: 'Оплата по заказу', storage: 'Оплата хранения / парковки', transfer: 'Перенос между кассами', income: 'Приход (прочий)', expense: 'Расход' };
-/** Карточка документа кассы: откуда деньги / на что расход, комментарий, печать, удаление (админ) */
+/** Карточка документа кассы: откуда деньги / на что расход, правка (комментарий — касса; сумма, дата, касса, способ, клиент, заказ — админ), печать, удаление (админ) */
 function CashDoc({ id, onClose, onChanged }) {
   const app = useApp();
   const { data: p } = useData('cash/' + id, [id]);
-  const [note, setNote] = useState(null);
+  const { data: regs } = useData('cash/registers');
+  const [f, setF] = useState(null);
+  const [cq, setCq] = useState(null);
+  const [found, setFound] = useState([]);
   if (!p) return html`<${Modal} title="Документ кассы" onClose=${onClose}><${Loading} /></${Modal}>`;
-  const n = note ?? p.note ?? '';
   const canEdit = app.perms['cash.edit'];
   const isAdmin = app.user.role === 'admin';
+  const full = isAdmin && p.method !== 'points';
+  const init = { note: p.note || '', amount: p.amount, created_at: String(p.created_at || '').replace(' ', 'T').slice(0, 16), register_id: p.register_id || '', method: p.method,
+    customer_id: p.customer_id || null, customer_name: p.customer_name || '', order_number: p.order_number || '' };
+  const v = f || init;
+  const set = (patch) => setF({ ...v, ...patch });
+  const diff = {};
+  if (v.note.trim() !== (p.note || '').trim()) diff.note = v.note;
+  if (full) {
+    if (Number(v.amount) !== p.amount) diff.amount = Number(v.amount);
+    if (v.created_at !== init.created_at) diff.created_at = v.created_at.replace('T', ' ');
+    if (String(v.register_id) !== String(init.register_id) && !p.transfer_id) diff.register_id = Number(v.register_id);
+    if (v.method !== p.method) diff.method = v.method;
+    if ((v.customer_id || null) !== (p.customer_id || null)) diff.customer_id = v.customer_id;
+    if (v.order_number.trim() !== (p.order_number || '') && !p.transfer_id) diff.order_number = v.order_number.trim();
+  }
+  const dirty = Object.keys(diff).length > 0 && (diff.note === undefined || diff.note.trim());
+  const save = async () => { const r = await act(() => api('cash/' + p.id, { method: 'PUT', body: diff }), 'Сохранено'); if (r) onChanged(); };
+  const findCust = async (q) => { setCq(q); if (q.trim().length < 2) return setFound([]); try { const r = await api('customers?q=' + encodeURIComponent(q.trim())); setFound((r.rows || r || []).slice(0, 8)); } catch { setFound([]); } };
   const title = p.number || (p.direction === 'in' ? `Оплата: ${METHOD[p.method] || p.method}` : 'Расход');
   return html`<${Modal} title=${`${title} · ${p.direction === 'in' ? 'приход' : 'расход'} ${zl(p.amount)}`} onClose=${onClose} foot=${html`
       ${isAdmin && p.method !== 'points' && html`<${ConfirmButton} cls="btn danger" label=${p.order_id ? 'Удалить? Оплата уйдёт из заказа' : p.transfer_id ? 'Удалить обе части переноса?' : 'Удалить документ?'}
         onConfirm=${async () => { await act(() => api('cash/' + p.id, { method: 'DELETE' }), 'Документ удалён'); onChanged(); }}><${Icon} n="trash" />Удалить</${ConfirmButton}>`}
       <span style="flex:1"></span>
       ${p.number && html`<a class="btn" href=${'/crm-api/print/cash/' + p.id} target="_blank" rel="noopener"><${Icon} n="print" />Печать ${p.number.slice(0, 2)}</a>`}
-      ${canEdit && html`<button class="btn primary" disabled=${n.trim() === (p.note || '').trim() || !n.trim()} onClick=${async () => { await act(() => api('cash/' + p.id, { method: 'PUT', body: { note: n } }), 'Сохранено'); onChanged(); }}>Сохранить</button>`}`}>
+      ${canEdit && html`<button class="btn primary" disabled=${!dirty} onClick=${save}>Сохранить</button>`}`}>
     <div class="kv-list" style="margin-bottom:12px">
       <span>Откуда / на что</span><b>${SOURCE[p.source]}${p.source === 'order' ? html` — <a href=${'#/orders/' + p.order_id} onClick=${onClose}>${p.order_number}</a> <span class=${p.order_final ? 'pos' : 'muted'}>(${p.order_status || '—'}${p.order_final ? ', заказ закрыт' : ''})</span>` : ''}
         ${p.source === 'storage' && p.storage ? html` — <a href="#/storage" onClick=${onClose}>${p.storage.number}</a>` : ''}${p.source === 'transfer' ? html` — пара ${p.pair_number || ''} (${p.pair_register || ''})` : ''}</b>
-      <span>Касса</span><b>${p.register_name || '—'}</b>
+      ${!full && html`<span>Касса</span><b>${p.register_name || '—'}</b>
       <span>Способ</span><b>${METHOD[p.method] || p.method}</b>
       <span>Сумма</span><b class=${p.direction === 'in' ? 'pos' : 'neg'}>${p.direction === 'in' ? '+' : '−'}${zl(p.amount)}</b>
       <span>Дата</span><b>${fdt(p.created_at)}</b>
-      ${p.customer_name ? html`<span>Клиент</span><b>${p.customer_name} <span class="sub">${p.customer_phone || ''}</span></b>` : ''}
+      ${p.customer_name ? html`<span>Клиент</span><b>${p.customer_name} <span class="sub">${p.customer_phone || ''}</span></b>` : ''}`}
       <span>Кто провёл</span><b>${p.staff || '—'}</b>
     </div>
+    ${full && html`<div class="grid g2">
+        <label class="f">Сумма, zł<input type="number" step="0.01" min="0.01" value=${v.amount} onInput=${(e) => set({ amount: e.target.value })} /></label>
+        <label class="f">Дата и время<input type="datetime-local" value=${v.created_at} onInput=${(e) => set({ created_at: e.target.value })} /></label>
+        <label class="f">Касса<select value=${v.register_id} disabled=${!!p.transfer_id} onChange=${(e) => set({ register_id: e.target.value })}>
+          ${!v.register_id && html`<option value="">—</option>`}${(regs || []).map((r) => html`<option value=${r.id}>${r.name}${r.active ? '' : ' (не используется)'}</option>`)}</select></label>
+        <label class="f">Способ<select value=${v.method} onChange=${(e) => set({ method: e.target.value })}>${['cash', 'card', 'blik', 'transfer'].map((m) => html`<option value=${m}>${METHOD[m]}</option>`)}</select></label>
+        ${!p.transfer_id && html`<label class="f">Заказ (номер)<input value=${v.order_number} onInput=${(e) => set({ order_number: e.target.value })} placeholder="напр. ZL 12/10/2026 — пусто, если не к заказу" /></label>`}
+        <div class="f" style="position:relative">Клиент
+          ${cq === null ? html`<div class="row" style="gap:6px"><b class="grow">${v.customer_name || '—'}</b><button class="btn sm" onClick=${() => findCust('')}>Изменить</button>
+            ${v.customer_id && html`<button class="btn sm" onClick=${() => set({ customer_id: null, customer_name: '' })}>Убрать</button>`}</div>`
+          : html`<input autofocus value=${cq} onInput=${(e) => findCust(e.target.value)} placeholder="Имя или телефон" />
+            ${found.length > 0 && html`<div class="ac-list">${found.map((c) => html`<button class="ac-item" style="display:block;width:100%;text-align:left;background:none;border-left:0;border-right:0;border-top:0;color:inherit;font:inherit" onClick=${() => { set({ customer_id: c.id, customer_name: c.name }); setCq(null); setFound([]); }}>${c.name} <span class="sub">${c.phone || ''}</span></button>`)}</div>`}`}</div>
+      </div>
+      ${p.transfer_id && html`<div class="muted small">Перенос между кассами: сумма и дата меняются у обеих частей, кассы — нет.</div>`}
+      ${p.order_id && html`<div class="muted small">Оплата по заказу: после сохранения сумма оплаты в заказе пересчитается.</div>`}`}
     <label class="f">${p.direction === 'out' ? 'На что потрачено (комментарий)' : 'Назначение / комментарий'}
-      <textarea rows="3" value=${n} disabled=${!canEdit} onInput=${(e) => setNote(e.target.value)} placeholder=${p.direction === 'out' ? 'Например: закупка масла в Inter Cars, аренда, хозтовары…' : 'Например: оплата по заказу, предоплата…'}></textarea></label>
-    ${!isAdmin && html`<div class="muted small">Удалить документ может только администратор.</div>`}
+      <textarea rows="3" value=${v.note} disabled=${!canEdit} onInput=${(e) => set({ note: e.target.value })} placeholder=${p.direction === 'out' ? 'Например: закупка масла в Inter Cars, аренда, хозтовары…' : 'Например: оплата по заказу, предоплата…'}></textarea></label>
+    ${!isAdmin && html`<div class="muted small">Сумму, дату, кассу и способ меняет и документ удаляет только администратор.</div>`}
   </${Modal}>`;
 }

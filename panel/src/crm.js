@@ -1351,15 +1351,69 @@ crm.get('/cash/:id', (req, res) => {
   const source = p.transfer_id ? 'transfer' : p.order_id ? 'order' : st ? 'storage' : p.direction === 'in' ? 'income' : 'expense';
   res.json({ ...p, source, storage: st });
 });
+/** Правка документа кассы. Комментарий — сотрудник с правом «касса»; касса, способ, сумма, дата, клиент, заказ — только администратор.
+ *  Оплата заказа: суммы обоих заказов (старого и нового) пересчитываются; перенос между кассами — сумма и дата меняются у обеих частей. */
 crm.put('/cash/:id', (req, res) => {
   const s = who(req, 'cash.edit');
   const p = one('SELECT * FROM payments WHERE id = ?', Number(req.params.id));
   if (!p) throw new HttpError(404, 'Документ не найден');
-  const note = String(req.body?.note ?? '').trim().slice(0, 500);
-  if (!note) throw new HttpError(400, 'Напишите назначение / комментарий');
-  run('UPDATE payments SET note = ? WHERE id = ?', note, p.id);
-  log('payment', p.id, 'update', { note }, s.name);
-  res.json({ ok: true });
+  const b = req.body || {};
+  const ch = {};
+  if (b.note !== undefined) {
+    const note = String(b.note ?? '').trim().slice(0, 500);
+    if (!note) throw new HttpError(400, 'Напишите назначение / комментарий');
+    if (note !== (p.note || '')) ch.note = note;
+  }
+  const adminKeys = ['amount', 'created_at', 'register_id', 'method', 'customer_id', 'order_number'].filter((k) => b[k] !== undefined);
+  if (adminKeys.length) {
+    if (s.role !== 'admin') throw new HttpError(403, 'Сумму, дату, кассу, способ, клиента и заказ меняет только администратор');
+    if (p.method === 'points') throw new HttpError(400, 'Списание баллов меняется корректировкой баллов у клиента');
+    if (b.amount !== undefined) { const v = round2(b.amount); if (!(v > 0)) throw new HttpError(400, 'Сумма должна быть больше 0'); if (v !== p.amount) ch.amount = v; }
+    if (b.created_at !== undefined) {
+      const v = String(b.created_at || '').replace('T', ' ').slice(0, 19);
+      if (!/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(v)) throw new HttpError(400, 'Неверная дата');
+      const full = v.length === 10 ? v + ' 00:00:00' : v.length === 16 ? v + ':00' : v;
+      if (full !== p.created_at) ch.created_at = full;
+    }
+    if (b.register_id !== undefined && Number(b.register_id) !== p.register_id) {
+      if (p.transfer_id) throw new HttpError(400, 'У переноса между кассами кассы не меняются — удалите и сделайте перенос заново');
+      const r = one('SELECT * FROM cash_registers WHERE id = ?', Number(b.register_id));
+      if (!r) throw new HttpError(400, 'Касса не найдена');
+      ch.register_id = r.id;
+    }
+    if (b.method !== undefined && b.method !== p.method) {
+      if (!PAY_METHODS.includes(b.method)) throw new HttpError(400, 'Неизвестный способ оплаты');
+      ch.method = b.method;
+      if (b.method === 'cash' && !p.number) ch.number = nextNumber(p.direction === 'in' ? 'KP' : 'KW');
+    }
+    if (b.customer_id !== undefined) {
+      const v = b.customer_id ? Number(b.customer_id) : null;
+      if (v && !one('SELECT 1 FROM customers WHERE id = ?', v)) throw new HttpError(400, 'Клиент не найден');
+      if (v !== p.customer_id) ch.customer_id = v;
+    }
+    if (b.order_number !== undefined) {
+      if (p.transfer_id) throw new HttpError(400, 'Перенос между кассами нельзя привязать к заказу');
+      const num = String(b.order_number || '').trim();
+      const o = num ? one('SELECT id, customer_id FROM orders WHERE number = ? COLLATE NOCASE', num) : null;
+      if (num && !o) throw new HttpError(400, `Заказ ${num} не найден`);
+      const v = o ? o.id : null;
+      if (v !== p.order_id) { ch.order_id = v; if (o?.customer_id && b.customer_id === undefined) ch.customer_id = o.customer_id; }
+    }
+  }
+  if (!Object.keys(ch).length) return res.json({ ok: true, changed: 0 });
+  tx(() => {
+    run(`UPDATE payments SET ${Object.keys(ch).map((k) => k + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(ch), p.id);
+    // вторая часть переноса — та же сумма и дата
+    if (p.transfer_id && (ch.amount !== undefined || ch.created_at !== undefined)) {
+      const pair = {}; if (ch.amount !== undefined) pair.amount = ch.amount; if (ch.created_at !== undefined) pair.created_at = ch.created_at;
+      run(`UPDATE payments SET ${Object.keys(pair).map((k) => k + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(pair), p.transfer_id);
+    }
+    for (const oid of new Set([p.order_id, ch.order_id].filter(Boolean))) recalc(oid);
+  });
+  const was = Object.fromEntries(Object.keys(ch).map((k) => [k, p[k] ?? null]));
+  log('payment', p.id, 'update', { was, now: ch }, s.name);
+  for (const oid of new Set([p.order_id, ch.order_id].filter(Boolean))) log('order', oid, 'payment_edit', { number: p.number, was, now: ch }, s.name);
+  res.json({ ok: true, changed: Object.keys(ch).length });
 });
 /** Удалить документ кассы (только администратор): оплата заказа — сумма заказа пересчитывается, перенос — удаляются обе части */
 crm.delete('/cash/:id', (req, res) => {

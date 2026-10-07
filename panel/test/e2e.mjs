@@ -433,6 +433,14 @@ try {
   assert.equal(kwd.note, 'Zakup oleju Inter Cars'); assert.equal(kwd.source, 'expense');
   const payRow = cashL.rows.find((r) => r.order_id === po.id && r.method === 'cash');
   assert.equal(ok(await req('/crm-api/cash/' + payRow.id), 'pay get').source, 'order');
+  // правка документа (админ): сумма → оплата заказа пересчитывается; дата, способ, касса
+  const paidBefore = ok(await req('/crm-api/orders/' + po.id), 'po before').paid;
+  ok(await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { amount: payRow.amount + 10, created_at: '2026-10-05 09:30', method: 'card' } }), 'pay edit');
+  const payE = ok(await req('/crm-api/cash/' + payRow.id), 'pay edited');
+  assert.equal(payE.amount, payRow.amount + 10); assert.equal(payE.created_at, '2026-10-05 09:30:00'); assert.equal(payE.method, 'card');
+  assert.equal(ok(await req('/crm-api/orders/' + po.id), 'po after').paid, paidBefore + 10, 'оплата заказа пересчитана после правки суммы');
+  assert.equal((await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { amount: 0 } })).status, 400);
+  assert.equal((await req('/crm-api/cash/' + payRow.id, { method: 'PUT', body: { order_number: 'NIE-MA-TAKIEGO' } })).status, 400);
   ok(await req('/crm-api/cash/' + payRow.id, { method: 'DELETE' }), 'pay delete');
   assert.equal(ok(await req('/crm-api/orders/' + po.id), 'po get').paid, 300, 'заказ пересчитан после удаления KP');
   ok(await req('/crm-api/cash/' + kwRow.id, { method: 'DELETE' }), 'kw delete');
