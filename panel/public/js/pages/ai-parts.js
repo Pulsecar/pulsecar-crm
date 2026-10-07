@@ -65,6 +65,27 @@ export function AiModal({ o, ai, onClose, reload }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const noVin = !car?.vin || car.vin.length !== 17;
 
+  // подбор ждёт страницу: аналоги по OE ищем в Inter Cars e-Catalog через расширение (один раз на подбор)
+  const [ecatFor, setEcatFor] = useState(null);
+  const [ecatMsg, setEcatMsg] = useState('');
+  useEffect(() => {
+    if (!job || job.status !== 'waiting' || !job.result?.need || ecatFor === job.id) return;
+    setEcatFor(job.id);
+    const reqId = Math.random().toString(36).slice(2);
+    const onMsg = async (e) => {
+      const m = e.data;
+      if (e.source !== window || m?.source !== 'pulsecar-ext' || m.reqId !== reqId) return;
+      if (m.type === 'pl24-progress') setEcatMsg(m.text);
+      if (m.type === 'ecat-result') {
+        removeEventListener('message', onMsg);
+        setEcatMsg(m.ok ? '' : m.error || '');
+        await api(`ai-parts/jobs/${job.id}/ecat`, { body: { results: m.results || [], error: m.ok ? null : m.error } }).catch(() => {});
+      }
+    };
+    addEventListener('message', onMsg);
+    window.postMessage({ source: 'pulsecar-crm', type: 'ecat', reqId, job: { oes: job.result.need } }, location.origin);
+  }, [job]);
+
   useEffect(() => {
     if (!job || ['done', 'error', 'cancelled'].includes(job.status)) return;
     const t = setTimeout(async () => {
@@ -103,7 +124,7 @@ export function AiModal({ o, ai, onClose, reload }) {
   };
 
   const start = async () => {
-    const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: f }));
+    const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: { ...f, ext: extOk } }));
     if (r) setJob({ id: r.id, status: 'queued', steps: d.steps.map((s) => ({ key: s.key, state: 'wait' })) });
   };
   const label = Object.fromEntries((d?.steps || []).map((s) => [s.key, s.label]));
@@ -142,6 +163,7 @@ export function AiModal({ o, ai, onClose, reload }) {
       <ol class="ai-steps">${(job.steps || []).map((s) => html`<li class=${s.state}>
         <span class="ai-dot">${s.state === 'ok' ? html`<${Icon} n="check" />` : s.state === 'error' ? html`<${Icon} n="x" />` : ''}</span>
         <div><b>${label[s.key]}</b>${s.info && html`<div class="sub">${s.info}</div>`}</div></li>`)}</ol>
+      ${ecatMsg && html`<div class="ai-pl24-st"><span class="ai-dot run-dot"></span>${ecatMsg}</div>`}
       ${job.status === 'error' && html`<div class="card err small">${job.error || 'Подбор не удался'} — позиции не добавлены.</div>`}
     `}
     ${!!d?.jobs?.length && html`<details class="ai-hist"><summary>История подборов (${d.jobs.length})</summary>

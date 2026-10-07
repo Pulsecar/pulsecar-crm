@@ -51,7 +51,8 @@
     "https://allegro.pl/*",
     "https://*.allegro.pl/*",
     "http://127.0.0.1/*",
-    "https://www.partslink24.com/*"
+    "https://www.partslink24.com/*",
+    "https://*.e-cat.intercars.eu/*"
   ],
   "content_scripts": [
     {

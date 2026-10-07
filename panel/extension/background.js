@@ -1,6 +1,6 @@
 // Pulsecar: фон расширения — запросы к CRM с ключом сотрудника (без CORS), проверка обновлений,
 // сайты поставщиков, включённые пользователем, и меню по правому клику.
-if (typeof importScripts === 'function') importScripts('i18n.js', 'pl24.js');
+if (typeof importScripts === 'function') importScripts('i18n.js', 'pl24.js', 'ecat.js');
 if (!globalThis.pcT) Object.assign(globalThis, { pcT: (s) => s, pcOnLang: () => {}, pcI18nReady: Promise.resolve() });
 const DEF_PANEL = 'https://panel.pulsecar.tech';
 const VERSION = chrome.runtime.getManifest().version;
@@ -199,6 +199,15 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel || !sender.tab?.id) return reply({ ok: false, error: 'partslink24 доступен только из CRM ' + c.panel });
       const progress = (text) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text }).catch(() => {});
       try { reply(await globalThis.pl24Run(msg.job || {}, progress)); } catch (e) { reply({ ok: false, error: 'partslink24: ' + e.message }); }
+    });
+    return true;
+  }
+  // ИИ-запчастист: аналоги по OE в Inter Cars e-Catalog менеджера — только по запросу страницы самой CRM
+  if (msg?.type === 'ecat') {
+    conf().then(async (c) => {
+      if (!sender.origin || sender.origin.replace(/\/+$/, '') !== c.panel || !sender.tab?.id) return reply({ ok: false, error: 'e-Catalog доступен только из CRM ' + c.panel });
+      const progress = (text) => chrome.tabs.sendMessage(sender.tab.id, { type: 'pl24-progress', reqId: msg.reqId, text }).catch(() => {});
+      try { reply(await globalThis.ecatRun(msg.job || {}, progress)); } catch (e) { reply({ ok: false, error: 'Inter Cars e-Catalog: ' + e.message }); }
     });
     return true;
   }

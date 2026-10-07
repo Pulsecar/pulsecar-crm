@@ -117,8 +117,56 @@ async function pick(jobId) {
   const found = [];
   let checked = 0, hits = 0;
   const pool = async (items, n, fn) => { let i = 0; await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; await fn(items[k]); } })); };
+  // 4а. Аналоги по OE из Inter Cars e-Catalog (через расширение во вкладке менеджера): ждём ответа страницы до 150 с
+  const ecatParts = new Set();
+  const oeList = [...new Set(parts.flatMap((p) => (p.oe || []).map((x) => norm(x.number)).filter((x) => x.length >= 5)))].slice(0, 15);
+  if (req.ext && oeList.length && !cancelled()) {
+    step('prices', 'run', `ищу аналоги по ${oeList.length} OE-номерам в Inter Cars e-Catalog (окно подбора не закрывайте)…`);
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'waiting', result = ? WHERE id = ?", JSON.stringify({ need: oeList }), jobId));
+    let ecat = null;
+    for (let i = 0; i < 100 && !ecat; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const row = withDb(d, () => one('SELECT status, result FROM ai_jobs WHERE id = ?', jobId));
+      if (row.status === 'cancelled') return;
+      ecat = JSON.parse(row.result || '{}').ecat || null;
+    }
+    withDb(d, () => run("UPDATE ai_jobs SET status = 'running' WHERE id = ?", jobId));
+    if (ecat?.length) {
+      // какие товары из списка e-Catalog — именно та деталь, что нужна (комплект с помпой / без, фильтр, а не корпус…)
+      const byOe = new Map(ecat.map((r) => [norm(r.oe), r.items || []]));
+      const cand = parts.map((p, pi) => ({ pi, key: p.key, name_pl: p.name_pl, check: p.check || null,
+        items: [...new Map((p.oe || []).flatMap((x) => byOe.get(norm(x.number)) || []).map((it) => [it.code, it])).values()].slice(0, 40) })).filter((c) => c.items.length);
+      if (cand.length) {
+        try {
+          const { data: pk, usage: u3 } = await callTool({
+            system: 'You match catalogue search results to the parts needed for a repair. For each part choose ONLY the items that are exactly that product type for this job (e.g. "timing belt kit WITH water pump" vs kit without pump vs single belt; oil filter, not housing/gasket). Prefer complete kits when the part is a kit. Return item codes. If several engine variants are possible, still return them and add a short Russian check note.',
+            user: JSON.stringify({ vehicle, request: req.text, parts: cand.map((c) => ({ key: c.key, name_pl: c.name_pl, items: c.items.map((it) => ({ code: it.code, brand: it.brand || 'OE', index: it.index, name: it.name })) })) }),
+            tool: { name: 'pick_items', description: 'Matching item codes per part', input_schema: { type: 'object', properties: { parts: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, codes: { type: 'array', items: { type: 'string' } }, check: { type: 'string' } }, required: ['key', 'codes'] } } }, required: ['parts'] } },
+            maxTokens: 3000, timeout: 90_000,
+          });
+          run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u3.input_tokens || 0, u3.output_tokens || 0, jobId);
+          const oeNums = new Set(parts.flatMap((p) => (p.oe || []).map((x) => norm(x.number))));
+          for (const pp of pk.parts || []) {
+            const c = cand.find((x) => x.key === pp.key);
+            if (!c) continue;
+            for (const code of pp.codes || []) {
+              const it = c.items.find((x) => x.code === code);
+              if (!it || blackBrands.has(normBrand(it.brand))) continue;
+              const isOe = !it.brand || /^OE\b/i.test(it.brand) || oeNums.has(norm(it.index));
+              found.push({ pi: c.pi, kind: isOe ? 'oe' : 'analog', brand: it.brand, article: it.index, src: 'ecat',
+                prod: { sku: it.code, index: it.index, brand: isOe ? (it.brand && !/^OE\b/i.test(it.brand) ? it.brand : vehicle.make) : it.brand, articleNumber: it.index, name: it.name } });
+              hits++;
+            }
+            if ((pp.codes || []).length) ecatParts.add(c.pi);
+            if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check;
+          }
+        } catch { /* без выбора — дальше обычным путём */ }
+      }
+    }
+  }
   const tasks = [];
   parts.forEach((p, pi) => {
+    if (ecatParts.has(pi)) return; // аналоги уже есть из e-Catalog
     for (const a of (p.analogs || []).slice(0, 10)) if (a.article && !blackBrands.has(normBrand(a.brand))) tasks.push({ pi, kind: 'analog', brand: a.brand, article: a.article });
     for (const x of (p.oe || []).slice(0, 3)) if (x.number) tasks.push({ pi, kind: 'oe', brand: null, article: x.number });
   });
@@ -154,7 +202,7 @@ async function pick(jobId) {
       await pool(t2, 4, lookup);
     } catch { /* второй круг не обязателен */ }
   }
-  withDb(d, () => run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ tried: tried.slice(0, 200) }), jobId));
+  withDb(d, () => run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ tried: tried.slice(0, 200), ecat: found.filter((f) => f.src === 'ecat').length }), jobId));
   const q = await quote(found.map((f) => f.prod.sku));
   step('prices', 'ok', `проверено артикулов: ${checked}, найдено в Inter Cars: ${hits}, с ценой: ${[...q.values()].filter((x) => x.priceNet > 0).length}`);
   if (cancelled()) return;
@@ -197,7 +245,7 @@ async function pick(jobId) {
     const chosen = order.find((k) => variants[k]) || null;
     const oe = (p.oe || []).filter((x) => x.number).map((x) => {
       const n = norm(x.number);
-      const src = hist.has(n) ? 'история выцен' : pasted.includes(n) ? 'partslink24' : x.from === 'history' ? 'история выцен' : oeVars.some((v) => norm(v.article) === n) ? 'ИИ + каталог IC' : 'ИИ';
+      const src = hist.has(n) ? 'история выцен' : pasted.includes(n) ? 'partslink24' : x.from === 'history' ? 'история выцен' : oeVars.some((v) => norm(v.article) === n) ? 'ИИ + каталог IC' : ecatParts.has(pi) ? 'ИИ + e-Catalog IC' : 'ИИ';
       return { number: x.number, source: src };
     });
     const reasons = [];

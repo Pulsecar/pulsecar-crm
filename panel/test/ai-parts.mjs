@@ -21,7 +21,7 @@ const CATALOG = {
   '04E198119A': { sku: 'VAG1', brand: 'VAG', articleNumber: '04E198119A' },
   'W71295': { sku: 'MANN1', brand: 'MANN-FILTER', articleNumber: 'W 712/95' },
 };
-const PRICE = { SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0] };
+const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0] };
 
 const mock = createServer(async (req, res) => {
   let body = ''; for await (const c of req) body += c;
@@ -32,6 +32,11 @@ const mock = createServer(async (req, res) => {
   if (u.pathname === '/v1/messages') {
     const b = JSON.parse(body);
     assert.equal(b.model, 'claude-sonnet-5');
+    if (b.tool_choice.name === 'pick_items') {
+      const ctx = JSON.parse(b.messages[0].content);
+      // из списка e-Catalog берём только комплекты (не одиночный ремень)
+      return json(200, { usage: { input_tokens: 500, output_tokens: 50 }, content: [{ type: 'tool_use', name: 'pick_items', input: { parts: ctx.parts.map((p) => ({ key: p.key, codes: p.items.filter((i) => /Zestaw/.test(i.name)).map((i) => i.code) })) } }] });
+    }
     assert.equal(b.tool_choice.name, 'parts_plan');
     const ctx = JSON.parse(b.messages[0].content);
     assert.equal(ctx.vehicle.vin, 'WVWZZZAUZGW123456');
@@ -160,6 +165,23 @@ try {
     // INA и Gates в правилах → средний — середина из них (по цене: Gates 640, INA 700 → Gates); Contitech в чёрном списке не проверялся
     assert.equal(tk.variants.mid.brand, 'GATES'); assert.ok(!calls.some((x) => x.includes('CT1168K2')) || true);
     assert.ok(Array.isArray((await req('ai-parts/rules/suggest')).brands));
+  });
+  await t('аналоги по OE из Inter Cars e-Catalog (через расширение): подбор ждёт страницу, Claude выбирает нужный тип', async () => {
+    const q4 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${q4.id}/jobs`, { body: { text: 'ГРМ', level: 'mid', ext: true } });
+    let j; for (let i = 0; i < 60; i++) { j = await req('ai-parts/jobs/' + id); if (j.status === 'waiting') break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'waiting'); assert.ok(j.result.need.includes('04E198119A'));
+    await req(`ai-parts/jobs/${id}/ecat`, { body: { results: [{ oe: '04E198119A', items: [
+      { code: 'EC1', index: 'BELT 1', name: 'Pasek rozrządu', brand: 'Dayco' },
+      { code: 'EC2', index: 'KIT 2', name: 'Zestaw paska rozrządu', brand: 'Dayco' },
+      { code: 'EC3', index: 'KIT 3', name: 'Zestaw paska rozrządu + pompa', brand: 'Hepu' },
+      { code: '<x>', index: 'bad', name: 'odrzucony kod', brand: 'X' }] }] } });
+    for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 200)); }
+    assert.equal(j.status, 'done', j.error);
+    const tk = (await req(`ai-parts/orders/${q4.id}`)).lines.find((l) => l.group_key === 'timing_kit');
+    assert.equal(tk.variants.eco.sku, 'EC2'); assert.equal(tk.variants.eco.sellGross, 460);
+    assert.equal(tk.variants.mid.sku, 'EC3');
+    assert.ok(!Object.values(tk.variants).some((v) => v.sku === 'EC1'), 'одиночный ремень не попал');
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });

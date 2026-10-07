@@ -61,7 +61,7 @@ export function mountAiParts(crm, who) {
     if (limit && one("SELECT COUNT(*) n FROM ai_jobs WHERE kind = 'pick' AND substr(created_at,1,7) = strftime('%Y-%m','now')").n >= limit)
       throw new HttpError(429, `Лимит подборов в этом месяце исчерпан (${limit}). Увеличить: Настройки → ИИ-запчастист.`);
     const request = { text, level: LEVELS[b.level] ? b.level : 'mid', urgency: ['today', 'tomorrow', 'any'].includes(b.urgency) ? b.urgency : 'any',
-      comment: String(b.comment || '').slice(0, 1000), paste: String(b.paste || '').slice(0, 20000) };
+      comment: String(b.comment || '').slice(0, 1000), paste: String(b.paste || '').slice(0, 20000), ext: !!b.ext };
     const id = insert('ai_jobs', { order_id: o.id, request: JSON.stringify(request), created_by: s.name,
       steps: JSON.stringify(STEPS.map(([key]) => ({ key, state: 'wait' }))) });
     ev('job', request, { job_id: id, order_id: o.id, staff: s.name });
@@ -86,6 +86,22 @@ export function mountAiParts(crm, who) {
     });
     insert('ai_events', { kind: 'pl24_terms', order_id: o.id, data: JSON.stringify({ n: (data.terms || []).length, tokens: (usage.input_tokens || 0) + (usage.output_tokens || 0) }) });
     res.json({ vin: car.vin, terms: (data.terms || []).slice(0, 12) });
+  });
+
+  /** Ответ страницы: аналоги по OE из Inter Cars e-Catalog (собраны расширением во вкладке менеджера) */
+  crm.post('/ai-parts/jobs/:id/ecat', (req, res) => {
+    gate(req, 'orders.edit');
+    const j = one('SELECT * FROM ai_jobs WHERE id = ?', Number(req.params.id));
+    if (!j) throw new HttpError(404, 'Нет такого подбора');
+    if (j.status !== 'waiting') return res.json({ ok: false, late: true });
+    const s2 = (v, n) => String(v ?? '').slice(0, n);
+    const results = (Array.isArray(req.body?.results) ? req.body.results : []).slice(0, 15).map((r) => ({
+      oe: s2(r.oe, 40), items: (Array.isArray(r.items) ? r.items : []).slice(0, 40).filter((it) => /^[A-Z0-9]{3,12}$/.test(String(it.code || '')))
+        .map((it) => ({ code: s2(it.code, 12), index: s2(it.index, 60), name: s2(it.name, 120), brand: s2(it.brand, 40) })),
+    }));
+    const cur = J(j.result, {}) || {};
+    run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ ...cur, ecat: results.length ? results : [{ oe: '', items: [] }], ecatError: req.body?.error ? s2(req.body.error, 300) : null }), j.id);
+    res.json({ ok: true });
   });
 
   crm.get('/ai-parts/jobs/:id', (req, res) => {
