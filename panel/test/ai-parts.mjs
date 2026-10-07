@@ -269,12 +269,15 @@ try {
     assert.equal((await req('orders/' + q7.id)).internal_note, 'Клиент просит позвонить');
     assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
   });
-  await t('разбор ответа Claude: обёртка { parts_plan: {...} }, список строкой', async () => {
+  await t('разбор ответа Claude: обёртка { parts_plan: {...} }, список строкой; объём канистры для цены за 1 л', async () => {
     const { normPlan } = await import('../src/ai-parts/pipeline.js');
     assert.equal(normPlan({ parts_plan: { parts: [{ key: 'a', name_pl: 'Tarcza', oe: [], analogs: [] }], labor: [{ job: 'W', hours: 1 }] } }).parts[0].name_pl, 'Tarcza');
     assert.equal(normPlan({ parts_plan: JSON.stringify({ parts: [{ name_pl: 'X' }] }) }).parts.length, 1);
     assert.equal(normPlan({ parts: '[{"name_pl":"Y","analogs":"[]"}]' }).parts[0].name_pl, 'Y');
     assert.equal(normPlan({}).parts.length, 0);
+    const { packLitres } = await import('../src/ai-parts/pipeline.js');
+    assert.equal(packLitres('8100 X-CESS GEN2 5W40 5L'), 5); assert.equal(packLitres('Castrol Edge 5W30 4 l'), 4); assert.equal(packLitres('Motul 2,5L'), 2.5);
+    assert.equal(packLitres('Filtr oleju HU 6032 Z'), null);
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });

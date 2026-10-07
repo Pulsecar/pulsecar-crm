@@ -239,8 +239,8 @@ async function pick(jobId) {
     const pr = q.get(f.prod.sku);
     if (!pr || !(pr.priceNet > 0) || !(pr.availability > 0)) return null;
     const { sellGross, src } = icSell(pr.priceNet, pr.sellGross, pr.vat || 23);
-    return { brand: f.prod.brand || f.brand, article: f.prod.articleNumber || f.article, sku: f.prod.sku, index: f.prod.index, priceNet: round2(pr.priceNet), buyGross: round2(pr.priceNet * 1.23),
-      sellGross, sellNet: round2(sellGross / 1.23), sellSrc: src, availability: pr.availability, delivery: whenText(pr.deliveryAt), supplier: 'Inter Cars' };
+    return perLitre({ brand: f.prod.brand || f.brand, article: f.prod.articleNumber || f.article, sku: f.prod.sku, index: f.prod.index, priceNet: round2(pr.priceNet), buyGross: round2(pr.priceNet * 1.23),
+      sellGross, sellNet: round2(sellGross / 1.23), sellSrc: src, availability: pr.availability, delivery: whenText(pr.deliveryAt), supplier: 'Inter Cars' }, parts[f.pi]?.unit, f.prod.index, f.prod.name, pr.name);
   };
   const tiers = (oeVars, analogs, key) => {
     const variants = {};
@@ -272,7 +272,7 @@ async function pick(jobId) {
   if (noStock.length && req.extAllegro && !cancelled()) {
     const queries = noStock.slice(0, 12).map(({ pi }) => {
       const p = parts[pi];
-      const oe = (p.oe || []).map((x) => String(x.number || '').trim()).find((x) => x.length >= 5);
+      const oe = (p.oe || []).map((x) => String(x.number || '').toUpperCase().replace(/[^A-Z0-9]/g, '')).find((x) => x.length >= 5);
       return { key: p.key, q: oe || [p.name_pl, vehicle.make, String(vehicle.model || '').split(/\s+/)[0], vehicle.capacity_ccm && (Math.round(vehicle.capacity_ccm / 100) / 10).toFixed(1)].filter(Boolean).join(' ') };
     });
     step('add', 'run', `нет в наличии в Inter Cars: ${noStock.map(({ pi }) => parts[pi].name_pl).join(', ')} — ищу на Allegro (окно подбора не закрывайте)…`);
@@ -305,8 +305,8 @@ async function pick(jobId) {
           const toV = (it) => {
             const buy = round2(it.withDelivery || it.gross); // закупка брутто с доставкой
             const sell = allegroSell(buy);
-            return { brand: it.brand || '', article: it.article || '', sku: 'allegro:' + it.offerId, url: it.url, title: it.title, priceNet: round2(it.net ? it.net * (buy / it.gross) : buy / 1.23), buyGross: buy,
-              sellGross: sell, sellNet: round2(sell / 1.23), sellSrc: 'allegro', markup: allegroMarkup(buy), availability: 1, delivery: it.delivery || '', supplier: 'Allegro' };
+            return perLitre({ brand: it.brand || '', article: it.article || '', sku: 'allegro:' + it.offerId, url: it.url, title: it.title, priceNet: round2(it.net ? it.net * (buy / it.gross) : buy / 1.23), buyGross: buy,
+              sellGross: sell, sellNet: round2(sell / 1.23), sellSrc: 'allegro', markup: allegroMarkup(buy), availability: 1, delivery: it.delivery || '', supplier: 'Allegro' }, parts[c.pi].unit, it.title);
           };
           const chosenOffers = (pp.offers || []).map((x) => ({ it: c.r.items.find((y) => y.offerId === String(x.id)), oe: !!x.oe })).filter((x) => x.it && !blackBrands.has(normBrand(x.it.brand)));
           const oeV = chosenOffers.filter((x) => x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
@@ -336,6 +336,8 @@ async function pick(jobId) {
     else if (!oe.length) reasons.push('Нет OE-номера — проверьте применимость');
     else if (oe.every((x) => x.source === 'ИИ') && !p.oe_sure) reasons.push('OE-номер от ИИ не подтверждён историей / partslink24 — проверьте применимость');
     if (chosen && supplierSrc === 'allegro') reasons.push(`С Allegro — закажите заранее по ссылке (наценка ${variants[chosen].markup}%)`);
+    if (chosen && variants[chosen].pack > 1) reasons.push(`Цена за 1 л (в упаковке ${String(variants[chosen].pack).replace('.', ',')} л по ${String(variants[chosen].packPrice).replace('.', ',')} zł) — закажите нужное число упаковок`);
+    if (chosen && variants[chosen].packUnknown) reasons.push('Не удалось определить объём упаковки — проверьте, что цена указана за 1 л');
     if (chosen && variants[chosen].sellSrc === 'min') reasons.push(`Рекомендуемая цена Inter Cars ниже минимальной маржи — поднята до закупки брутто + ${minMargin()}%`);
     if (chosen && variants[chosen].sellSrc === 'markup') reasons.push('Inter Cars не дал рекомендуемую цену — цена продажи по наценке');
     if (vinWarn) reasons.push(vinWarn);
@@ -362,6 +364,24 @@ async function pick(jobId) {
   run("UPDATE ai_jobs SET status = 'done', added = ?, to_check = ?, finished_at = datetime('now'), result = ? WHERE id = ?", added, toCheck, JSON.stringify({ note, tried: tried.slice(0, 200), allegro: fromAllegro, labor: laborAdded }), jobId);
   step('add', 'ok', added ? `добавлено ${added} (работ ${laborAdded}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}${allegroNote ? ' · ' + allegroNote : ''}` : 'новых позиций нет — всё уже в выцене');
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
+}
+
+/** Объём упаковки в литрах из названия («5W40 5L», «1 l», «4 ltr», «208L») — для масел и жидкостей, которые считаем в литрах */
+export function packLitres(...texts) {
+  for (const t of texts) {
+    const m = String(t || '').match(/(?:^|[^\dA-Za-z.,])(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:l|L|ltr|litr(?:y|ów|a)?|liter)(?![A-Za-z])/);
+    if (m) { const v = Number(m[1].replace(',', '.')); if (v > 0 && v <= 250) return v; }
+  }
+  return null;
+}
+/** Позиция в литрах, а товар — канистра: цены пересчитываем на 1 л (иначе 7 л × цена канистры) */
+function perLitre(v, unit, ...texts) {
+  if (!v || unit !== 'l') return v;
+  const pack = packLitres(...texts);
+  if (!pack) return { ...v, packUnknown: true };
+  if (pack === 1) return { ...v, pack: 1 };
+  const k = (x) => (x ? round2(x / pack) : x);
+  return { ...v, pack, priceNet: k(v.priceNet), buyGross: k(v.buyGross), sellGross: k(v.sellGross), sellNet: k(v.sellNet), packPrice: v.sellGross };
 }
 
 /** Ответ parts_plan → { parts: [], labor: [], note } (строки JSON разбираем, массивы под другими ключами тоже берём) */
