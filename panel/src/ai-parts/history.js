@@ -16,7 +16,17 @@ export function trainOnHistory() {
   const orders = all(`SELECT o.id, o.kind, o.created_at, o.complaint, k.vin, k.make, k.model, k.engine, k.capacity, k.fuel, k.year
     FROM orders o LEFT JOIN cars k ON k.id = o.car_id
     WHERE EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id) ORDER BY o.id`);
-  const items = all("SELECT order_id, kind, name, code, qty, unit FROM order_items WHERE name IS NOT NULL AND name <> '' ORDER BY order_id, pos, id");
+  // часы работы: «rbh» — это и есть часы; «oper» (за операцию) — из стоимости строки по ставке нормо-часа сервиса
+  const rate = Number(getSetting('rbh_rate', '250')) || 250;
+  const laborHours = (l) => {
+    const q = Number(l.qty) || 0;
+    let h = 0;
+    if (String(l.unit || '').toLowerCase() === 'rbh') h = q;
+    else if (Number(l.price) > 0 && q > 0) h = (Number(l.price) * q * (1 - (Number(l.discount) || 0) / 100)) / (rate * (1 + (l.vat ?? 23) / 100));
+    h = Math.round(h * 10) / 10;
+    return h >= 0.1 && h < 40 ? h : 0;
+  };
+  const items = all("SELECT order_id, kind, name, code, qty, unit, price, discount, vat FROM order_items WHERE name IS NOT NULL AND name <> '' ORDER BY order_id, pos, id");
   const byOrder = new Map();
   for (const it of items) (byOrder.get(it.order_id) || byOrder.set(it.order_id, []).get(it.order_id)).push(it);
   const co = new Map(), jobsCnt = new Map(), hours = new Map(), names = new Map();
@@ -45,9 +55,10 @@ export function trainOnHistory() {
           for (const p of pk) { const k = jk + '|' + p; co.set(k, (co.get(k) || 0) + 1); names.set('p|' + p, names.get('p|' + p) || p); }
         }
       }
-      for (const l of labor) if (String(l.unit || '').toLowerCase() === 'rbh' && l.qty > 0 && l.qty < 40) {
-        const jk = jobKey(l.name);
-        if (jk) (hours.get(jk) || hours.set(jk, []).get(jk)).push(Number(l.qty));
+      for (const l of labor) {
+        const h = laborHours(l);
+        const jk = h ? jobKey(l.name) : '';
+        if (jk) (hours.get(jk) || hours.set(jk, []).get(jk)).push(h);
       }
     }
     for (const [k, n] of co) {
