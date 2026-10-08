@@ -261,13 +261,23 @@ async function pick(jobId) {
   }
   // проверка типа товара: номер, придуманный неточно, может совпасть с совсем другой деталью («датчик износа колодок» → «вал КПП»).
   // Название товара в IC без общих слов с нужной деталью — спорное: решает Claude, без ответа — отбрасываем
-  const sus = found.map((f, i) => ({ f, i })).filter(({ f }) => f.src !== 'ecat' && !sameType(parts[f.pi], f.prod.name));
+  // …и применимость: в описании IC есть ось («przód L/P») и марки («pasuje do: MERCEDES C (W203)…»). Другая ось — сразу мимо,
+  // другая марка — спорное, решает Claude по описанию (артикул из «памяти» ИИ мог оказаться от другого авто)
+  const axleDrop = new Set();
+  found.forEach((f, i) => {
+    if (f.src === 'ecat') return;
+    const need = axleOf([parts[f.pi].name_pl, parts[f.pi].key].join(' ')), has = axleOf(f.prod.desc);
+    if (need && has && need !== has) { axleDrop.add(i); const t = tried.find((x) => x.pi === f.pi && norm(x.article) === norm(f.article)); if (t) t.wrongType = 'другая ось: ' + f.prod.desc.slice(0, 120); }
+  });
+  for (let i = found.length - 1; i >= 0; i--) if (axleDrop.has(i)) { found.splice(i, 1); hits--; }
+  const sus = found.map((f, i) => ({ f, i })).filter(({ f }) => f.src !== 'ecat' && (!sameType(parts[f.pi], f.prod.name)
+    || (f.kind !== 'oe' && /pasuje do/i.test(f.prod.desc || '') && !fitsMake(f.prod.desc, vehicle.make))));
   if (sus.length && !cancelled()) {
     let okIds = new Set();
     try {
       const { data: ck, usage: u6 } = await callTool({
-        system: 'For each catalogue item decide if it is the SAME TYPE of part as the needed part (names are Polish; synonyms and kits count as the same type, e.g. "Pierścień uszczelniający" = "Uszczelka", "Komplet klocków" = "Klocki"). A different product (e.g. gearbox shaft instead of brake pad wear sensor) is NOT ok. Return ids of items that are ok.',
-        user: JSON.stringify({ vehicle: { make: vehicle.make, model: vehicle.model }, items: sus.map(({ f, i }) => ({ id: String(i), need: parts[f.pi].name_pl, catalogue_name: f.prod.name, brand: f.prod.brand, article: f.prod.index })) }),
+        system: 'For each catalogue item decide if it is the SAME TYPE of part as the needed part (names are Polish; synonyms and kits count as the same type, e.g. "Pierścień uszczelniający" = "Uszczelka", "Komplet klocków" = "Klocki") AND fits this vehicle: catalogue_description often says the axle (przód / tył) and "pasuje do:" with makes and models — if it lists other makes/models and not this vehicle (allowing platform twins, e.g. Toyota Aygo = Citroen C1 = Peugeot 107), it does NOT fit. A different product (e.g. gearbox shaft instead of brake pad wear sensor) or a part for another car is NOT ok. Return ids of items that are ok.',
+        user: JSON.stringify({ vehicle: { make: vehicle.make, model: vehicle.model, year: vehicle.year, capacity_ccm: vehicle.capacity_ccm }, items: sus.map(({ f, i }) => ({ id: String(i), need: parts[f.pi].name_pl, catalogue_name: f.prod.name, catalogue_description: f.prod.desc || null, brand: f.prod.brand, article: f.prod.index })) }),
         tool: { name: 'check_types', description: 'Items of the right part type', input_schema: { type: 'object', properties: { ok_ids: { type: 'array', items: { type: 'string' } } }, required: ['ok_ids'] } },
         maxTokens: 800, timeout: 45_000,
       });
@@ -494,6 +504,21 @@ async function pick(jobId) {
   step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromPa ? `, из ProfiAuto ${fromPa}` : ''}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
     + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (paNote ? ' · ' + paNote : '') + (allegroNote ? ' · ' + allegroNote : ''));
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
+}
+
+/** Ось из названия детали или описания IC: 'front' | 'rear' | null (обе / не указано) */
+export function axleOf(t) {
+  const x = String(t || '').toLowerCase();
+  const f = /prz[oó]d|przedni|front/.test(x), r = /(?:^|[^a-ząćęłńóśźż])ty[łl](?![a-ząćęłńóśźż])|tyln|ty[łl]u\b|(?:^|[^a-z])rear/.test(x);
+  return f && !r ? 'front' : r && !f ? 'rear' : null;
+}
+const MAKE_ALIAS = { VOLKSWAGEN: ['VW', 'VOLKSWAGEN'], VW: ['VW', 'VOLKSWAGEN'], MERCEDES: ['MERCEDES', 'MB'], 'MERCEDES-BENZ': ['MERCEDES', 'MB'], CITROEN: ['CITROEN', 'CITROËN'] };
+/** В описании IC «pasuje do: …» есть марка авто */
+export function fitsMake(desc, make) {
+  const m = String(make || '').toUpperCase().trim();
+  if (!m) return true;
+  const list = String(desc || '').toUpperCase().split(/PASUJE DO:?/)[1] || '';
+  return (MAKE_ALIAS[m] || [m.split(/\s+/)[0]]).some((x) => list.includes(x));
 }
 
 // общие слова в названиях деталей не считаем совпадением типа

@@ -22,10 +22,13 @@ const CATALOG = {
   'K015688XS': { sku: 'GAT1', brand: 'GATES', articleNumber: 'K015688XS' },
   '04E198119A': { sku: 'VAG1', brand: 'VAG', articleNumber: '04E198119A' },
   'W71295': { sku: 'MANN1', brand: 'MANN-FILTER', articleNumber: 'W 712/95' },
+  'ATEFRONT1': { sku: 'ATE1', brand: 'ATE', articleNumber: 'ATE.FRONT-1', description: 'Tarcza hamulcowa przód L/P pasuje do: VOLKSWAGEN GOLF VII 1.2-2.0 08.12-' },
+  'ATEMB1': { sku: 'ATE2', brand: 'ATE', articleNumber: 'ATE.MB-1', description: 'Tarcza hamulcowa tył L/P pasuje do: MERCEDES C (W203) 1.8-3.5 05.00-02.11' },
+  'ZIMREAR1': { sku: 'ZIM1', brand: 'ZIMMERMANN', articleNumber: 'ZIM.REAR-1', description: 'Tarcza hamulcowa tył L/P pasuje do: VOLKSWAGEN GOLF VII 1.2-2.0 08.12-' },
   'P06100': { sku: 'BRE1', brand: 'BREMBO', articleNumber: 'P 06 100' },
   'GDB2543': { sku: 'TRW1', brand: 'TRW', articleNumber: 'GDB2543', desc: 'Wałek wejściowy skrzyni biegów' },
 };
-const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0], BRE1: [400, 700], TRW1: [150, 260] };
+const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0], BRE1: [400, 700], TRW1: [150, 260], ATE1: [100, 200], ATE2: [90, 180], ZIM1: [150, 300] };
 
 const mock = createServer(async (req, res) => {
   let body = ''; for await (const c of req) body += c;
@@ -51,7 +54,7 @@ const mock = createServer(async (req, res) => {
     if (b.tool_choice.name === 'check_types') {
       const ctx = JSON.parse(b.messages[0].content);
       checkCalls.push(ctx.items);
-      return json(200, { usage: { input_tokens: 100, output_tokens: 10 }, content: [{ type: 'tool_use', name: 'check_types', input: { ok_ids: ctx.items.filter((i) => !/Wałek/.test(i.catalogue_name)).map((i) => i.id) } }] });
+      return json(200, { usage: { input_tokens: 100, output_tokens: 10 }, content: [{ type: 'tool_use', name: 'check_types', input: { ok_ids: ctx.items.filter((i) => !/Wałek/.test(i.catalogue_name) && !/MERCEDES/.test(i.catalogue_description || '')).map((i) => i.id) } }] });
     }
     if (b.tool_choice.name === 'pick_rows') {
       const ctx = JSON.parse(b.messages[0].content);
@@ -66,6 +69,9 @@ const mock = createServer(async (req, res) => {
     const ctx = JSON.parse(b.messages[0].content);
     if (ctx.request !== undefined) lastCtx = ctx;
     // колодки Brembo: номер из истории этого же авто (артикул Brembo) ИИ ошибочно кладёт в OE — подбор всё равно должен найти его в IC
+    if (/задние диски/.test(ctx.request || '')) return json(200, { usage: { input_tokens: 900, output_tokens: 200 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
+      { key: 'brake_disc_rear', name_pl: 'Tarcza hamulcowa tylna', qty: 2, unit: 'szt.', oe: [], analogs: [{ brand: 'ATE', article: 'ATE.FRONT-1' }, { brand: 'ATE', article: 'ATE.MB-1' }, { brand: 'Zimmermann', article: 'ZIM.REAR-1' }] },
+    ] } }] });
     if (/Brembo/.test(ctx.request || '')) return json(200, { usage: { input_tokens: 900, output_tokens: 200 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
       { key: 'brake_pads_front', name_pl: 'Klocki hamulcowe przednie', qty: 1, unit: 'kpl.', brand_wanted: 'Brembo', oe: [{ number: 'P 06 100', from: 'history' }], analogs: [{ brand: 'TRW', article: 'GDB2543' }] },
     ] } }] });
@@ -375,6 +381,17 @@ try {
     // TRW GDB2543 в каталоге — «вал КПП» (другой товар): спорное название уходит на проверку и отбрасывается
     assert.ok(checkCalls.some((c) => c.some((i) => /Wałek/.test(i.catalogue_name))), 'спорный тип товара проверен');
     assert.ok(j.result.tried.some((x) => x.article === 'GDB2543' && /Wałek/.test(x.wrongType || '')), 'отмечен как другой товар');
+  });
+  await t('применимость по описанию IC: передний диск вместо заднего и диск от другой марки не берём', async () => {
+    const qr = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${qr.id}/jobs`, { body: { text: 'задние диски', level: 'eco' } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'done', j.error);
+    const bd = (await req(`ai-parts/orders/${qr.id}`)).lines.find((l) => l.group_key === 'brake_disc_rear');
+    assert.equal(bd.variants[bd.chosen].brand, 'ZIMMERMANN', 'только задний диск для этого авто');
+    assert.ok(!Object.values(bd.variants).some((v) => v.brand === 'ATE'));
+    assert.match(j.result.tried.find((x) => x.article === 'ATE.FRONT-1').wrongType, /другая ось/);
+    assert.ok(checkCalls.some((c) => c.some((i) => /MERCEDES/.test(i.catalogue_description || ''))), 'чужая марка — на проверку');
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });

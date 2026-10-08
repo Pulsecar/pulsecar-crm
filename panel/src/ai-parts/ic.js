@@ -28,7 +28,7 @@ export async function findByArticle(article, brand, cache) {
       const okArt = norm(p.articleNumber) === want || norm(p.index) === want || norm(p.index).endsWith(want) || norm(p.tecDoc) === want;
       if (!okArt) continue;
       const brandOk = !wb || !p.brand || normBrand(p.brand) === wb;
-      if (!out.some((x) => x.sku === p.sku)) out.push({ sku: p.sku, index: p.index, brand: p.brand, articleNumber: p.articleNumber, name: p.shortDescription || p.description || '', brandOk });
+      if (!out.some((x) => x.sku === p.sku)) out.push({ sku: p.sku, index: p.index, brand: p.brand, articleNumber: p.articleNumber, name: p.shortDescription || p.description || '', desc: String(p.description || '').slice(0, 300), brandOk });
     }
     if (out.length) break;
   }
