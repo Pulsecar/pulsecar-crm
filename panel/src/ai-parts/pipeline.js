@@ -263,16 +263,18 @@ async function pick(jobId) {
   // Название товара в IC без общих слов с нужной деталью — спорное: решает Claude, без ответа — отбрасываем
   // …и применимость: в описании IC есть ось («przód L/P») и марки («pasuje do: MERCEDES C (W203)…»). Другая ось — сразу мимо,
   // другая марка — спорное, решает Claude по описанию (артикул из «памяти» ИИ мог оказаться от другого авто)
-  const axleDrop = new Set();
-  found.forEach((f, i) => {
-    if (f.src === 'ecat') return;
-    const need = axleOf([parts[f.pi].name_pl, parts[f.pi].key].join(' ')), has = axleOf(f.prod.desc);
-    if (need && has && need !== has) { axleDrop.add(i); const t = tried.find((x) => x.pi === f.pi && norm(x.article) === norm(f.article)); if (t) t.wrongType = 'другая ось: ' + f.prod.desc.slice(0, 120); }
-  });
-  for (let i = found.length - 1; i >= 0; i--) if (axleDrop.has(i)) { found.splice(i, 1); hits--; }
-  const sus = found.map((f, i) => ({ f, i })).filter(({ f }) => f.src !== 'ecat' && (!sameType(parts[f.pi], f.prod.name)
-    || (f.kind !== 'oe' && /pasuje do/i.test(f.prod.desc || '') && !fitsMake(f.prod.desc, vehicle.make))));
-  if (sus.length && !cancelled()) {
+  const mark = (f, why) => { const t = tried.find((x) => x.pi === f.pi && norm(x.article) === norm(f.article)); if (t) t.wrongType = why; };
+  /** Оставляет из списка найденного в IC только подходящее (тип товара, ось, марка); спорное решает Claude */
+  const fitFilter = async (list) => {
+    const keep = list.filter((f) => {
+      if (f.src === 'ecat') return true;
+      const need = axleOf([parts[f.pi].name_pl, parts[f.pi].key].join(' ')), has = axleOf(f.prod.desc);
+      if (need && has && need !== has) { mark(f, 'другая ось: ' + String(f.prod.desc).slice(0, 120)); return false; }
+      return true;
+    });
+    const sus = keep.map((f, i) => ({ f, i })).filter(({ f }) => f.src !== 'ecat' && (!sameType(parts[f.pi], f.prod.name)
+      || (f.kind !== 'oe' && /pasuje do/i.test(f.prod.desc || '') && !fitsMake(f.prod.desc, vehicle.make))));
+    if (!sus.length || cancelled()) return keep;
     let okIds = new Set();
     try {
       const { data: ck, usage: u6 } = await callTool({
@@ -285,8 +287,13 @@ async function pick(jobId) {
       okIds = new Set((ck.ok_ids || []).map(String));
     } catch { /* без ответа — спорные не берём */ }
     const drop = new Set(sus.filter(({ i }) => !okIds.has(String(i))).map(({ i }) => i));
-    for (const { f, i } of sus) if (drop.has(i)) { const t = tried.find((x) => x.pi === f.pi && norm(x.article) === norm(f.article)); if (t) t.wrongType = f.prod.name; }
-    for (let i = found.length - 1; i >= 0; i--) if (drop.has(i)) { found.splice(i, 1); hits--; }
+    for (const { f, i } of sus) if (drop.has(i)) mark(f, /pasuje do/i.test(f.prod.desc || '') ? 'не для этого авто: ' + String(f.prod.desc).slice(0, 120) : f.prod.name);
+    return keep.filter((_, i) => !drop.has(i));
+  };
+  {
+    const kept = await fitFilter(found);
+    hits -= found.length - kept.length;
+    found.splice(0, found.length, ...kept);
   }
   withDb(d, () => run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ tried: tried.slice(0, 200), ecat: found.filter((f) => f.src === 'ecat').length }), jobId));
   const q = await quote(found.map((f) => f.prod.sku));
@@ -330,6 +337,37 @@ async function pick(jobId) {
     const variants = tiers(oeVars, analogs, p.key);
     return { variants, chosen: pickLevel(variants, partLevel(p)), oeVars, src: 'ic' };
   });
+
+  // номер нашёлся у другого поставщика (ProfiAuto / Allegro) — сначала проверяем этот же артикул в Inter Cars:
+  // если там есть в наличии и подходит к авто, берём из Inter Cars (быстрее и удобнее закупать)
+  const icReplace = async (pi, items) => {
+    const fs = [];
+    const seenA = new Set();
+    for (const it of items.slice(0, 8)) {
+      const art = String(it.article || '').trim();
+      if (norm(art).length < 3 || seenA.has(norm(it.brand) + norm(art))) continue;
+      seenA.add(norm(it.brand) + norm(art));
+      let r = [];
+      try { r = await findByArticle(art, it.brand || null, icCache); } catch { r = []; }
+      checked++;
+      tried.push({ pi, kind: 'via-' + it.via, brand: it.brand || null, article: art, found: r.length });
+      for (const prod of r) if (!blackBrands.has(normBrand(prod.brand))) fs.push({ pi, kind: normBrand(prod.brand) === oeBrand ? 'oe' : 'analog', brand: prod.brand, article: art, prod, via: it.via });
+    }
+    if (!fs.length) return null;
+    const ok = await fitFilter(fs);
+    // по описанию Inter Cars артикул не для этого авто / не та ось — значит и предложение поставщика с этим номером не подходит
+    const bad = new Set(fs.filter((f) => !ok.includes(f)).map((f) => norm(f.article)).filter((a) => !ok.some((x) => norm(x.article) === a)));
+    if (!ok.length) return { bad };
+    const qq = await quote(ok.map((f) => f.prod.sku));
+    for (const [k, v] of qq) q.set(k, v);
+    const p = parts[pi];
+    const seen = new Set();
+    const oeV = ok.filter((f) => f.kind === 'oe').map(variantOf).filter(Boolean).sort((a, b) => a.sellGross - b.sellGross);
+    const anV = wantedOnly(p, ok.filter((f) => f.kind === 'analog').map(variantOf).filter((v) => v && !seen.has(v.sku) && seen.add(v.sku)).sort((a, b) => a.sellGross - b.sellGross));
+    const variants = tiers(oeV, anV, p.key);
+    const chosen = pickLevel(variants, partLevel(p));
+    return chosen ? { variants, chosen, oeVars: oeV, src: 'ic', via: ok[0].via, bad } : { bad };
+  };
 
   // ожидание ответа расширения (страница CRM передаёт результаты из вкладки менеджера); null — отменено
   const waitExt = async (kind, need, rounds) => {
@@ -394,6 +432,9 @@ async function pick(jobId) {
               return perLitre({ brand: it.brand, article: it.index, sku: 'pa:' + it.brand + ':' + it.index, index: it.index, priceNet: round2(net), buyGross: round2(it.gross || net * 1.23),
                 sellGross, sellNet: round2(sellGross / 1.23), sellSrc: src, availability: it.total, delivery: whText(it.stock), supplier: 'ProfiAuto', url: it.link || null }, parts[c.pi].unit, it.name, it.index);
             };
+            const viaIc = await icReplace(c.pi, rows.map((it) => ({ brand: it.brand, article: it.index, via: 'ProfiAuto' })));
+            if (viaIc?.chosen) { per[c.pi] = viaIc; if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check; continue; }
+            if (viaIc?.bad?.size) rows.splice(0, rows.length, ...rows.filter((it) => !viaIc.bad.has(norm(it.index))));
             const oeV = rows.filter((it) => normBrand(it.brand) === oeBrand).map(toV).sort((a, b) => a.sellGross - b.sellGross);
             const anV = rows.filter((it) => normBrand(it.brand) !== oeBrand).map(toV).sort((a, b) => a.sellGross - b.sellGross);
             const variants = tiers(oeV, wantedOnly(parts[c.pi], anV), parts[c.pi].key);
@@ -443,6 +484,9 @@ async function pick(jobId) {
               sellGross: sell, sellNet: round2(sell / 1.23), sellSrc: 'allegro', markup: allegroMarkup(buy), availability: 1, delivery: it.delivery || '', supplier: 'Allegro' }, parts[c.pi].unit, it.title);
           };
           const chosenOffers = (pp.offers || []).map((x) => ({ it: c.r.items.find((y) => y.offerId === String(x.id)), oe: !!x.oe })).filter((x) => x.it && !blackBrands.has(normBrand(x.it.brand)));
+          const viaIc = await icReplace(c.pi, chosenOffers.filter((x) => x.it.article).map((x) => ({ brand: x.it.brand, article: x.it.article, via: 'Allegro' })));
+          if (viaIc?.chosen) { per[c.pi] = viaIc; if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check; continue; }
+          if (viaIc?.bad?.size) chosenOffers.splice(0, chosenOffers.length, ...chosenOffers.filter((x) => !viaIc.bad.has(norm(x.it.article))));
           const oeV = chosenOffers.filter((x) => x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
           const anV = chosenOffers.filter((x) => !x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
           const variants = tiers(oeV, wantedOnly(parts[c.pi], anV), parts[c.pi].key);
@@ -460,7 +504,7 @@ async function pick(jobId) {
   const hist = new Set([...verified.map((v) => norm(v.oe)), ...sameRows.map((r) => norm(r.code)).filter(Boolean)]);
   const pasted = norm(req.paste || '');
   for (const [pi, p] of parts.entries()) {
-    const { variants, chosen, oeVars, src: supplierSrc } = per[pi];
+    const { variants, chosen, oeVars, src: supplierSrc, via } = per[pi];
     const oe = (p.oe || []).filter((x) => x.number).map((x) => {
       const n = norm(x.number);
       const src = hist.has(n) ? 'история выцен' : pasted.includes(n) ? 'partslink24' : x.from === 'history' ? 'история выцен' : oeVars.some((v) => norm(v.article) === n) ? 'ИИ + каталог IC' : ecatParts.has(pi) ? 'ИИ + e-Catalog IC' : 'ИИ';
@@ -471,6 +515,7 @@ async function pick(jobId) {
     if (!chosen) reasons.push('Нет в наличии в Inter Cars' + (req.extAllegro ? ' и не найдено на Allegro' : '') + ' — подберите вручную');
     else if (!oe.length) reasons.push('Нет OE-номера — проверьте применимость');
     else if (oe.every((x) => x.source === 'ИИ') && !p.oe_sure) reasons.push(req.paste ? 'OE-номер от ИИ: в partslink24 и истории сервиса этого номера нет — проверьте применимость' : 'OE-номер от ИИ (partslink24 не запускался, в истории нет) — проверьте применимость');
+    if (chosen && via) reasons.push(`Номер найден через ${via} — этот же артикул взят из Inter Cars (в наличии)`);
     if (chosen && supplierSrc === 'allegro') reasons.push(`С Allegro — закажите заранее по ссылке (наценка ${variants[chosen].markup}%)`);
     if (chosen && supplierSrc === 'profiauto') reasons.push(`Нет в наличии в Inter Cars — из ProfiAuto (${variants[chosen].delivery || 'в наличии'})`);
     if (chosen && variants[chosen].pack > 1) reasons.push(`Цена за 1 л (в упаковке ${String(variants[chosen].pack).replace('.', ',')} л по ${String(variants[chosen].packPrice).replace('.', ',')} zł) — закажите нужное число упаковок`);

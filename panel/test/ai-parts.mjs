@@ -25,10 +25,11 @@ const CATALOG = {
   'ATEFRONT1': { sku: 'ATE1', brand: 'ATE', articleNumber: 'ATE.FRONT-1', description: 'Tarcza hamulcowa przód L/P pasuje do: VOLKSWAGEN GOLF VII 1.2-2.0 08.12-' },
   'ATEMB1': { sku: 'ATE2', brand: 'ATE', articleNumber: 'ATE.MB-1', description: 'Tarcza hamulcowa tył L/P pasuje do: MERCEDES C (W203) 1.8-3.5 05.00-02.11' },
   'ZIMREAR1': { sku: 'ZIM1', brand: 'ZIMMERMANN', articleNumber: 'ZIM.REAR-1', description: 'Tarcza hamulcowa tył L/P pasuje do: VOLKSWAGEN GOLF VII 1.2-2.0 08.12-' },
+  'NGKSP1': { sku: 'NGK1', brand: 'NGK', articleNumber: 'NGK-SP1', desc: 'Świeca zapłonowa', description: 'Świeca zapłonowa pasuje do: VOLKSWAGEN GOLF VII 1.4 TSI' },
   'P06100': { sku: 'BRE1', brand: 'BREMBO', articleNumber: 'P 06 100' },
   'GDB2543': { sku: 'TRW1', brand: 'TRW', articleNumber: 'GDB2543', desc: 'Wałek wejściowy skrzyni biegów' },
 };
-const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0], BRE1: [400, 700], TRW1: [150, 260], ATE1: [100, 200], ATE2: [90, 180], ZIM1: [150, 300] };
+const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0], BRE1: [400, 700], TRW1: [150, 260], ATE1: [100, 200], ATE2: [90, 180], ZIM1: [150, 300], NGK1: [8, 20] };
 
 const mock = createServer(async (req, res) => {
   let body = ''; for await (const c of req) body += c;
@@ -319,6 +320,30 @@ try {
     await req(`ai-parts/jobs/${id}/undo`, { method: 'POST' });
     assert.equal((await req('orders/' + q7.id)).internal_note, 'Клиент просит позвонить');
     assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
+  });
+  await t('номер нашёлся на Allegro, а этот же артикул есть в наличии в Inter Cars → берём из Inter Cars', async () => {
+    const qa = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${qa.id}/jobs`, { body: { text: 'свечи', level: 'mid', extAllegro: true } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (j.status === 'waiting' || ['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.result.wait, 'allegro');
+    await req(`ai-parts/jobs/${id}/allegro`, { body: { results: [{ key: 'spark_plug', q: 'x', items: [
+      { offerId: '55555555555', title: 'Świeca NGK NGK-SP1', brand: 'NGK', article: 'NGK-SP1', gross: 25, delivery: 'dostawa za 3 dni' }] }] } });
+    for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 200)); }
+    assert.equal(j.status, 'done', j.error);
+    const sp = (await req(`ai-parts/orders/${qa.id}`)).lines.find((l) => l.group_key === 'spark_plug');
+    assert.equal(sp.variants[sp.chosen].supplier, 'Inter Cars'); assert.equal(sp.variants[sp.chosen].sku, 'NGK1');
+    assert.match(sp.reason, /найден через Allegro — этот же артикул взят из Inter Cars/);
+    assert.ok(!(await req('orders/' + qa.id)).internal_note?.includes('allegro.pl'), 'ссылка на Allegro не нужна');
+  });
+  await t('предложение Allegro, которое по описанию Inter Cars подходит к другой марке, не берём', async () => {
+    const qa = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${qa.id}/jobs`, { body: { text: 'свечи', level: 'mid', extAllegro: true } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (j.status === 'waiting' || ['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    await req(`ai-parts/jobs/${id}/allegro`, { body: { results: [{ key: 'spark_plug', q: 'x', items: [
+      { offerId: '66666666666', title: 'Świeca do VW Golf', brand: 'ATE', article: 'ATE.MB-1', gross: 25, delivery: 'dostawa za 3 dni' }] }] } });
+    for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 200)); }
+    assert.equal(j.status, 'done', j.error);
+    assert.ok(!(await req(`ai-parts/orders/${qa.id}`)).lines.some((l) => l.group_key === 'spark_plug'), 'чужой номер с Allegro не добавлен');
   });
   await t('разбор ответа Claude: обёртка { parts_plan: {...} }, список строкой; объём канистры для цены за 1 л', async () => {
     const { normPlan } = await import('../src/ai-parts/pipeline.js');
