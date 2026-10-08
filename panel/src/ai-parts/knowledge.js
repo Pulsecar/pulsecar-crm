@@ -29,6 +29,7 @@ For each job write the practical knowledge an advisor needs to quote it correctl
 - assemblies: which assemblies / covers / pipes are removed or opened to do the job;
 - always: parts that are always replaced for this job;
 - seals: gaskets, seals, O-rings, one-time (stretch) bolts, clips, crush washers that must be renewed BECAUSE of that disassembly, each with a short Russian reason ("снимается крышка клапанов — прокладка одноразовая");
+  joints that normally use liquid sealant instead of a gasket (oil pan, timing cover on many engines) → list "Uszczelniacz silikonowy (masa uszczelniająca)" with the reason, never an invented gasket;
 - often: parts the workshop often adds (from the statistics: share >= 30%) or that are worn together;
 - fluids: fluids drained / refilled;
 - not_parts: services that must NOT be quoted as parts (cleaning, diagnostics, coding);

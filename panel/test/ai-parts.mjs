@@ -73,6 +73,10 @@ const mock = createServer(async (req, res) => {
     const ctx = JSON.parse(b.messages[0].content);
     if (ctx.request !== undefined) lastCtx = ctx;
     // колодки Brembo: номер из истории этого же авто (артикул Brembo) ИИ ошибочно кладёт в OE — подбор всё равно должен найти его в IC
+    if (/герметик/.test(ctx.request || '')) return json(200, { usage: { input_tokens: 900, output_tokens: 200 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
+      { key: 'sealant', name_pl: 'Uszczelniacz silikonowy (masa uszczelniająca), tubka', qty: 2, unit: 'szt.', oe: [], analogs: [] },
+      { key: 'sealant_2', name_pl: 'Masa uszczelniająca do miski olejowej', qty: 1, unit: 'szt.', oe: [], analogs: [] },
+    ] } }] });
     if (/пара тормозов/.test(ctx.request || '')) return json(200, { usage: { input_tokens: 900, output_tokens: 200 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
       { key: 'brake_disc_rear', name_pl: 'Tarcza hamulcowa tylna', qty: 2, unit: 'szt.', oe: [], analogs: [{ brand: 'Zimmermann', article: 'ZIM.REAR-1' }, { brand: 'TRW', article: 'TRW.DISC-1' }] },
       { key: 'brake_pads_rear', name_pl: 'Klocki hamulcowe tylne', qty: 1, unit: 'kpl.', oe: [], analogs: [{ brand: 'Bosch', article: 'BOSCH.PAD-1' }, { brand: 'TRW', article: 'TRW.PAD-1' }] },
@@ -437,6 +441,13 @@ try {
     const disc = ls.find((l) => l.group_key === 'brake_disc_rear'), pads = ls.find((l) => l.group_key === 'brake_pads_rear');
     assert.equal(disc.variants[disc.chosen].brand, 'TRW', 'диск того же бренда, что и колодки (у Zimmermann колодок нет)');
     assert.equal(pads.variants[pads.chosen].brand, 'TRW', 'колодки TRW к диску TRW, а не дешёвые Bosch');
+  });
+  await t('герметик вместо прокладки — одна тубка на весь заказ', async () => {
+    const qs2 = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${qs2.id}/jobs`, { body: { text: 'поддон на герметик', level: 'eco' } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'done', j.error);
+    assert.match(j.steps.find((s) => s.key === 'parse').info, /— 1 поз\./);
   });
   await t('ГРМ: по partslink24 цепь — ремень не предлагаем', async () => {
     const { timingDrive } = await import('../src/ai-parts/pipeline.js');
