@@ -179,6 +179,7 @@ export function AiModal({ o, ai, onClose, reload }) {
         .map(([k, v]) => html`<div><span class="sub">${k}</span><b>${v || '—'}</b></div>`)}
     </div>
     ${noVin && html`<div class="card err small">Добавьте VIN в выцену — без него подбор недоступен.</div>`}
+    ${!job && !extOk && !d?.mock && html`<div class="card err small">Расширение Pulsecar не найдено в этом Chrome — без него нет partslink24 (OE по VIN) и заменителей из каталога Inter Cars, подбор будет неточным. Включите расширение (chrome://extensions) и обновите страницу.</div>`}
     ${!job ? html`
       <label class="f">Что нужно<textarea rows="4" value=${f.text} onInput=${set('text')} placeholder="напр. замена комплекта ГРМ + водяной насос + масло, масляный фильтр + замена свечей"></textarea></label>
       <div class="grid2">
