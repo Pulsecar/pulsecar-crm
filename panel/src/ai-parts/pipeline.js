@@ -150,7 +150,16 @@ async function pick(jobId) {
     // работы есть, а деталей нет (или ответ обрезан) — запрос почти всегда про детали: ещё одна попытка
     insert('ai_events', { kind: 'parse_empty', job_id: jobId, order_id: o.id, data: JSON.stringify({ attempt, stop: r.stop || null, labor: data.labor.length, raw: JSON.stringify(r.data).slice(0, 6000) }) });
   }
-  const parts = data.parts.slice(0, 25);
+  let parts = data.parts.slice(0, 25);
+  // привод ГРМ по partslink24 (по VIN): есть цепь, а ремня в каталоге нет → ремень / «комплект ремня с помпой» убираем
+  const drive = timingDrive(req.paste);
+  if (drive === 'chain') {
+    const belt = parts.filter((p) => /pas(ek|ka|kiem)\s+(z[ęe]bat|rozrz)|zestaw\s+pask|timing\s+belt/i.test(p.name_pl || ''));
+    if (belt.length) {
+      parts = parts.filter((p) => !belt.includes(p));
+      data.note = [data.note, `В этом авто цепь ГРМ (partslink24) — убрано: ${belt.map((p) => p.name_pl).join(', ')}`].filter(Boolean).join(' · ');
+    }
+  }
   // partslink24 (по VIN) — главный источник OE: если для детали есть номер из partslink24, номера «из памяти» ИИ убираем
   const plText = norm(req.paste || '');
   if (plText) for (const p of parts) {
@@ -342,7 +351,7 @@ async function pick(jobId) {
     const seen = new Set();
     const analogs = wantedOnly(p, vars(mine.filter((f) => f.kind === 'analog')).filter((v) => normBrand(v.brand) !== oeBrand && !seen.has(v.sku) && seen.add(v.sku)).sort((a, b) => a.sellGross - b.sellGross));
     const variants = tiers(oeVars, analogs, p.key);
-    return { variants, chosen: pickLevel(variants, partLevel(p)), oeVars, src: 'ic' };
+    return { variants, chosen: pickLevel(variants, partLevel(p)), oeVars, src: 'ic', all: analogs };
   });
 
   // номер нашёлся у другого поставщика (ProfiAuto / Allegro) — сначала проверяем этот же артикул в Inter Cars:
@@ -506,12 +515,34 @@ async function pick(jobId) {
   } else if (noStock.length && !req.extAllegro) allegroNote = 'Поиск на Allegro работает через расширение Pulsecar 1.6+ — установите его, чтобы ассистент искал то, чего нет в Inter Cars';
 
   if (cancelled()) return; // подбор отменён, пока ждали поставщиков — ничего не добавляем
+  // тормоза: диск и колодки одной оси — одного производителя (TRW + TRW), если такая пара есть в наличии в Inter Cars;
+  // другой бренд колодок — только когда пары к диску нет
+  const isDisc = (p) => { const t = [p.name_pl, p.key].join(' '); return /tarcz|brake_disc|\bdisc\b/i.test(t) && !/klock|pad|czujnik|sensor|styk/i.test(t); };
+  const isPad = (p) => { const t = [p.name_pl, p.key].join(' '); return /klock|brake_pad|pad kit|\bpads?\b/i.test(t) && !/czujnik|sensor|styk|wear|ręczn|postoj|parking|szcz/i.test(t); };
+  for (const [di, dp] of parts.entries()) {
+    const D = per[di];
+    if (!isDisc(dp) || D.src !== 'ic' || !D.chosen || dp.brand_wanted) continue;
+    const ax = axleOf([dp.name_pl, dp.key].join(' '));
+    const pi = parts.findIndex((p, i) => i !== di && isPad(p) && axleOf([p.name_pl, p.key].join(' ')) === ax && per[i].src === 'ic' && !p.brand_wanted);
+    if (pi < 0) continue;
+    const P = per[pi];
+    const dAll = [...(D.all || []), ...(D.oeVars || [])], pAll = [...(P.all || []), ...(P.oeVars || [])];
+    const pb = new Set(pAll.map((v) => normBrand(v.brand)));
+    const common = dAll.filter((v) => pb.has(normBrand(v.brand)));
+    if (!common.length) continue;
+    const cur = D.variants[D.chosen];
+    const dv = common.find((v) => normBrand(v.brand) === normBrand(cur.brand)) || common.slice().sort((a, b) => Math.abs(a.sellGross - cur.sellGross) - Math.abs(b.sellGross - cur.sellGross))[0];
+    const pv = pAll.filter((v) => normBrand(v.brand) === normBrand(dv.brand)).sort((a, b) => a.sellGross - b.sellGross)[0];
+    D.variants[D.chosen] = dv;
+    P.variants[D.chosen] = pv; P.chosen = D.chosen;
+    D.pair = P.pair = dv.brand;
+  }
   let added = 0, toCheck = 0, fromAllegro = 0;
   const notFound = [];
   const hist = new Set([...verified.map((v) => norm(v.oe)), ...sameRows.map((r) => norm(r.code)).filter(Boolean)]);
   const pasted = norm(req.paste || '');
   for (const [pi, p] of parts.entries()) {
-    const { variants, chosen, oeVars, src: supplierSrc, via } = per[pi];
+    const { variants, chosen, oeVars, src: supplierSrc, via, pair } = per[pi];
     const oe = (p.oe || []).filter((x) => x.number).map((x) => {
       const n = norm(x.number);
       const src = hist.has(n) ? 'история выцен' : pasted.includes(n) ? 'partslink24' : x.from === 'history' ? 'история выцен' : oeVars.some((v) => norm(v.article) === n) ? 'ИИ + каталог IC' : ecatParts.has(pi) ? 'ИИ + e-Catalog IC' : 'ИИ';
@@ -532,7 +563,7 @@ async function pick(jobId) {
     if (vinWarn) reasons.push(vinWarn);
     const line = {
       purpose: p.purpose || null, hours: Number(p.labor_hours) || null,
-      note: [p.purpose, p.job ? `${p.job}${Number(p.labor_hours) ? ` ~${String(Math.round(Number(p.labor_hours) * 10) / 10).replace('.', ',')} h${p.hours_source === 'history' ? ' (история сервиса)' : ' (оценка ИИ)'}` : ''}` : null].filter(Boolean).join(' · ') || null,
+      note: [p.purpose, pair ? `пара диск + колодки ${pair}` : null, p.job ? `${p.job}${Number(p.labor_hours) ? ` ~${String(Math.round(Number(p.labor_hours) * 10) / 10).replace('.', ',')} h${p.hours_source === 'history' ? ' (история сервиса)' : ' (оценка ИИ)'}` : ''}` : null].filter(Boolean).join(' · ') || null,
       group_key: String(p.key || p.name_pl).toLowerCase().slice(0, 60), title: p.name_pl, qty: Number(p.qty) || 1, unit: p.unit || 'szt.', qty_note: p.qty_note || null,
       oe, variants: chosen ? variants : {}, chosen, confidence: reasons.length ? 'check' : 'high', reason: reasons.join(' · ') || null,
     };
@@ -556,6 +587,18 @@ async function pick(jobId) {
   step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromPa ? `, из ProfiAuto ${fromPa}` : ''}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
     + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (paNote ? ' · ' + paNote : '') + (allegroNote ? ' · ' + allegroNote : ''));
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
+}
+
+/** Привод ГРМ по строкам partslink24 («# фраза» + найденные строки): 'chain' | 'belt' | null */
+export function timingDrive(paste) {
+  let chain = false, belt = false, cur = null, rows = 0;
+  const flush = () => { if (cur && rows) { if (/łańcuch|lancuch|chain|kette/i.test(cur)) chain = true; if (/pas(ek|ka)|timing\s*belt|zahnriemen/i.test(cur)) belt = true; } };
+  for (const line of String(paste || '').split('\n')) {
+    if (/^#\s/.test(line) && !/^##/.test(line)) { flush(); cur = line.slice(2); rows = 0; continue; }
+    if (cur && line.trim() && !/nie znaleziono/i.test(line) && !/^##/.test(line)) rows++;
+  }
+  flush();
+  return chain && !belt ? 'chain' : belt && !chain ? 'belt' : null;
 }
 
 /** Ось из названия детали или описания IC: 'front' | 'rear' | null (обе / не указано) */
@@ -635,7 +678,8 @@ const SYSTEM = `You are an experienced auto-parts specialist (części samochodo
 A service advisor describes the job for a specific vehicle. Produce the list of PARTS to put in the repair quote (wycena) and the list of LABOUR operations (labor).
 
 Rules:
-- Expand standard jobs into parts (e.g. "rozrząd/ГРМ" → timing belt kit (+ water pump if the engine's pump is driven by the belt), "ТО/service" → oil, oil filter, air filter, cabin filter, drain plug washer...). Use workshop_kits when given.
+- Expand standard jobs into parts ("ТО/service" → oil, oil filter, air filter, cabin filter, drain plug washer...). Use workshop_kits when given.
+- TIMING jobs ("rozrząd", "ГРМ", "timing"): FIRST decide whether THIS engine has a timing CHAIN or a timing BELT — from partslink24_rows (only parts fitted to this VIN are listed: chain / guides / chain tensioner → chain; toothed belt → belt), then workshop_history_same_car / same_model, then your knowledge of this exact engine code. CHAIN engine → "Zestaw łańcucha rozrządu" (chain, guides/slides, tensioner, sprockets — kit or separate parts as in partslink24) and, if the request asks for the pump or the workshop usually replaces it, the water pump as a SEPARATE part ("Pompa wody") — never a "belt kit with water pump" and never a timing belt on a chain engine. BELT engine → belt kit (with water pump only when the pump is driven by the timing belt, otherwise kit + separate pump if requested). If you cannot tell belt vs chain, do not guess: list the parts you can confirm and explain in "check" (Russian) that the drive type must be checked in partslink24.
 - Oils and fluids (unit "l"): leave "oe" EMPTY unless there is a real OE part number of the fluid (e.g. "83 21 2 365 946"); never put a product name or viscosity there. List the oil products themselves in "analogs" with their exact manufacturer article numbers (e.g. MOTUL "109474" / "17603", CASTROL "15F0FB"), several package sizes when you know them.
 - Quantities from the engine: engine oil = factory capacity with filter in litres (unit "l"), spark plugs = number of cylinders, glow plugs for diesels instead of spark plugs (always with a check note). Explain each quantity in qty_note (Russian).
 - partslink24_rows may contain "## rysunek węzła" blocks: the COMPLETE parts list of the assembly drawing for THIS car (position. OE number | name | qty | notes). Use them as the authority: take the main part and every gasket / seal / O-ring / one-time bolt / clip from that drawing that must be renewed when the assembly is removed or replaced, with the drawing quantity and exactly that OE number. Do NOT add sensors, actuators, brackets or other reusable parts from the drawing unless the request asks for them (mention them in note instead).
