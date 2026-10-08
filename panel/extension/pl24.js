@@ -34,8 +34,17 @@ function enterVin(vin) {
   return true;
 }
 function readList(onlyNumber) {
-  // элементы списка partslink24: колонки «подпись — значение»; неактивные (_inactive) — не подходят к этому VIN
+  // два вида списков partslink24: «карточки» (_listItem_ с подписями колонок — VW, BMW…) и таблицы (_headerRow_ + _row_ — Toyota и др.)
+  // неактивные строки (_inactive / _disabled) не подходят к этому VIN
   const rows = [];
+  const push = (r) => {
+    const num = r['numer czesci'] || r['numer części'] || r['part number'] || r['teilenummer'];
+    if (!num) return;
+    if (onlyNumber && num.replace(/\W/g, '') !== onlyNumber.replace(/\W/g, '')) return;
+    rows.push({ number: num, name: r['nazwa'] || r['name'] || r['benennung'] || '', note: [r['oznaczenie'] || r['bemerkung'], r['dodatek'] || r['zusatz'], r['od'] && 'od ' + r['od'], r['do'] && 'do ' + r['do']].filter(Boolean).join(', '),
+      qty: r['szt.'] || r['ilosc'] || r['ilość'] || r['qty'] || r['menge'] || '', model: r['podanie modelu'] || r['modellangabe'] || r['więcej informacji'] || r['wiecej informacji'] || '',
+      group: [r['gr gl.'], r['pg'], r['nr rysunku'], r['grupa']].filter(Boolean).join('/'), pos: r._bom ? (r['poz.'] || r['pos.'] || '') : (r._table ? '' : r['poz.'] || r['pos.'] || ''), el: null });
+  };
   for (const it of document.querySelectorAll('[class*="_listItem_"]')) {
     if ([...it.classList].some((c) => /_inactive/.test(c))) continue;
     const r = {};
@@ -44,28 +53,51 @@ function readList(onlyNumber) {
       const val = col.innerText.replace(lab, '').replace(/\s+/g, ' ').trim();
       if (lab) r[lab.toLowerCase()] = val;
     }
-    const num = r['numer czesci'] || r['numer części'] || r['part number'] || r['teilenummer'];
-    if (!num) continue;
-    if (onlyNumber && num.replace(/\W/g, '') !== onlyNumber.replace(/\W/g, '')) continue;
-    rows.push({ number: num, name: r['nazwa'] || r['name'] || r['benennung'] || '', note: [r['oznaczenie'] || r['bemerkung'], r['dodatek'] || r['zusatz']].filter(Boolean).join(', '), qty: r['szt.'] || r['qty'] || r['menge'] || '',
-      model: r['podanie modelu'] || r['modellangabe'] || '', group: [r['gr gl.'], r['pg'], r['nr rysunku']].filter(Boolean).join('/'), pos: r['poz.'] || r['pos.'] || '', el: null });
+    push(r);
   }
-  return rows.slice(0, 60);
+  for (const h of document.querySelectorAll('[class*="_headerRow_"]')) {
+    const labs = [...h.querySelectorAll('[class*="_headerContent_"]')].map((e) => e.innerText.trim().toLowerCase());
+    const box = h.parentElement;
+    const bom = labs.some((l) => /^(ilosc|ilość|szt\.?|qty|menge)$/.test(l)); // таблица рисунка узла (есть количество)
+    for (const row of box.querySelectorAll('[class*="_row_"]')) {
+      if (/_headerRow_/.test(row.className) || [...row.classList].some((c) => /_inactive|_disabled/.test(c))) continue;
+      const fields = [...(row.querySelector('[class*="_fieldContainer_"]') || row).children].map((f) => f.innerText.replace(/\s+/g, ' ').trim());
+      const r = { _table: true, _bom: bom };
+      labs.forEach((l, i) => { if (l) r[l] = fields[i] || ''; });
+      push(r);
+    }
+  }
+  return rows.slice(0, 80);
 }
 function clickBest(q) {
   // строка, где в названии больше всего слов запроса (а не первая попавшаяся)
-  const words = String(q).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/\s+/).filter((w) => w.length > 2).map((w) => w.slice(0, 5));
-  let best = null, score = -1, hits = 0;
+  const words = String(q).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[\s,]+/).filter((w) => w.length > 2).map((w) => w.slice(0, 5));
+  let best = null, score = -1, hits = 0, num = null;
+  const cands = [];
   for (const it of document.querySelectorAll('[class*="_listItem_"]')) {
     if ([...it.classList].some((c) => /_inactive/.test(c))) continue;
-    const name = it.innerText.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const n = [...it.querySelectorAll('[class*="_listItemColumn_"]')].map((c) => c.innerText.replace(/\s+/g, ' ').trim()).find((t) => /^Numer cz/i.test(t))?.replace(/^Numer cz\S*\s*/i, '') || null;
+    cands.push({ el: it, text: it.innerText, num: n });
+  }
+  // таблица результатов поиска (без колонки количества)
+  for (const h of document.querySelectorAll('[class*="_headerRow_"]')) {
+    const labs = [...h.querySelectorAll('[class*="_headerContent_"]')].map((e) => e.innerText.trim().toLowerCase());
+    const ni = labs.findIndex((l) => /^numer cz/.test(l)), nmi = labs.findIndex((l) => /^nazwa|^name/.test(l));
+    if (ni < 0 || labs.some((l) => /^(ilosc|ilość|szt\.?)$/.test(l))) continue;
+    for (const row of h.parentElement.querySelectorAll('[class*="_row_"]')) {
+      if (/_headerRow_/.test(row.className) || [...row.classList].some((c) => /_inactive|_disabled/.test(c))) continue;
+      const f = [...(row.querySelector('[class*="_fieldContainer_"]') || row).children].map((x) => x.innerText.replace(/\s+/g, ' ').trim());
+      cands.push({ el: row, text: f[nmi] || row.innerText, num: f[ni] || null });
+    }
+  }
+  for (const c of cands) {
+    const name = String(c.text).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const h = words.filter((w) => name.includes(w)).length;
     const sc = h - name.length / 1000;
-    if (sc > score) { score = sc; best = it; hits = h; }
+    if (sc > score) { score = sc; best = c.el; hits = h; num = c.num; }
   }
   // все слова запроса должны быть в названии (иначе «kolektor ssący» откроет «kolektor wydechowy»)
   if (!best || hits < Math.min(words.length, 2) || !hits) return null; // ни одного слова запроса в названии — не открываем чужую деталь
-  const num = [...best.querySelectorAll('[class*="_listItemColumn_"]')].map((c) => c.innerText.replace(/\s+/g, ' ').trim()).find((t) => /^Numer cz/i.test(t))?.replace(/^Numer cz\S*\s*/i, '') || null;
   best.click();
   return num;
 }
