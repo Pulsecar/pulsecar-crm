@@ -219,6 +219,7 @@ export function mountAiParts(crm, who) {
   crm.get('/ai-parts/ic-probe', async (req, res) => {
     who(req, 'settings.manage');
     const { findByArticle, quote } = await import('./ic.js');
+    if (req.query.raw && /^\/ic\/catalog\/[\w/.-]*$/.test(String(req.query.path || '/ic/catalog/products'))) { const { icRead } = await import('../integrations/intercars.js'); return res.json(await icRead(String(req.query.path || '/ic/catalog/products'), { query: req.query.sku ? {} : { index: String(req.query.article || ''), pageSize: 5 } }).catch((e) => ({ error: e.message }))); }
     const found = await findByArticle(String(req.query.article || ''), req.query.brand ? String(req.query.brand) : null, new Map());
     const q = await quote(found.map((f) => f.sku));
     res.json(found.map((f) => ({ ...f, ...(q.get(f.sku) || {}) })));
