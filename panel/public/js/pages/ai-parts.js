@@ -142,7 +142,7 @@ export function AiModal({ o, ai, onClose, reload }) {
       };
       const timer = setTimeout(() => finish(partial, false, 'partslink24 отвечал слишком долго'), 180_000);
       addEventListener('message', onMsg);
-      window.postMessage({ source: 'pulsecar-crm', type: 'pl24', reqId, job: { vin: job.vin, terms: job.terms } }, location.origin);
+      window.postMessage({ source: 'pulsecar-crm', type: 'pl24', reqId, job: { vin: job.vin, make: job.make, terms: job.terms } }, location.origin);
     });
   };
   const runPl24 = async () => {

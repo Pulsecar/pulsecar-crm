@@ -33,6 +33,47 @@ function enterVin(vin) {
   inp.form?.requestSubmit?.();
   return true;
 }
+// VIN подходит к нескольким маркам («Dla tego nr VIN znaleziono wiele wpisów» — Hyundai / Kia): выбираем марку авто
+function pickMake(make) {
+  const opts = [...document.querySelectorAll('[class*="_inputMenu_"] [role="button"]')];
+  if (!opts.length) return null;
+  const m = String(make || '').toLowerCase().split(/\s+/)[0];
+  const o = opts.find((x) => x.innerText.trim().toLowerCase().startsWith(m)) || (opts.length === 1 ? opts[0] : null);
+  if (!o) return 'nomatch';
+  o.click();
+  return 'clicked';
+}
+// старый интерфейс partslink24 (Hyundai / Kia и др.: …/kia_parts/vin-group.action): окно «Szukaj» и таблица searchResultTable
+function legacySearch(q) {
+  let i = document.getElementById('searchTerm');
+  if (!i) { const a = document.getElementById('search') || [...document.querySelectorAll('a')].find((x) => /^Szukaj$/i.test(x.innerText.trim())); a?.click(); i = document.getElementById('searchTerm'); }
+  if (!i) return false;
+  document.querySelectorAll('table.searchResultTable').forEach((t) => t.remove());
+  i.value = q;
+  (i.form?.querySelector('button, input[type=submit]') || i.nextElementSibling)?.click();
+  return true;
+}
+function legacyRead(q) {
+  const t = document.querySelector('table.searchResultTable');
+  if (!t) return null;
+  const trs = [...t.querySelectorAll('tr')];
+  const head = [...(trs[0]?.children || [])].map((c) => c.innerText.trim().toLowerCase());
+  const col = (re) => head.findIndex((h) => re.test(h));
+  const ni = col(/numer/), nm = col(/nazwa|name/), gi = col(/rysun|illustr/), pi = col(/pnc|poz/);
+  // поиск в старом каталоге ищет по любому слову — берём строки, где есть все значимые слова запроса
+  const words = String(q).toLowerCase().split(/[\s,\-]+/).filter((w) => w.length > 2).map((w) => w.slice(0, 5));
+  const rows = [];
+  for (const tr of trs.slice(1)) {
+    const c = [...tr.children].map((x) => x.innerText.replace(/\s+/g, ' ').trim());
+    const name = c[nm] || '';
+    if (!c[ni]) continue;
+    const low = name.toLowerCase();
+    if (words.length && !words.every((w) => low.includes(w))) continue;
+    if (!rows.some((r) => r.number === c[ni])) rows.push({ number: c[ni], name, note: '', qty: '', model: '', group: c[gi] || '', pos: '', pnc: c[pi] || '' });
+  }
+  return rows.slice(0, 20);
+}
+
 function readList(onlyNumber) {
   // два вида списков partslink24: «карточки» (_listItem_ с подписями колонок — VW, BMW…) и таблицы (_headerRow_ + _row_ — Toyota и др.)
   // неактивные строки (_inactive / _disabled) не подходят к этому VIN
@@ -103,7 +144,33 @@ function clickBest(q) {
 }
 
 /** Главный сценарий: VIN → поиск каждой детали → активные строки (+ количество из иллюстрации) */
-globalThis.pl24Run = async function pl24Run({ vin, terms }, progress) {
+const LEGACY = /partslink24\.com\/[^/]+\/[a-z_]+_parts\/[a-z-]+\.action/;
+/** Старый интерфейс partslink24: поиск каждой детали в окне «Szukaj» (каталог уже открыт по VIN), без рисунков узла */
+async function legacyRun(tabId, terms, progress) {
+  await waitLoad(tabId);
+  await wait(1500);
+  const out = [];
+  for (const [i, t] of terms.entries()) {
+    const qs = [t.q, ...(Array.isArray(t.alt) ? t.alt : [])].map((x) => String(x || '').trim()).filter(Boolean).slice(0, 3);
+    let rows = [], usedQ = t.q;
+    for (const q of qs) {
+      await pause();
+      progress(`Ищу «${q}» (${i + 1} из ${terms.length})…`);
+      const st = await run(tabId, pageState);
+      if (st && st !== 'ok') return { ok: false, stop: st, results: out, error: 'partslink24 остановил работу (вход / капча) — продолжите вручную' };
+      if (!(await run(tabId, legacySearch, [q]))) break;
+      let r = null;
+      for (let k = 0; k < 14 && !r; k++) { await wait(500); r = await run(tabId, legacyRead, [q]); }
+      rows = r || [];
+      usedQ = q;
+      if (rows.length) break;
+    }
+    out.push({ key: t.key, q: usedQ, rows, bom: [] });
+  }
+  return { ok: true, service: 'legacy', results: out };
+}
+
+globalThis.pl24Run = async function pl24Run({ vin, terms, make }, progress) {
   vin = String(vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   terms = (terms || []).slice(0, 12);
   if (vin.length !== 17 || !terms.length) return { ok: false, error: 'Нет VIN или списка деталей' };
@@ -118,12 +185,19 @@ globalThis.pl24Run = async function pl24Run({ vin, terms }, progress) {
   let st = await run(tabId, pageState);
   if (st !== 'ok') return { ok: false, stop: st, error: st === 'login' ? 'Войдите в partslink24 в открытой вкладке и нажмите ещё раз' : 'partslink24 показал проверку (капча) — пройдите её сами и нажмите ещё раз' };
   const SLUG = /\/pl24-app\/([^/]+)\/([A-Z0-9]{7,17})\//;
+  if (open && LEGACY.test(open.url || '')) return legacyRun(tabId, terms, progress);
   let slug = SLUG.exec(await tabUrl(tabId));
   if (!slug || slug[2] !== key) {
     progress('Открываю авто по VIN…');
     await run(tabId, enterVin, [key]);
     const until = Date.now() + 15000;
-    while (Date.now() < until && !((slug = SLUG.exec(await tabUrl(tabId))) && slug[2] === key)) await wait(500);
+    while (Date.now() < until && !((slug = SLUG.exec(await tabUrl(tabId))) && slug[2] === key)) {
+      if (LEGACY.test(await tabUrl(tabId))) break;
+      await wait(500);
+      const pm = await run(tabId, pickMake, [make]);
+      if (pm === 'clicked') await wait(1500);
+    }
+    if (LEGACY.test(await tabUrl(tabId))) return legacyRun(tabId, terms, progress);
     if (!slug || slug[2] !== key) {
       if (key !== vin) { // на всякий случай — полный VIN
         await run(tabId, enterVin, [vin]);

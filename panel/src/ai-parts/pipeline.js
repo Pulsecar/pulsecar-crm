@@ -288,13 +288,14 @@ async function pick(jobId) {
       if (need && has && need !== has) { mark(f, 'другая ось: ' + String(f.prod.desc).slice(0, 120)); return false; }
       return true;
     });
-    const sus = keep.map((f, i) => ({ f, i })).filter(({ f }) => f.src !== 'ecat' && (!sameType(parts[f.pi], f.prod.name)
+    const KIT = /zestaw|komplet|\bkpl\b|\bkit\b|\bset\b|satz/i;
+    const sus = keep.map((f, i) => ({ f, i })).filter(({ f }) => (KIT.test(parts[f.pi].name_pl || '') && f.prod.name && !KIT.test(f.prod.name)) || f.src !== 'ecat' && (!sameType(parts[f.pi], f.prod.name)
       || (f.kind !== 'oe' && /pasuje do/i.test(f.prod.desc || '') && !fitsMake(f.prod.desc, vehicle.make))));
     if (!sus.length || cancelled()) return keep;
     let okIds = new Set();
     try {
       const { data: ck, usage: u6 } = await callTool({
-        system: 'For each catalogue item decide if it is the SAME TYPE of part as the needed part (names are Polish; synonyms and kits count as the same type, e.g. "Pierścień uszczelniający" = "Uszczelka", "Komplet klocków" = "Klocki") AND fits this vehicle: catalogue_description often says the axle (przód / tył) and "pasuje do:" with makes and models — if it lists other makes/models and not this vehicle (allowing platform twins, e.g. Toyota Aygo = Citroen C1 = Peugeot 107), it does NOT fit. A different product (e.g. gearbox shaft instead of brake pad wear sensor) or a part for another car is NOT ok. Return ids of items that are ok.',
+        system: 'For each catalogue item decide if it is the SAME TYPE of part as the needed part (names are Polish; synonyms and kits count as the same type, e.g. "Pierścień uszczelniający" = "Uszczelka", "Komplet klocków" = "Klocki") AND fits this vehicle: catalogue_description often says the axle (przód / tył) and "pasuje do:" with makes and models — if it lists other makes/models and not this vehicle (allowing platform twins, e.g. Toyota Aygo = Citroen C1 = Peugeot 107), it does NOT fit. A different product (e.g. gearbox shaft instead of brake pad wear sensor) or a part for another car is NOT ok. When the needed part is a KIT (zestaw / komplet, e.g. "Zestaw łańcucha rozrządu" = chain + tensioner + guides + sprockets), a single component (only the chain, only a tensioner) is NOT ok. Return ids of items that are ok.',
         user: JSON.stringify({ vehicle: { make: vehicle.make, model: vehicle.model, year: vehicle.year, capacity_ccm: vehicle.capacity_ccm }, items: sus.map(({ f, i }) => ({ id: String(i), need: parts[f.pi].name_pl, catalogue_name: f.prod.name, catalogue_description: f.prod.desc || null, brand: f.prod.brand, article: f.prod.index })) }),
         tool: { name: 'check_types', description: 'Items of the right part type', input_schema: { type: 'object', properties: { ok_ids: { type: 'array', items: { type: 'string' } } }, required: ['ok_ids'] } },
         maxTokens: 800, timeout: 45_000,
@@ -592,10 +593,16 @@ async function pick(jobId) {
 /** Привод ГРМ по строкам partslink24 («# фраза» + найденные строки): 'chain' | 'belt' | null */
 export function timingDrive(paste) {
   let chain = false, belt = false, cur = null, rows = 0;
-  const flush = () => { if (cur && rows) { if (/łańcuch|lancuch|chain|kette/i.test(cur)) chain = true; if (/pas(ek|ka)|timing\s*belt|zahnriemen/i.test(cur)) belt = true; } };
+  // в разделе «# фраза» считаем только строки, где в названии есть цепь / зубчатый ремень (поиск каталога бывает «по любому слову»)
+  const CH = /łańcuch|lancuch|chain|kette/i, BE = /(pas(ek|ka)\s*(z[ęe]bat|rozrz))|timing\s*belt|belt[-\s,]*timing|zahnriemen/i;
+  let chainRows = 0, beltRows = 0;
+  const flush = () => { if (cur) { if (CH.test(cur) && chainRows) chain = true; if ((/pas(ek|ka)|belt|riemen/i.test(cur)) && beltRows) belt = true; } };
   for (const line of String(paste || '').split('\n')) {
-    if (/^#\s/.test(line) && !/^##/.test(line)) { flush(); cur = line.slice(2); rows = 0; continue; }
-    if (cur && line.trim() && !/nie znaleziono/i.test(line) && !/^##/.test(line)) rows++;
+    if (/^#\s/.test(line) && !/^##/.test(line)) { flush(); cur = line.slice(2); chainRows = beltRows = 0; continue; }
+    if (!cur || !line.trim() || /nie znaleziono/i.test(line) || /^##/.test(line)) continue;
+    rows++;
+    if (CH.test(line)) chainRows++;
+    if (BE.test(line)) beltRows++;
   }
   flush();
   return chain && !belt ? 'chain' : belt && !chain ? 'belt' : null;
@@ -679,7 +686,7 @@ A service advisor describes the job for a specific vehicle. Produce the list of 
 
 Rules:
 - Expand standard jobs into parts ("ТО/service" → oil, oil filter, air filter, cabin filter, drain plug washer...). Use workshop_kits when given.
-- TIMING jobs ("rozrząd", "ГРМ", "timing"): FIRST decide whether THIS engine has a timing CHAIN or a timing BELT — from partslink24_rows (only parts fitted to this VIN are listed: chain / guides / chain tensioner → chain; toothed belt → belt), then workshop_history_same_car / same_model, then your knowledge of this exact engine code. CHAIN engine → "Zestaw łańcucha rozrządu" (chain, guides/slides, tensioner, sprockets — kit or separate parts as in partslink24) and, if the request asks for the pump or the workshop usually replaces it, the water pump as a SEPARATE part ("Pompa wody") — never a "belt kit with water pump" and never a timing belt on a chain engine. BELT engine → belt kit (with water pump only when the pump is driven by the timing belt, otherwise kit + separate pump if requested). If you cannot tell belt vs chain, do not guess: list the parts you can confirm and explain in "check" (Russian) that the drive type must be checked in partslink24.
+- TIMING jobs ("rozrząd", "ГРМ", "timing"): FIRST decide whether THIS engine has a timing CHAIN or a timing BELT — from partslink24_rows (only parts fitted to this VIN are listed: chain / guides / chain tensioner → chain; toothed belt → belt), then workshop_history_same_car / same_model, then your knowledge of this exact engine code. CHAIN engine → ONE part "Zestaw łańcucha rozrządu" (key timing_chain_kit, unit kpl.): a complete KIT (chain + tensioner + guides/slides + sprockets), with the OE numbers of its components from partslink24 in "oe" (chain, tensioner, guides) and aftermarket KIT article numbers in analogs (Febi/SWAG, INA, Lemförder, Bga, Dayco, Gates… kits for this engine) — never only the chain and, if the request asks for the pump or the workshop usually replaces it, the water pump as a SEPARATE part ("Pompa wody") — never a "belt kit with water pump" and never a timing belt on a chain engine. BELT engine → belt kit (with water pump only when the pump is driven by the timing belt, otherwise kit + separate pump if requested). If you cannot tell belt vs chain, do not guess: list the parts you can confirm and explain in "check" (Russian) that the drive type must be checked in partslink24.
 - Oils and fluids (unit "l"): leave "oe" EMPTY unless there is a real OE part number of the fluid (e.g. "83 21 2 365 946"); never put a product name or viscosity there. List the oil products themselves in "analogs" with their exact manufacturer article numbers (e.g. MOTUL "109474" / "17603", CASTROL "15F0FB"), several package sizes when you know them.
 - Quantities from the engine: engine oil = factory capacity with filter in litres (unit "l"), spark plugs = number of cylinders, glow plugs for diesels instead of spark plugs (always with a check note). Explain each quantity in qty_note (Russian).
 - partslink24_rows may contain "## rysunek węzła" blocks: the COMPLETE parts list of the assembly drawing for THIS car (position. OE number | name | qty | notes). Use them as the authority: take the main part and every gasket / seal / O-ring / one-time bolt / clip from that drawing that must be renewed when the assembly is removed or replaced, with the drawing quantity and exactly that OE number. Do NOT add sensors, actuators, brackets or other reusable parts from the drawing unless the request asks for them (mention them in note instead).
