@@ -21,8 +21,10 @@ const CATALOG = {
   'K015688XS': { sku: 'GAT1', brand: 'GATES', articleNumber: 'K015688XS' },
   '04E198119A': { sku: 'VAG1', brand: 'VAG', articleNumber: '04E198119A' },
   'W71295': { sku: 'MANN1', brand: 'MANN-FILTER', articleNumber: 'W 712/95' },
+  'P06100': { sku: 'BRE1', brand: 'BREMBO', articleNumber: 'P 06 100' },
+  'GDB2543': { sku: 'TRW1', brand: 'TRW', articleNumber: 'GDB2543' },
 };
-const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0] };
+const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0], BRE1: [400, 700], TRW1: [150, 260] };
 
 const mock = createServer(async (req, res) => {
   let body = ''; for await (const c of req) body += c;
@@ -57,6 +59,10 @@ const mock = createServer(async (req, res) => {
     assert.equal(b.tool_choice.name, 'parts_plan');
     const ctx = JSON.parse(b.messages[0].content);
     if (ctx.request !== undefined) lastCtx = ctx;
+    // колодки Brembo: номер из истории этого же авто (артикул Brembo) ИИ ошибочно кладёт в OE — подбор всё равно должен найти его в IC
+    if (/Brembo/.test(ctx.request || '')) return json(200, { usage: { input_tokens: 900, output_tokens: 200 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
+      { key: 'brake_pads_front', name_pl: 'Klocki hamulcowe przednie', qty: 1, unit: 'kpl.', brand_wanted: 'Brembo', oe: [{ number: 'P 06 100', from: 'history' }], analogs: [{ brand: 'TRW', article: 'GDB2543' }] },
+    ] } }] });
     assert.equal(ctx.vehicle.vin, 'WVWZZZAUZGW123456');
     assert.ok(!JSON.stringify(ctx).includes('Kowalski'), 'данные клиента не уходят в Claude');
     return json(200, { usage: { input_tokens: 1200, output_tokens: 400 }, content: [{ type: 'tool_use', name: 'parts_plan', input: { parts: [
@@ -345,6 +351,21 @@ try {
     await new Promise((x) => setTimeout(x, 2500));
     assert.equal((await req('orders/' + q9.id)).items.length, 0);
     assert.equal((await req('ai-parts/jobs/' + id)).status, 'cancelled');
+  });
+  await t('номер из истории этого же авто — артикул Brembo, даже если ИИ положил его в OE; бренд, названный клиентом, — в приоритете', async () => {
+    const old = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    await req(`orders/${old.id}/items`, { body: { kind: 'part', name: 'Klocki hamulcowe kpl.', code: 'P 06 100', qty: 1, price: 950 } });
+    const qb = await req('orders', { body: { kind: 'quote', customer_id: c.id, car_id: car.id } });
+    const { id } = await req(`ai-parts/orders/${qb.id}/jobs`, { body: { text: 'Тормозные колодки Brembo передние', level: 'mid' } });
+    let j; for (let i = 0; i < 80; i++) { j = await req('ai-parts/jobs/' + id); if (['done', 'error'].includes(j.status)) break; await new Promise((x) => setTimeout(x, 150)); }
+    assert.equal(j.status, 'done', j.error);
+    const sc = lastCtx.workshop_history_same_car.flatMap((x) => x.parts).find((x) => x.code === 'P 06 100');
+    assert.equal(sc.brand, 'BREMBO'); assert.equal(sc.number_type, 'aftermarket article');
+    assert.match(j.steps.find((s) => s.key === 'history').info, /этот же автомобиль в истории/);
+    const bp = (await req(`ai-parts/orders/${qb.id}`)).lines.find((l) => l.group_key === 'brake_pads_front');
+    assert.ok(bp, 'колодки найдены');
+    assert.equal(bp.variants[bp.chosen].brand, 'BREMBO', 'клиент просил Brembo — не дешёвый TRW');
+    assert.ok(!Object.values(bp.variants).some((v) => v.brand === 'TRW'));
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });

@@ -89,6 +89,23 @@ async function pick(jobId) {
     FROM orders o JOIN cars k ON k.id = o.car_id
     WHERE o.id <> ? AND k.make = ? AND k.model LIKE ? AND EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.kind = 'part')
     ORDER BY (k.capacity = ?) DESC, o.id DESC LIMIT 25`, o.id, car.make, model0 + '%', car.capacity || -1) : [];
+  // этот же автомобиль (тот же VIN): что сервис уже ставил / считал — самые точные номера. Бренд каждого номера уточняем в каталоге IC
+  // (номер из истории бывает не OE, а артикулом производителя: Brembo «P 06 100», MANN «C 28 053»)
+  const sameRows = all(`SELECT o.id, o.kind, o.created_at, i.name, i.code, i.qty FROM orders o JOIN cars k ON k.id = o.car_id JOIN order_items i ON i.order_id = o.id AND i.kind = 'part'
+    WHERE o.id <> ? AND (o.car_id = ? OR (? <> '' AND upper(k.vin) = ?)) AND i.id NOT IN (SELECT order_item_id FROM ai_lines WHERE status = 'draft' AND order_item_id IS NOT NULL)
+    ORDER BY o.id DESC, i.pos LIMIT 80`, o.id, car.id, vin, vin);
+  const icCache = new Map();
+  const codeBrand = new Map();
+  const codes = [...new Set(sameRows.map((r) => String(r.code || '').trim()).filter((c) => norm(c).length >= 4))].slice(0, 25);
+  await Promise.all(codes.map(async (c) => { try { const r = await findByArticle(c, null, icCache); if (r.length) codeBrand.set(c, r[0].brand || null); } catch { /* без бренда */ } }));
+  const sameCar = [];
+  for (const r of sameRows) {
+    let e = sameCar.find((x) => x.id === r.id);
+    if (!e) sameCar.push(e = { id: r.id, type: r.kind === 'quote' ? 'wycena' : 'zlecenie', date: r.created_at?.slice(0, 10), parts: [] });
+    const code = String(r.code || '').trim();
+    const b = codeBrand.get(code);
+    e.parts.push({ name: r.name, code: code || null, brand: b || null, number_type: !code ? null : b ? (normBrand(b) === normBrand(vehicle.make) ? 'OE' : 'aftermarket article') : null, qty: r.qty });
+  }
   // похожие работы по всей истории сервиса (любые авто): что разбирали, какие прокладки / уплотнения меняли, сколько часов
   let jobTerms = [];
   try {
@@ -103,7 +120,7 @@ async function pick(jobId) {
   } catch { jobTerms = [req.text]; }
   const similar = similarJobs(jobTerms, car, 15).filter((x) => x.work.length || x.parts.length);
   const know = jobKnowledge(jt2(jobTerms));
-  step('history', 'ok', `похожих выцен на эту модель: ${past.length}, похожих работ в истории: ${similar.length}${know.parts.length ? `, связанных деталей: ${know.parts.length}` : ''}${know.knowledge.length ? `, знаний по узлам: ${know.knowledge.length}` : ''}${verified.length ? `, проверенных номеров: ${verified.length}` : ''}`);
+  step('history', 'ok', `${sameCar.length ? `этот же автомобиль в истории: ${sameCar.length}, ` : ''}похожих выцен на эту модель: ${past.length}, похожих работ в истории: ${similar.length}${know.parts.length ? `, связанных деталей: ${know.parts.length}` : ''}${know.knowledge.length ? `, знаний по узлам: ${know.knowledge.length}` : ''}${verified.length ? `, проверенных номеров: ${verified.length}` : ''}`);
   if (cancelled()) return;
 
   // 3. Claude: позиции, количество, OE, кандидаты-аналоги
@@ -113,7 +130,8 @@ async function pick(jobId) {
   const planUser = JSON.stringify({
       vehicle, request: req.text, manager_comment: req.comment || null, workshop_rules_text: getSetting('ai_parts_notes') || null, wanted_level: req.level,
       partslink24_rows: req.paste ? req.paste.slice(0, 12000) : null,
-      workshop_history_same_model: past.map((p) => ({ date: p.created_at?.slice(0, 10), engine: [p.engine, p.capacity, p.fuel].filter(Boolean).join(' '), parts: p.parts })).slice(0, 25),
+      workshop_history_same_car: sameCar.map(({ id, ...x }) => x).slice(0, 10),
+      workshop_history_same_model: past.filter((p) => !sameCar.some((x) => x.id === p.id)).map((p) => ({ date: p.created_at?.slice(0, 10), engine: [p.engine, p.capacity, p.fuel].filter(Boolean).join(' '), parts: p.parts })).slice(0, 25),
       workshop_verified_numbers: verified,
       workshop_similar_jobs_any_car: similar,
       workshop_parts_usually_with_these_jobs: know.parts,
@@ -138,7 +156,6 @@ async function pick(jobId) {
 
   // 4. Inter Cars: проверяем кандидатов в каталоге, берём цены и наличие
   step('prices', 'run');
-  const cache = new Map();
   const blackBrands = blacklist();
   const oeBrand = normBrand(vehicle.make);
   const found = [];
@@ -179,7 +196,6 @@ async function pick(jobId) {
             maxTokens: 3000, timeout: 90_000,
           });
           run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u3.input_tokens || 0, u3.output_tokens || 0, jobId);
-          const oeNums = new Set(parts.flatMap((p) => (p.oe || []).filter((x) => !x.hidden).map((x) => norm(x.number))));
       for (const p of parts) if (p._q) p.oe = (p.oe || []).filter((x) => !x.hidden);
           for (const pp of pk.parts || []) {
             const c = cand.find((x) => x.key === pp.key);
@@ -187,7 +203,8 @@ async function pick(jobId) {
             for (const code of pp.codes || []) {
               const it = c.items.find((x) => x.code === code);
               if (!it || blackBrands.has(normBrand(it.brand))) continue;
-              const isOe = !it.brand || /^OE\b/i.test(it.brand) || oeNums.has(norm(it.index));
+              // OE — только товар марки авто; номер из списка OE, но другого бренда (Brembo P 06 100) — это аналог
+              const isOe = !it.brand || /^OE\b/i.test(it.brand) || normBrand(it.brand) === oeBrand;
               found.push({ pi: c.pi, kind: isOe ? 'oe' : 'analog', brand: it.brand, article: it.index, src: 'ecat',
                 prod: { sku: it.code, index: it.index, brand: isOe ? (it.brand && !/^OE\b/i.test(it.brand) ? it.brand : vehicle.make) : it.brand, articleNumber: it.index, name: it.name } });
               hits++;
@@ -201,19 +218,24 @@ async function pick(jobId) {
   }
   const tasks = [];
   parts.forEach((p, pi) => {
-    if (ecatParts.has(pi)) return; // аналоги уже есть из e-Catalog
-    for (const a of (p.analogs || []).slice(0, 10)) if (a.article && !blackBrands.has(normBrand(a.brand))) tasks.push({ pi, kind: 'analog', brand: a.brand, article: a.article });
+    // аналоги уже есть из e-Catalog — но номера из истории этого авто / нужного клиенту бренда и OE проверяем в каталоге IC всегда
+    const wanted = p.brand_wanted ? normBrand(p.brand_wanted) : null;
+    const strong = (a) => a.from === 'history' || (wanted && normBrand(a.brand) === wanted);
+    const an = (p.analogs || []).filter((a) => !ecatParts.has(pi) || strong(a)).sort((a, b) => strong(b) - strong(a));
+    for (const a of an.slice(0, 10)) if (a.article && !blackBrands.has(normBrand(a.brand))) tasks.push({ pi, kind: 'analog', brand: a.brand, article: a.article });
     for (const x of (p.oe || []).slice(0, 3)) if (x.number) tasks.push({ pi, kind: 'oe', brand: null, article: x.number });
   });
   const tried = [];
   const lookup = async (t) => {
-    const r = await findByArticle(t.article, t.brand, cache);
+    const r = await findByArticle(t.article, t.brand, icCache);
     checked++;
     tried.push({ pi: t.pi, kind: t.kind, brand: t.brand, article: t.article, found: r.length });
     for (const prod of r) {
-      if (t.kind === 'oe' && prod.brand && normBrand(prod.brand) !== oeBrand) continue; // OE — только товар марки авто
+      // номер из списка OE, а товар другого бренда — это артикул производителя (Brembo «P 06 100»): берём как аналог, а не выбрасываем
+      const kind = t.kind === 'oe' && prod.brand && normBrand(prod.brand) !== oeBrand ? 'analog' : t.kind;
+      if (kind === 'analog' && blackBrands.has(normBrand(prod.brand))) continue;
       hits++;
-      found.push({ ...t, prod });
+      found.push({ ...t, kind, prod });
     }
   };
   await pool(tasks, 4, lookup);
@@ -265,15 +287,19 @@ async function pick(jobId) {
     if (oeVars.length) variants.oe = oeVars[0];
     return variants;
   };
-  const pickLevel = (variants) => (req.level === 'eco' ? ['eco', 'mid', 'oe'] : req.level === 'oe' ? ['oe', 'mid', 'eco'] : ['mid', 'eco', 'oe']).find((k) => variants[k]) || null;
+  const pickLevel = (variants, lvl = req.level) => (lvl === 'eco' ? ['eco', 'mid', 'oe'] : lvl === 'oe' ? ['oe', 'mid', 'eco'] : ['mid', 'eco', 'oe']).find((k) => variants[k]) || null;
+  const partLevel = (p) => (['eco', 'mid', 'oe'].includes(p.level) ? p.level : req.level);
+  // клиент назвал бренд («колодки Brembo») — если такой есть в наличии, берём только его
+  const wantedOnly = (p, arr) => { const w = p.brand_wanted ? normBrand(p.brand_wanted) : null; const m = w ? arr.filter((v) => normBrand(v.brand) === w) : []; return m.length ? m : arr; };
   const per = parts.map((p, pi) => {
     const mine = found.filter((f) => f.pi === pi);
     const vars = (arr) => arr.map(variantOf).filter(Boolean);
-    const oeVars = vars(mine.filter((f) => f.kind === 'oe')).sort((a, b) => a.sellGross - b.sellGross);
+    const seenOe = new Set();
+    const oeVars = vars(mine.filter((f) => f.kind === 'oe')).filter((v) => !seenOe.has(v.sku) && seenOe.add(v.sku)).sort((a, b) => a.sellGross - b.sellGross);
     const seen = new Set();
-    const analogs = vars(mine.filter((f) => f.kind === 'analog')).filter((v) => normBrand(v.brand) !== oeBrand && !seen.has(v.sku) && seen.add(v.sku)).sort((a, b) => a.sellGross - b.sellGross);
+    const analogs = wantedOnly(p, vars(mine.filter((f) => f.kind === 'analog')).filter((v) => normBrand(v.brand) !== oeBrand && !seen.has(v.sku) && seen.add(v.sku)).sort((a, b) => a.sellGross - b.sellGross));
     const variants = tiers(oeVars, analogs, p.key);
-    return { variants, chosen: pickLevel(variants), oeVars, src: 'ic' };
+    return { variants, chosen: pickLevel(variants, partLevel(p)), oeVars, src: 'ic' };
   });
 
   // ожидание ответа расширения (страница CRM передаёт результаты из вкладки менеджера); null — отменено
@@ -341,8 +367,8 @@ async function pick(jobId) {
             };
             const oeV = rows.filter((it) => normBrand(it.brand) === oeBrand).map(toV).sort((a, b) => a.sellGross - b.sellGross);
             const anV = rows.filter((it) => normBrand(it.brand) !== oeBrand).map(toV).sort((a, b) => a.sellGross - b.sellGross);
-            const variants = tiers(oeV, anV, parts[c.pi].key);
-            const chosen = pickLevel(variants);
+            const variants = tiers(oeV, wantedOnly(parts[c.pi], anV), parts[c.pi].key);
+            const chosen = pickLevel(variants, partLevel(parts[c.pi]));
             if (chosen) { per[c.pi] = { variants, chosen, oeVars: oeV, src: 'profiauto' }; fromPa++; }
             if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check;
           }
@@ -390,8 +416,8 @@ async function pick(jobId) {
           const chosenOffers = (pp.offers || []).map((x) => ({ it: c.r.items.find((y) => y.offerId === String(x.id)), oe: !!x.oe })).filter((x) => x.it && !blackBrands.has(normBrand(x.it.brand)));
           const oeV = chosenOffers.filter((x) => x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
           const anV = chosenOffers.filter((x) => !x.oe).map((x) => toV(x.it)).sort((a, b) => a.sellGross - b.sellGross);
-          const variants = tiers(oeV, anV, parts[c.pi].key);
-          const chosen = pickLevel(variants);
+          const variants = tiers(oeV, wantedOnly(parts[c.pi], anV), parts[c.pi].key);
+          const chosen = pickLevel(variants, partLevel(parts[c.pi]));
           if (chosen) per[c.pi] = { variants, chosen, oeVars: oeV, src: 'allegro' };
           if (pp.check && !parts[c.pi].check) parts[c.pi].check = pp.check;
         }
@@ -402,7 +428,7 @@ async function pick(jobId) {
   if (cancelled()) return; // подбор отменён, пока ждали поставщиков — ничего не добавляем
   let added = 0, toCheck = 0, fromAllegro = 0;
   const notFound = [];
-  const hist = new Set(verified.map((v) => norm(v.oe)));
+  const hist = new Set([...verified.map((v) => norm(v.oe)), ...sameRows.map((r) => norm(r.code)).filter(Boolean)]);
   const pasted = norm(req.paste || '');
   for (const [pi, p] of parts.entries()) {
     const { variants, chosen, oeVars, src: supplierSrc } = per[pi];
@@ -498,7 +524,10 @@ Rules:
 - Oils and fluids (unit "l"): leave "oe" EMPTY unless there is a real OE part number of the fluid (e.g. "83 21 2 365 946"); never put a product name or viscosity there. List the oil products themselves in "analogs" with their exact manufacturer article numbers (e.g. MOTUL "109474" / "17603", CASTROL "15F0FB"), several package sizes when you know them.
 - Quantities from the engine: engine oil = factory capacity with filter in litres (unit "l"), spark plugs = number of cylinders, glow plugs for diesels instead of spark plugs (always with a check note). Explain each quantity in qty_note (Russian).
 - partslink24_rows may contain "## rysunek węzła" blocks: the COMPLETE parts list of the assembly drawing for THIS car (position. OE number | name | qty | notes). Use them as the authority: take the main part and every gasket / seal / O-ring / one-time bolt / clip from that drawing that must be renewed when the assembly is removed or replaced, with the drawing quantity and exactly that OE number. Do NOT add sensors, actuators, brackets or other reusable parts from the drawing unless the request asks for them (mention them in note instead).
-- OE numbers: take them from partslink24_rows, workshop_verified_numbers and workshop_history_same_model first (from: "partslink24" / "history"). Add OE numbers from your own knowledge only when you are reasonably sure for this exact engine/model (from: "knowledge"); set oe_sure=true only if you are certain. Never invent numbers.
+- workshop_history_same_car = quotes / repair orders of THIS SAME vehicle (same VIN) made by the workshop: the strongest evidence. When the request asks for a part that is there (same part type and position), reuse exactly that number. Each code has "brand" and "number_type" checked in the Inter Cars catalogue: "OE" → put it in "oe" (from "history"); "aftermarket article" (e.g. BREMBO "P 06 100", MANN-FILTER "C 28 053") → put it in "analogs" with that brand and from "history", NOT in "oe". Never put an aftermarket article into "oe".
+- Workshop history codes (same car or same model) without a known brand: car-maker format numbers (BMW "34 10 7 889 662", VAG "04E 198 119 A") are OE; numbers in a parts maker format (Brembo "P 06 100", Mann "W 712/95", TRW "GDB1234", Bosch "0 986 ...") are aftermarket articles → analogs with that brand.
+- If the request names a brand for a part ("колодки Brembo", "масло Motul") — set "brand_wanted" to that brand and list that brand's exact article numbers for THIS vehicle first in analogs (for performance models such as BMW M, Audi RS, Mercedes AMG use the numbers for that model's own brake system, not the base model's). If the request says OE / original for a part ("диск ОЕ БМВ") set "level":"oe" for that part; "дешёвый / эконом" → "eco".
+- OE numbers: take them from partslink24_rows, workshop_verified_numbers, workshop_history_same_car and workshop_history_same_model first (from: "partslink24" / "history"). Add OE numbers from your own knowledge only when you are reasonably sure for this exact engine/model (from: "knowledge"); set oe_sure=true only if you are certain. Never invent numbers.
 - Analogs: for every part list 4–10 real aftermarket cross-references of that OE (exact catalogue article numbers as printed by the manufacturer / TecDoc) from DIFFERENT manufacturers and price tiers that are sold in Poland by Inter Cars (e.g. economy: Hepu, Filtron, Maxgear, Febi; middle: SKF, Gates, Contitech, Mann, Bosch, NGK, Mahle, TRW, Lemförder; premium: INA, LuK, Sachs, Brembo, Denso, Bilstein). Only numbers you actually know; they will be verified in the Inter Cars catalogue and non-existing ones dropped. Respect manager_comment and workshop_rules_text (e.g. "oil only Castrol" → only Castrol oils as analogs) and workshop_brand_rules (preferred brands per level eco/mid; never propose blacklisted brands).
 - If a part depends on equipment the VIN may not distinguish (engine code variants, brake disc size, gearbox) or you are unsure — fill "check" with a short Russian explanation instead of guessing.
 - name_pl: short Polish part name as on a Polish invoice (e.g. "Zestaw paska rozrządu z pompą wody", "Filtr oleju", "Olej silnikowy 5W-30 VW 504.00").
@@ -525,7 +554,9 @@ const TOOL = {
             qty_note: { type: 'string', description: 'Russian, why this quantity' },
             oe: { type: 'array', items: { type: 'object', properties: { number: { type: 'string' }, from: { type: 'string', enum: ['partslink24', 'history', 'knowledge'] } }, required: ['number', 'from'] } },
             oe_sure: { type: 'boolean' },
-            analogs: { type: 'array', items: { type: 'object', properties: { brand: { type: 'string' }, article: { type: 'string' }, tier: { type: 'string', enum: ['economy', 'middle', 'premium'] } }, required: ['brand', 'article'] } },
+            analogs: { type: 'array', items: { type: 'object', properties: { brand: { type: 'string' }, article: { type: 'string' }, tier: { type: 'string', enum: ['economy', 'middle', 'premium'] }, from: { type: 'string', enum: ['history', 'knowledge'] } }, required: ['brand', 'article'] } },
+            brand_wanted: { type: 'string', description: 'brand the manager asked for this part (empty if none)' },
+            level: { type: 'string', enum: ['eco', 'mid', 'oe'], description: 'only when the request asks for a level for this part (e.g. "OE")' },
             check: { type: 'string', description: 'Russian: why the manager must verify; empty if confident' },
             purpose: { type: 'string', description: 'why this part is needed (same language as request)' },
             job: { type: 'string', description: 'labour operation it belongs to (Polish)' },
