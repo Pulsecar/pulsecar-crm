@@ -376,7 +376,7 @@ export function addAiLabor(jobId, orderId, w) {
   if (one("SELECT 1 FROM ai_lines l WHERE l.order_id = ? AND l.group_key = ? AND l.status <> 'removed' AND EXISTS (SELECT 1 FROM order_items i WHERE i.id = l.order_item_id)", orderId, 'job:' + jk)) return null;
   const hours = Math.round(w.hours * 10) / 10;
   const vat = Number(getSetting('default_vat', '23')) || 23;
-  const rate = Number(getSetting('rbh_rate', '250')) || 0;
+  const rate = Number(getSetting('rbh_rate', '200')) || 0;
   const rbh = String(getSetting('labor_unit_default', 'oper') || 'oper').toLowerCase() === 'rbh';
   const hTxt = String(hours).replace('.', ',');
   // цена: ваш «Прайс работ» → цена этой работы в ваших прошлых выценах → часы × ставка

@@ -37,7 +37,7 @@ export function trainOnHistory() {
     FROM orders o LEFT JOIN cars k ON k.id = o.car_id
     WHERE EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id) ORDER BY o.id`);
   // часы работы: «rbh» — это и есть часы; «oper» (за операцию) — из стоимости строки по ставке нормо-часа сервиса
-  const rate = Number(getSetting('rbh_rate', '250')) || 250;
+  const rate = Number(getSetting('rbh_rate', '200')) || 200;
   const laborHours = (l) => {
     const q = Number(l.qty) || 0;
     let h = 0;

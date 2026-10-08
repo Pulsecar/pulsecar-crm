@@ -650,7 +650,7 @@ function seedMotowarsztat() {
   }
   const W = {
     show_amounts: 'gross', vat_rates: '23,8,5,0', payment_term_days: '0', payment_method_default: 'cash', discounts_on: '1', proforma_on: '1',
-    rbh_rate: '250', rbh_cost: '0', max_job_hours: '0', mileage_unit: 'km', power_unit: 'kW', labor_units: 'oper,rbh', labor_unit_default: 'oper',
+    rbh_rate: '200', rbh_cost: '0', max_job_hours: '0', mileage_unit: 'km', power_unit: 'kW', labor_units: 'oper,rbh', labor_unit_default: 'oper',
     only_assigned_finish: '0', require_time_before_finish: '0', require_mechanic_all: '0', require_mechanic_job: '0', block_finish_open_jobs: '0',
     save_owner_from_aztec: '1', order_type_on: '1', field_internal: '1', field_mechanic: '1', field_faults: '1', field_after: '1', field_external_no: '0',
     parts_to_jobs: '0', show_cost_column: '1', free_code: '1', pickup_format: 'datetime', pickup_warn_orange: '2', pickup_warn_red: '0',

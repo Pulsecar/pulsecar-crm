@@ -460,7 +460,7 @@ async function pick(jobId) {
     if (p.check) reasons.push(p.check);
     if (!chosen) reasons.push('Нет в наличии в Inter Cars' + (req.extAllegro ? ' и не найдено на Allegro' : '') + ' — подберите вручную');
     else if (!oe.length) reasons.push('Нет OE-номера — проверьте применимость');
-    else if (oe.every((x) => x.source === 'ИИ') && !p.oe_sure) reasons.push('OE-номер от ИИ не подтверждён историей / partslink24 — проверьте применимость');
+    else if (oe.every((x) => x.source === 'ИИ') && !p.oe_sure) reasons.push(req.paste ? 'OE-номер от ИИ: в partslink24 и истории сервиса этого номера нет — проверьте применимость' : 'OE-номер от ИИ (partslink24 не запускался, в истории нет) — проверьте применимость');
     if (chosen && supplierSrc === 'allegro') reasons.push(`С Allegro — закажите заранее по ссылке (наценка ${variants[chosen].markup}%)`);
     if (chosen && supplierSrc === 'profiauto') reasons.push(`Нет в наличии в Inter Cars — из ProfiAuto (${variants[chosen].delivery || 'в наличии'})`);
     if (chosen && variants[chosen].pack > 1) reasons.push(`Цена за 1 л (в упаковке ${String(variants[chosen].pack).replace('.', ',')} л по ${String(variants[chosen].packPrice).replace('.', ',')} zł) — закажите нужное число упаковок`);

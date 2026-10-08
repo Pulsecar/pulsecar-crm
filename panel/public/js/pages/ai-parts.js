@@ -116,31 +116,53 @@ export function AiModal({ o, ai, onClose, reload }) {
   const extN = extV ? extV.split('.').map(Number).reduce((a, x, i) => a + x * [10000, 100, 1][i], 0) : 0;
   const extOk = extN >= 10500, extAllegro = extN >= 10600, extPa = extN >= 10700;
   const [pl, setPl] = useState(null);
+  // partslink24: ищем OE-номера по VIN (ответ — строки для ИИ); timeout — не держим подбор дольше 3 минут
+  const pl24Fetch = async (text) => {
+    let job;
+    try { job = await api(`ai-parts/orders/${o.id}/pl24-terms`, { body: { text } }); } catch (e) { setPl({ error: e.message }); return ''; }
+    return new Promise((resolve) => {
+      const reqId = Math.random().toString(36).slice(2);
+      let partial = [];
+      const fmt = (x) => [x.number, x.name, x.qty && 'szt. ' + x.qty, x.note, x.model, x.group].filter(Boolean).join(' | ');
+      const toLines = (res) => res.flatMap((r) => [`# ${r.q}`, ...(r.rows || []).map(fmt), ...(r.rows?.length ? [] : ['(nie znaleziono)']),
+        ...(r.bom?.length ? [`## rysunek węzła (wszystkie części: uszczelki, śruby…)`, ...r.bom.map((x) => `${x.pos}. ${fmt(x)}`)] : [])]);
+      const finish = (res, ok, error) => {
+        clearTimeout(timer); removeEventListener('message', onMsg);
+        const lines = toLines(res || []);
+        const n = (res || []).filter((r) => r.rows?.length).length;
+        setPl(ok ? { done: true, text: `partslink24: найдено по ${n} из ${(res || []).length} деталей${(res || []).some((r) => r.bom?.length) ? ', со списками деталей узлов' : ''}` }
+          : { error: error || 'partslink24 не ответил', text: n ? 'часть номеров получена' : 'подбор идёт без partslink24' });
+        resolve(n ? lines.join('\n') : '');
+      };
+      const onMsg = (e) => {
+        const m = e.data;
+        if (e.source !== window || m?.source !== 'pulsecar-ext' || m.reqId !== reqId) return;
+        if (m.type === 'pl24-progress') { setPl({ busy: true, text: m.text }); if (Array.isArray(m.partial)) partial = m.partial; }
+        if (m.type === 'pl24-result') finish(m.results || m.rows || [], m.ok, m.error);
+      };
+      const timer = setTimeout(() => finish(partial, false, 'partslink24 отвечал слишком долго'), 180_000);
+      addEventListener('message', onMsg);
+      window.postMessage({ source: 'pulsecar-crm', type: 'pl24', reqId, job: { vin: job.vin, terms: job.terms } }, location.origin);
+    });
+  };
   const runPl24 = async () => {
     if (!f.text.trim()) return toast('Сначала напишите, что нужно', 'error');
     setPl({ busy: true, text: 'Готовлю список деталей для поиска…' });
-    let job;
-    try { job = await api(`ai-parts/orders/${o.id}/pl24-terms`, { body: { text: f.text } }); } catch (e) { setPl({ error: e.message }); return; }
-    const reqId = Math.random().toString(36).slice(2);
-    const onMsg = (e) => {
-      const m = e.data;
-      if (e.source !== window || m?.source !== 'pulsecar-ext' || m.reqId !== reqId) return;
-      if (m.type === 'pl24-progress') setPl({ busy: true, text: m.text });
-      if (m.type === 'pl24-result') {
-        removeEventListener('message', onMsg);
-        const fmt = (x) => [x.number, x.name, x.qty && 'szt. ' + x.qty, x.note, x.model, x.group].filter(Boolean).join(' | ');
-        const lines = (m.results || m.rows || []).flatMap((r) => [`# ${r.q}`, ...(r.rows || []).map(fmt), ...(r.rows?.length ? [] : ['(nie znaleziono)']),
-          ...(r.bom?.length ? [`## rysunek węzła (wszystkie części: uszczelki, śruby…)`, ...r.bom.map((x) => `${x.pos}. ${fmt(x)}`)] : [])]);
-        if (lines.length) { setF((cur) => ({ ...cur, paste: [cur.paste, lines.join('\n')].filter(Boolean).join('\n') })); setShowPaste(true); }
-        setPl(m.ok ? { done: true, text: `partslink24: найдено по ${(m.results || []).filter((r) => r.rows?.length).length} из ${(m.results || []).length} деталей${(m.results || []).some((r) => r.bom?.length) ? ', со списками деталей узлов' : ''}` } : { error: m.error, text: lines.length ? 'часть номеров получена' : '' });
-      }
-    };
-    addEventListener('message', onMsg);
-    window.postMessage({ source: 'pulsecar-crm', type: 'pl24', reqId, job: { vin: job.vin, terms: job.terms } }, location.origin);
+    const lines = await pl24Fetch(f.text);
+    if (lines) { setF((cur) => ({ ...cur, paste: [cur.paste, lines].filter(Boolean).join('\n') })); setShowPaste(true); }
   };
 
+  const [starting, setStarting] = useState(false);
   const start = async () => {
-    const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: { ...f, ext: extOk, extAllegro, extV: extN } }));
+    let paste = f.paste;
+    // OE-номера из partslink24 — автоматически перед подбором (если расширение есть и строки ещё не вставлены)
+    if (extOk && !paste.trim() && !pl?.done) {
+      setStarting(true);
+      setPl({ busy: true, text: 'partslink24: ищу OE-номера по VIN (ваш аккаунт)…' });
+      paste = await pl24Fetch(f.text);
+      setStarting(false);
+    }
+    const r = await act(() => api(`ai-parts/orders/${o.id}/jobs`, { body: { ...f, paste, ext: extOk, extAllegro, extV: extN } }));
     if (r) setJob({ id: r.id, status: 'queued', steps: d.steps.map((s) => ({ key: s.key, state: 'wait' })) });
   };
   const label = Object.fromEntries((d?.steps || []).map((s) => [s.key, s.label]));
@@ -150,7 +172,7 @@ export function AiModal({ o, ai, onClose, reload }) {
     foot=${html`${job?.status === 'done' ? html`<button class="btn primary" onClick=${onClose}>Готово</button>` : html`
       <span class="sub grow">${running ? 'Можно закрыть окно — позиции появятся в выцене сами.' : ''}</span>
       <button class="btn" onClick=${onClose}>${running ? 'Закрыть' : 'Отмена'}</button>
-      <button class="btn primary" disabled=${noVin || !f.text.trim() || running} title=${noVin ? 'Добавьте VIN в выцену' : ''} onClick=${start}><${Icon} n="spark" />Подобрать и добавить в выцену</button>`}`}>
+      <button class="btn primary" disabled=${noVin || !f.text.trim() || running || starting || pl?.busy} title=${noVin ? 'Добавьте VIN в выцену' : ''} onClick=${start}><${Icon} n="spark" />Подобрать и добавить в выцену</button>`}`}>
     ${d?.mock && html`<div class="ai-mock">Предпросмотр: подбор идёт на демо-данных (без Claude и Inter Cars), номера деталей условные.</div>`}
     <div class="ai-car">
       ${[['Марка', car?.make], ['Модель', car?.model], ['VIN', car?.vin], ['Двигатель', [car?.engine, car?.capacity && car.capacity + ' см³', car?.power_kw && car.power_kw + ' kW', car?.fuel].filter(Boolean).join(' · ')], ['Год', car?.year && String(car.year).replace(/\.0$/, '')], ['Пробег', car?.mileage && car.mileage.toLocaleString('pl-PL') + ' km']]
@@ -165,8 +187,8 @@ export function AiModal({ o, ai, onClose, reload }) {
       </div>
       <label class="f">Комментарий для ассистента <span class="sub">(необязательно)</span><input value=${f.comment} onInput=${set('comment')} placeholder="напр. масло только Castrol" /></label>
       <div class="ai-pl24">
-        <div class="grow"><b>OE-номера из partslink24</b> <span class="sub">(необязательно)</span>
-          <div class="sub">Работает с вашим аккаунтом partslink24 через расширение Pulsecar — или вставьте строки вручную.</div></div>
+        <div class="grow"><b>OE-номера из partslink24</b> <span class="sub">${extOk ? '(ищутся автоматически перед подбором)' : '(необязательно)'}</span>
+          <div class="sub">Работает с вашим аккаунтом partslink24 через расширение Pulsecar (войдите в partslink24 в Chrome) — или вставьте строки вручную.</div></div>
         <div class="row-btns" style="margin:0">${extOk
           ? html`<button class="btn sm primary" disabled=${pl?.busy || noVin} onClick=${runPl24}><${Icon} n="search" />Найти в partslink24</button>`
           : ''}

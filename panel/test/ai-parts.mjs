@@ -165,7 +165,7 @@ try {
     const lab = d.lines.find((l) => l.kind === 'labor');
     assert.equal(lab.title, 'Wymiana rozrządu'); assert.equal(lab.hours, 3.5);
     const li = o.items.find((i) => i.id === lab.order_item_id);
-    assert.equal(li.kind, 'labor'); assert.equal(li.unit, 'oper'); assert.equal(li.price, 1076.25); assert.match(li.norm_src, /ИИ: ~3,5 h \(история сервиса\)/); assert.match(li.note, /~3,5 h × 250 zł\/h/);
+    assert.equal(li.kind, 'labor'); assert.equal(li.unit, 'oper'); assert.equal(li.price, 861); assert.match(li.norm_src, /ИИ: ~3,5 h \(история сервиса\)/); assert.match(li.note, /~3,5 h × 200 zł\/h/);
     assert.ok(!calls.some((x) => x.includes('/ic/sales')), 'ничего не заказано');
   });
   await t('смена варианта меняет позицию в выцене', async () => {
