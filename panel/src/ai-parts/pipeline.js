@@ -259,6 +259,25 @@ async function pick(jobId) {
       await pool(t2, 4, lookup);
     } catch { /* второй круг не обязателен */ }
   }
+  // проверка типа товара: номер, придуманный неточно, может совпасть с совсем другой деталью («датчик износа колодок» → «вал КПП»).
+  // Название товара в IC без общих слов с нужной деталью — спорное: решает Claude, без ответа — отбрасываем
+  const sus = found.map((f, i) => ({ f, i })).filter(({ f }) => f.src !== 'ecat' && !sameType(parts[f.pi], f.prod.name));
+  if (sus.length && !cancelled()) {
+    let okIds = new Set();
+    try {
+      const { data: ck, usage: u6 } = await callTool({
+        system: 'For each catalogue item decide if it is the SAME TYPE of part as the needed part (names are Polish; synonyms and kits count as the same type, e.g. "Pierścień uszczelniający" = "Uszczelka", "Komplet klocków" = "Klocki"). A different product (e.g. gearbox shaft instead of brake pad wear sensor) is NOT ok. Return ids of items that are ok.',
+        user: JSON.stringify({ vehicle: { make: vehicle.make, model: vehicle.model }, items: sus.map(({ f, i }) => ({ id: String(i), need: parts[f.pi].name_pl, catalogue_name: f.prod.name, brand: f.prod.brand, article: f.prod.index })) }),
+        tool: { name: 'check_types', description: 'Items of the right part type', input_schema: { type: 'object', properties: { ok_ids: { type: 'array', items: { type: 'string' } } }, required: ['ok_ids'] } },
+        maxTokens: 800, timeout: 45_000,
+      });
+      run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', u6.input_tokens || 0, u6.output_tokens || 0, jobId);
+      okIds = new Set((ck.ok_ids || []).map(String));
+    } catch { /* без ответа — спорные не берём */ }
+    const drop = new Set(sus.filter(({ i }) => !okIds.has(String(i))).map(({ i }) => i));
+    for (const { f, i } of sus) if (drop.has(i)) { const t = tried.find((x) => x.pi === f.pi && norm(x.article) === norm(f.article)); if (t) t.wrongType = f.prod.name; }
+    for (let i = found.length - 1; i >= 0; i--) if (drop.has(i)) { found.splice(i, 1); hits--; }
+  }
   withDb(d, () => run('UPDATE ai_jobs SET result = ? WHERE id = ?', JSON.stringify({ tried: tried.slice(0, 200), ecat: found.filter((f) => f.src === 'ecat').length }), jobId));
   const q = await quote(found.map((f) => f.prod.sku));
   const inStock = [...q.values()].filter((x) => x.priceNet > 0 && x.availability > 0).length;
@@ -475,6 +494,20 @@ async function pick(jobId) {
   step('add', 'ok', (added ? `добавлено ${added} (работ ${laborAdded}${fromPa ? `, из ProfiAuto ${fromPa}` : ''}${fromAllegro ? `, с Allegro ${fromAllegro}` : ''}), проверить ${toCheck}` : 'новых позиций нет — всё уже в выцене')
     + (notFound.length ? ` · нет в наличии (не добавлено, список во внутреннем описании): ${notFound.map((x) => x.split(' (')[0].split(' — ')[0]).join(', ')}` : '') + (paNote ? ' · ' + paNote : '') + (allegroNote ? ' · ' + allegroNote : ''));
   insert('ai_events', { kind: 'job_done', job_id: jobId, order_id: o.id, data: JSON.stringify({ added, toCheck, parts: parts.length, labor: laborAdded, allegro: fromAllegro }) });
+}
+
+// общие слова в названиях деталей не считаем совпадением типа
+const STOP = new Set(['przod', 'przed', 'tylny', 'tylna', 'tylne', 'lewy', 'lewa', 'prawy', 'prawa', 'kompl', 'zesta', 'orygi', 'samoc', 'czesc', 'eleme', 'origi', 'zawie']);
+const stems = (s) => new Set(String(s || '').toLowerCase().replace(/ł/g, 'l').normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z]+/)
+  .filter((w) => w.length >= 4).map((w) => w.slice(0, 5)).filter((w) => !STOP.has(w)));
+/** Товар из каталога того же типа, что нужная деталь (есть общее слово). Пустое / короткое название — не судим */
+export function sameType(p, catName) {
+  const a = stems(catName);
+  if (!a.size) return true;
+  const b = stems([p?.name_pl, String(p?.key || '').replace(/_/g, ' ')].join(' '));
+  if (!b.size) return true;
+  for (const x of a) if (b.has(x)) return true;
+  return false;
 }
 
 /** Объём упаковки в литрах из названия («5W40 5L», «1 l», «4 ltr», «208L») — для масел и жидкостей, которые считаем в литрах */

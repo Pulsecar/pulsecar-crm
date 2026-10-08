@@ -12,6 +12,7 @@ const DB = './data/test-ai.db';
 for (const s of ['', '-wal', '-shm']) rmSync(DB + s, { force: true });
 const calls = [];
 let lastCtx = null;
+const checkCalls = [];
 
 // каталог IC: артикул → товар; цены: sku → закупка нетто и рекомендуемая брутто
 const CATALOG = {
@@ -22,7 +23,7 @@ const CATALOG = {
   '04E198119A': { sku: 'VAG1', brand: 'VAG', articleNumber: '04E198119A' },
   'W71295': { sku: 'MANN1', brand: 'MANN-FILTER', articleNumber: 'W 712/95' },
   'P06100': { sku: 'BRE1', brand: 'BREMBO', articleNumber: 'P 06 100' },
-  'GDB2543': { sku: 'TRW1', brand: 'TRW', articleNumber: 'GDB2543' },
+  'GDB2543': { sku: 'TRW1', brand: 'TRW', articleNumber: 'GDB2543', desc: 'Wałek wejściowy skrzyni biegów' },
 };
 const PRICE = { EC1: [150, 300], EC2: [250, 460], EC3: [600, 1100], SKF1: [300, 520], INA1: [390, 700], CT1: [330, 610], GAT1: [350, 640], VAG1: [700, 1200], MANN1: [20, 0], BRE1: [400, 700], TRW1: [150, 260] };
 
@@ -46,6 +47,11 @@ const mock = createServer(async (req, res) => {
       assert.ok(!JSON.stringify(ctx).includes('Kowalski'), 'данные клиента не уходят в Claude');
       return json(200, { usage: { input_tokens: 900, output_tokens: 300 }, content: [{ type: 'tool_use', name: 'job_knowledge', input: { jobs: ctx.jobs.map((j) => ({ key: j.key, assemblies: ['osłona rozrządu'],
         always: ['zestaw paska rozrządu'], seals: [{ part: 'uszczelka pokrywy rozrządu', why: 'снимается крышка ГРМ' }], often: ['pompa wody'], not_parts: ['czyszczenie'], tips: 'проверить натяжитель' })) } }] });
+    }
+    if (b.tool_choice.name === 'check_types') {
+      const ctx = JSON.parse(b.messages[0].content);
+      checkCalls.push(ctx.items);
+      return json(200, { usage: { input_tokens: 100, output_tokens: 10 }, content: [{ type: 'tool_use', name: 'check_types', input: { ok_ids: ctx.items.filter((i) => !/Wałek/.test(i.catalogue_name)).map((i) => i.id) } }] });
     }
     if (b.tool_choice.name === 'pick_rows') {
       const ctx = JSON.parse(b.messages[0].content);
@@ -76,7 +82,7 @@ const mock = createServer(async (req, res) => {
   if (req.headers.authorization !== 'Bearer ictok') return json(401, {});
   if (u.pathname === '/ic/catalog/products') {
     const p = CATALOG[u.searchParams.get('index').toUpperCase().replace(/[^A-Z0-9]/g, '')];
-    return json(200, { totalResults: p ? 1 : 0, products: p ? [{ ...p, index: p.articleNumber, shortDescription: 'x' }] : [] });
+    return json(200, { totalResults: p ? 1 : 0, products: p ? [{ ...p, index: p.articleNumber, shortDescription: p.desc || 'x' }] : [] });
   }
   if (u.pathname === '/ic/inventory/quote') {
     const b = JSON.parse(body);
@@ -366,6 +372,9 @@ try {
     assert.ok(bp, 'колодки найдены');
     assert.equal(bp.variants[bp.chosen].brand, 'BREMBO', 'клиент просил Brembo — не дешёвый TRW');
     assert.ok(!Object.values(bp.variants).some((v) => v.brand === 'TRW'));
+    // TRW GDB2543 в каталоге — «вал КПП» (другой товар): спорное название уходит на проверку и отбрасывается
+    assert.ok(checkCalls.some((c) => c.some((i) => /Wałek/.test(i.catalogue_name))), 'спорный тип товара проверен');
+    assert.ok(j.result.tried.some((x) => x.article === 'GDB2543' && /Wałek/.test(x.wrongType || '')), 'отмечен как другой товар');
   });
   await t('без VIN — подбор недоступен', async () => {
     const c2 = await req('customers', { body: { name: 'Bez Auta', phone: '600100300' } });
