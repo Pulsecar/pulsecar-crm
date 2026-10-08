@@ -351,6 +351,9 @@ try {
     assert.equal(normPlan({ parts_plan: JSON.stringify({ parts: [{ name_pl: 'X' }] }) }).parts.length, 1);
     assert.equal(normPlan({ parts: '[{"name_pl":"Y","analogs":"[]"}]' }).parts[0].name_pl, 'Y');
     assert.equal(normPlan({}).parts.length, 0);
+    // весь ответ строкой под полем labor (так ответила модель на Toyota Verso) — детали не теряются
+    const wrapped = normPlan({ labor: JSON.stringify({ parts: [{ key: 'brake_disc_rear', name_pl: 'Tarcza hamulcowa tylna', oe: [], analogs: [] }], labor: [{ job: 'Wymiana tarcz', hours: 1.4 }] }) });
+    assert.equal(wrapped.parts.length, 1); assert.equal(wrapped.labor[0].job, 'Wymiana tarcz');
     const { packLitres } = await import('../src/ai-parts/pipeline.js');
     assert.equal(packLitres('8100 X-CESS GEN2 5W40 5L'), 5); assert.equal(packLitres('Castrol Edge 5W30 4 l'), 4); assert.equal(packLitres('Motul 2,5L'), 2.5);
     assert.equal(packLitres('Filtr oleju HU 6032 Z'), null);

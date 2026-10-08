@@ -613,6 +613,11 @@ export function normPlan(d) {
     return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object') : [];
   };
   d = d && typeof d === 'object' ? d : {};
+  // весь ответ строкой JSON под одним из полей: { labor: "{\"parts\":[…],\"labor\":[…]}" }
+  for (const v of Object.values(d)) {
+    if (typeof v !== 'string' || !/^\s*\{/.test(v)) continue;
+    try { const o = JSON.parse(v); if (o && typeof o === 'object' && (o.parts || o.labor)) { d = o; break; } } catch { /* не JSON */ }
+  }
   // ответ, обёрнутый ещё раз: { parts_plan: { parts: [...] } } / { input: {...} } / строка JSON
   for (let i = 0; i < 3 && !d.parts && !d.labor; i++) {
     const inner = Object.values(d).map((v) => { if (typeof v === 'string') { try { return JSON.parse(v); } catch { return null; } } return v; })
