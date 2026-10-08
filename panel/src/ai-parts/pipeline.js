@@ -143,11 +143,12 @@ async function pick(jobId) {
   // Claude иногда отдаёт вложенный список строкой JSON или под другим ключом — приводим к виду; пусто → ещё одна попытка
   let data = {};
   for (let attempt = 0; attempt < 2; attempt++) {
-    const r = await callTool({ system: SYSTEM + (attempt ? '\n\nIMPORTANT: return "parts" as a JSON ARRAY of objects (not a string). The previous answer had no parts.' : ''), user: planUser, tool: TOOL });
+    const r = await callTool({ system: SYSTEM + (attempt ? '\n\nIMPORTANT: the previous answer had NO parts. The request asks for parts — return every physical part in "parts" as a JSON ARRAY of objects (not a string), even if you are unsure of numbers (leave oe empty and fill "check"). Keep "note" short.' : ''), user: planUser, tool: TOOL, maxTokens: 12000 });
     run('UPDATE ai_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? WHERE id = ?', r.usage.input_tokens || 0, r.usage.output_tokens || 0, jobId);
     data = normPlan(r.data);
-    if (data.parts.length || data.labor.length) break;
-    insert('ai_events', { kind: 'parse_empty', job_id: jobId, order_id: o.id, data: JSON.stringify({ attempt, stop: r.stop || null, raw: JSON.stringify(r.data).slice(0, 6000) }) });
+    if (data.parts.length) break;
+    // работы есть, а деталей нет (или ответ обрезан) — запрос почти всегда про детали: ещё одна попытка
+    insert('ai_events', { kind: 'parse_empty', job_id: jobId, order_id: o.id, data: JSON.stringify({ attempt, stop: r.stop || null, labor: data.labor.length, raw: JSON.stringify(r.data).slice(0, 6000) }) });
   }
   const parts = data.parts.slice(0, 25);
   // partslink24 (по VIN) — главный источник OE: если для детали есть номер из partslink24, номера «из памяти» ИИ убираем
