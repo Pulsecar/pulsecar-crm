@@ -156,6 +156,8 @@ export function AiModal({ o, ai, onClose, reload }) {
   const [plSkip, setPlSkip] = useState(false);
   const start = async () => {
     let paste = f.paste;
+    // без расширения нет partslink24 и каталога Inter Cars — не подбираем «по памяти ИИ», пока менеджер сам не выберет
+    if (!extOk && !d?.mock && plSkip !== true) { setPlSkip('noext'); return; }
     // OE-номера из partslink24 — автоматически перед подбором (если расширение есть и строки ещё не вставлены)
     if (extOk && !paste.trim() && plSkip !== true) {
       setStarting(true);
@@ -200,6 +202,7 @@ export function AiModal({ o, ai, onClose, reload }) {
           ${!extPa && html`<a class="btn sm" href="/pulsecar-extension.zip" title="Расширение Pulsecar 1.7 для Chrome: partslink24, e-Catalog Inter Cars, ProfiAuto и Allegro — поиск того, чего нет в наличии. Распакуйте и загрузите в chrome://extensions (режим разработчика)">Скачать расширение 1.7</a>`}
           <button class="btn sm" onClick=${() => setShowPaste(!showPaste)}><${Icon} n="list" />Вставить список</button></div>
       </div>
+      ${plSkip === 'noext' && html`<div class="card err small">Эта вкладка не видит расширение Pulsecar. Обновите страницу (Cmd+R / F5) — после установки или обновления расширения Chrome подключает его только к заново открытым страницам. <button class="btn sm" onClick=${() => location.reload()}>Обновить страницу</button> <button class="btn sm" onClick=${() => setPlSkip(true)}>Подобрать без расширения</button></div>`}
       ${plSkip === 'ask' && html`<div class="card err small">partslink24 просит войти: откройте вкладку partslink24, войдите и нажмите «Подобрать» ещё раз. <button class="btn sm" onClick=${() => setPlSkip(true)}>Подобрать без partslink24</button></div>`}
       ${pl && html`<div class=${'ai-pl24-st' + (pl.error ? ' err' : '')}>${pl.busy ? html`<span class="ai-dot run-dot"></span>` : ''}${pl.error ? pl.error + (pl.text ? ' — ' + pl.text : '') : pl.text}</div>`}
       ${showPaste && html`<textarea rows="4" value=${f.paste} onInput=${set('paste')} placeholder="Скопируйте строки таблицы деталей из partslink24 и вставьте сюда"></textarea>`}
