@@ -147,7 +147,7 @@ export function mountAiParts(crm, who) {
     res.json({ ok: true });
   });
 
-  crm.get('/ai-parts/jobs/:id/events', (req, res) => { who(req, 'settings.manage'); res.json(all('SELECT id, kind, created_at, data FROM ai_events WHERE job_id = ? ORDER BY id', Number(req.params.id))); });
+  crm.get('/ai-parts/jobs/:id/events', (req, res) => { who(req, 'settings.manage'); res.json(all('SELECT id, kind, at, data FROM ai_events WHERE job_id = ? ORDER BY id', Number(req.params.id))); });
   crm.get('/ai-parts/jobs/:id', (req, res) => {
     gate(req);
     const j = one('SELECT * FROM ai_jobs WHERE id = ?', Number(req.params.id));
