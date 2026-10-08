@@ -45,7 +45,8 @@ export function tr(s) {
       const w = t.split(' '), res = [];
       let hit = false;
       for (let i = 0; i < w.length;) {
-        let j = w.length;
+        // фраза — не длиннее 12 слов (иначе длинный текст ИИ переводится минутами и вешает вкладку)
+        let j = Math.min(w.length, i + 12);
         for (; j > i; j--) { const ph = w.slice(i, j).join(' '); if (dict[ph] !== undefined) { res.push(dict[ph]); hit = true; break; } }
         if (j > i) i = j; else res.push(w[i++]);
       }
