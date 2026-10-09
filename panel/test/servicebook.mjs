@@ -165,6 +165,11 @@ try {
   assert.equal(bk.booked, true); assert.equal(bk.start_at, startAt); assert.ok(bk.station);
   assert.equal((await req('/api/bookings', { token, body: { name: 'Ewa', phone: '600222333', rec_id: timing.id, start_at: '2020-01-01 10:00' } })).status, 409, 'прошлое время — нельзя');
   assert.equal((await req(`/api/recommendations/99999/slots`, { token })).status, 404, 'чужая/несуществующая рекомендация');
+  // публичные окна для формы записи на сайте: без входа, только полные часы, не больше 8 дней
+  const pub = ok(await req('/api/public/slots?min=90'), 'public slots');
+  assert.equal(pub.durationMin, 90); assert.ok(pub.days.length > 0 && pub.days.length <= 8);
+  assert.ok(pub.days.every((d) => d.times.length && d.times.every((t) => t.endsWith(':00'))), 'только полные часы');
+  assert.ok(!JSON.stringify(pub).includes('Ewa'), 'без данных клиентов');
   myc = ok(await req('/api/me', { token }), 'me booked').cars.find((x) => x.id === car.id);
   assert.deepEqual(myc.recommendations.find((r) => r.id === timing.id).booked, { start: startAt, status: 'planned' });
   const cal = ok(await req(`/crm-api/appointments?from=${d0.date}&to=${d0.date}`), 'calendar');

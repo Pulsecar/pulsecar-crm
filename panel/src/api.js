@@ -225,6 +225,19 @@ api.get('/recommendations/:id/slots', (req, res) => {
   res.json({ durationMin: r.duration_min, days: freeWindows(r.duration_min, r.title) });
 });
 
+// Публичные свободные окна для формы записи на сайте (pulsecar.pl/booking): без входа, только время,
+// без данных клиентов. Клиент выбирает удобное окно, менеджер подтверждает запись звонком.
+api.get('/public/slots', (req, res) => {
+  limit('ps:' + req.ip, 120, 3600_000);
+  const minutes = Math.min(480, Math.max(15, Number(req.query.min) || 60));
+  const title = String(req.query.kind || '').slice(0, 40); // 'ac' → пост кондиционера
+  const days = freeWindows(minutes, title === 'ac' ? 'кондиционер' : '', { days: 7 })
+    .map((d) => ({ ...d, times: d.times.filter((t) => t.endsWith(':00')).slice(0, 10) }))
+    .filter((d) => d.times.length);
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ durationMin: minutes, days });
+});
+
 api.post('/bookings', (req, res) => {
   limit('b:' + req.ip, 10, 3600_000);
   const b = req.body || {};
