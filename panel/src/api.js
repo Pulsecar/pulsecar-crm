@@ -238,6 +238,41 @@ api.get('/public/slots', (req, res) => {
   res.json({ durationMin: minutes, days });
 });
 
+// Заявка с формы записи на сайте (pulsecar.pl/booking). Если клиент выбрал свободное окно —
+// запись сразу встаёт в Терминарз на свободный пост (окно больше не предлагается другим),
+// с пометкой «подтвердить звонком». Окно уже заняли / без окна → «Не распределено».
+// Уведомление в Telegram отправляет сайт, здесь не дублируем.
+api.post('/public/booking', (req, res) => {
+  limit('pb:' + req.ip, 10, 3600_000);
+  const b = req.body || {};
+  if (b.website) return res.json({ ok: true }); // бот
+  const phone = normPhone(b.phone);
+  const name = String(b.name || '').trim().slice(0, 80) || 'Klient';
+  if (!phone) throw new HttpError(400, 'Телефон обязателен.');
+  const minutes = Math.min(480, Math.max(15, Number(b.min) || 60));
+  const kind = String(b.kind || '') === 'ac' ? 'кондиционер' : '';
+  const service = String(b.service || '').trim().slice(0, 100) || 'Wizyta';
+  const car = String(b.car || '').trim().replace(/^—$/, '').slice(0, 120);
+  const plate = normPlate(String(b.plate || '')) || '';
+  const start = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(String(b.start_at || '')) ? String(b.start_at) : '';
+  const customer = one('SELECT id FROM customers WHERE phone = ?', phone);
+  const carRow = plate ? one('SELECT id FROM cars WHERE plate = ? OR car_key = ?', plate, plate) : null;
+  const st = start ? pickStation(minutes, kind || service, start) : null;
+  const note = [
+    st ? 'Онлайн-запись с сайта pulsecar.pl — ПОДТВЕРДИТЬ ЗВОНКОМ' : 'Заявка с сайта pulsecar.pl — перезвонить',
+    start && !st && `Клиент выбрал ${start}, но окно уже занято — предложить другое время`,
+    car && `Auto: ${car}`, b.vin && `VIN: ${String(b.vin).slice(0, 17)}`, b.problem && String(b.problem).slice(0, 1000),
+    b.lang && `Język: ${String(b.lang).slice(0, 5)}`, b.ref && `Strona: ${String(b.ref).slice(0, 60)}`,
+  ].filter(Boolean).join('\n');
+  const id = insert('appointments', {
+    station_id: st?.id ?? null, customer_id: customer?.id ?? null, car_id: carRow?.id ?? null,
+    title: `${service}${car ? ' · ' + car : ''}`.slice(0, 120), note,
+    start_at: st ? start : null, duration_min: minutes, status: st ? 'planned' : 'request', source: 'site',
+    contact_name: name, contact_phone: phone, preferred: start || 'dowolny termin',
+  });
+  res.json({ ok: true, id, booked: !!st, start_at: st ? start : null, station: st?.name || null });
+});
+
 api.post('/bookings', (req, res) => {
   limit('b:' + req.ip, 10, 3600_000);
   const b = req.body || {};
