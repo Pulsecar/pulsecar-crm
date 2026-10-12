@@ -42,7 +42,7 @@ export async function sendJob(receiptId, job) {
   return { receipt: saved.receipt, result: r };
 }
 
-const ST = { printed: ['напечатан', 'var(--accent)'], pending: ['не напечатан', 'var(--warn)'], error: ['ошибка', 'var(--danger)'], manual: ['ждёт номер', 'var(--muted)'] };
+const ST = { printed: ['напечатан', 'var(--accent)'], pending: ['ждёт фискализации', 'var(--warn)'], error: ['ошибка', 'var(--danger)'], manual: ['ждёт номер', 'var(--muted)'] };
 
 /** Блок «Чек (paragon)» во вкладке оплаты заказа */
 export function ReceiptBox({ o, reload, ask }) {
@@ -56,7 +56,7 @@ export function ReceiptBox({ o, reload, ask }) {
   const retry = async (r) => {
     setBusy(true);
     try {
-      const { job } = await api(`receipts/${r.id}/job`);
+      const { job } = await api(`receipts/${r.id}/fiscalize`, { body: {} });
       if (job) { const x = await sendJob(r.id, job); x.receipt.status === 'printed' ? toast('Чек напечатан' + (x.receipt.number ? ' · № ' + x.receipt.number : '')) : toast(x.receipt.error || 'Не напечатан', 'error'); }
     } catch (e) { toast(e.message, 'error'); }
     setBusy(false); reload();
@@ -64,12 +64,13 @@ export function ReceiptBox({ o, reload, ask }) {
   if (!f && !(o.receipts || []).length) return html`<div class="muted small" style="margin-top:14px">Фискальная касса не подключена — ${app.perms?.['settings.manage'] ? html`<a href="#/settings/integrations">Настройки → Интеграции → Фискальная касса</a>` : 'попросите администратора подключить её'}.</div>`;
   return html`<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
     <div class="row"><b class="grow">Чек (paragon)</b>
-      ${!printed && f && html`<button class="btn primary sm" disabled=${busy || !o.items?.length} onClick=${() => setOpen(true)}>${f.driver === 'manual' ? 'Чек на кассе' : 'Пробить чек'}</button>`}</div>
+      ${!printed && f && !(o.receipts || []).some((r) => r.status !== 'error' || r.error !== 'Заменён новым чеком') && html`<button class="btn primary sm" disabled=${busy || !o.items?.length} onClick=${() => setOpen(true)}>${f.driver === 'manual' ? 'Чек на кассе' : 'Пробить чек'}</button>`}</div>
     ${(o.receipts || []).slice(0, 4).map((r) => html`<div class="row small" style="margin-top:6px">
       <span class="grow">${fdt(r.printed_at || r.created_at)} · ${zl(r.total)}${r.nip ? ' · NIP ' + r.nip : ''}${r.number ? html` · № <b>${r.number}</b>` : ''}
         ${r.error && r.status !== 'printed' ? html`<div style="color:var(--danger)">${r.error}</div>` : ''}</span>
       <span class="badge" style=${`border-color:${ST[r.status]?.[1]};color:${ST[r.status]?.[1]}`}>${ST[r.status]?.[0] || r.status}</span>
-      ${r.status !== 'printed' && r.printer === 'novitus' && !printed && html`<button class="btn sm" disabled=${busy} onClick=${() => retry(r)}>Повторить</button>`}
+      ${r.status !== 'printed' && r.error !== 'Заменён новым чеком' && !printed && html`<button class="btn primary sm" disabled=${busy || f?.driver !== 'novitus'}
+        title=${f?.driver === 'novitus' ? 'Отправить чек на фискальную кассу' : 'Касса не подключена: Настройки → Интеграции → Фискальная касса'} onClick=${() => retry(r)}>${busy ? 'Печатаю…' : 'Фискализировать'}</button>`}
       ${r.status !== 'printed' && !printed && html`<input class="inline-input" style="width:110px" placeholder="№ с кассы" value=${nums[r.id] || ''} onInput=${(e) => setNums({ ...nums, [r.id]: e.target.value })} />
         <button class="btn sm" disabled=${!nums[r.id]} onClick=${async () => { await act(() => api(`receipts/${r.id}/manual`, { body: { number: nums[r.id] } }), 'Номер чека сохранён'); reload(); }}>OK</button>`}
     </div>`)}

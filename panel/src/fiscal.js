@@ -118,6 +118,29 @@ export function createReceipt(order, { nip, method, manualFallback } = {}, staff
 
 export const publicReceipt = (r) => (r ? { id: r.id, order_id: r.order_id, number: r.number, nip: r.nip, total: r.total, status: r.status, printer: r.printer, error: r.error, created_at: r.created_at, printed_at: r.printed_at } : null);
 
+/** Фискализировать созданный чек (кнопка «Фискализировать»): позиции и оплаты — по заказу на сейчас, задание для кассы */
+export function prepareFiscal(id) {
+  const r = one('SELECT * FROM receipts WHERE id = ?', id);
+  if (!r) throw new HttpError(404, 'Чек не найден');
+  if (r.status === 'printed') throw new HttpError(409, `Чек уже фискализирован (${r.number || '№ ' + r.id})`);
+  const c = fiscalCfg();
+  if (!c) throw new HttpError(400, 'Фискальная касса не подключена: Настройки → Интеграции → Фискальная касса');
+  if (c.driver !== 'novitus') throw new HttpError(400, 'Касса в режиме «вручную»: пробейте чек на кассе и впишите его номер');
+  if (r.order_id) {
+    const done = one("SELECT id, number FROM receipts WHERE order_id = ? AND status = 'printed' AND id <> ?", r.order_id, r.id);
+    if (done) throw new HttpError(409, `По этому заказу уже есть фискальный чек (${done.number || '№ ' + done.id})`);
+    const lines = receiptLines(r.order_id);
+    if (!lines.length) throw new HttpError(400, 'В заказе нет позиций с ценой');
+    const paid = all("SELECT method, SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END) amount FROM payments WHERE order_id = ? AND transfer_id IS NULL GROUP BY method", r.order_id)
+      .sort((a, b) => (a.method === 'points' ? -1 : b.method === 'points' ? 1 : 0));
+    const o = one('SELECT number FROM orders WHERE id = ?', r.order_id);
+    const job = noviReceipt(lines, { nip: r.nip, payments: paid, cfg: c, systemNumber: o?.number });
+    update('receipts', r.id, { items: JSON.stringify({ lines, body: job.body }), total: job.total, printer: 'novitus', status: 'pending', error: null });
+  } else update('receipts', r.id, { printer: 'novitus', status: 'pending', error: null });
+  const r2 = one('SELECT * FROM receipts WHERE id = ?', r.id);
+  return { receipt: publicReceipt(r2), job: jobFor(r2, c) };
+}
+
 /** Результат от расширения: { ok, jpkid, error, eDocument } */
 export function saveResult(id, res = {}) {
   const r = one('SELECT * FROM receipts WHERE id = ?', id);

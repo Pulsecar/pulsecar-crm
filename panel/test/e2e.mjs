@@ -353,7 +353,12 @@ try {
   const mof = ok(await req('/crm-api/orders/' + mo.id), 'order mixed get');
   // полная оплата частного клиента → чек (paragon) создаётся сам; приход по заказу — статья «100 Przychód z usług»
   assert.ok(mpay.receipt, 'auto receipt: ' + JSON.stringify(mpay));
-  assert.equal(mpay.receipt.total, 300); assert.ok(mpay.job, 'задание для кассы'); assert.ok(mof.receipts.some((r) => r.id === mpay.receipt.id));
+  assert.equal(mpay.receipt.total, 300); assert.ok(!mpay.job, 'на кассу — только по кнопке'); assert.ok(mof.receipts.some((r) => r.id === mpay.receipt.id));
+  // кнопка «Фискализировать»: задание для кассы → результат → чек фискальный, второй раз нельзя
+  const fz = ok(await req(`/crm-api/receipts/${mpay.receipt.id}/fiscalize`, { body: {} }), 'fiscalize');
+  assert.equal(fz.job.resource, 'receipt'); assert.equal(fz.job.body.receipt.summary.total, '300.00');
+  assert.equal(ok(await req(`/crm-api/receipts/${mpay.receipt.id}/result`, { body: { ok: true, jpkid: 'FZ-1' } }), 'fz result').receipt.status, 'printed');
+  assert.equal((await req(`/crm-api/receipts/${mpay.receipt.id}/fiscalize`, { body: {} })).status, 409);
   const kpRow = ok(await req('/crm-api/cash/' + mof.payments.find((x) => x.method === 'cash').id), 'kp of order');
   assert.match(kpRow.article_name || kpRow.article || '', /Przychód z usług/);
   assert.equal(mof.paid, 300); assert.equal(mof.payments.length, 3);

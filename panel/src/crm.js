@@ -861,7 +861,7 @@ function autoReceipt(orderId, staffName) {
   try {
     const r = FISCAL.createReceipt(o, { manualFallback: true }, staffName);
     log('order', o.id, 'receipt', { id: r.receipt.id, total: r.receipt.total, auto: true }, staffName);
-    return { receipt: r.receipt, job: r.job };
+    return { receipt: r.receipt }; // на кассу — только по кнопке «Фискализировать»
   } catch (e) {
     log('order', o.id, 'receipt_error', 'Автоматический чек: ' + e.message, staffName);
     return { receipt_error: e.message };
@@ -1607,6 +1607,12 @@ crm.post('/receipts/:id/result', (req, res) => {
   if (r.order_id) log('order', r.order_id, r.status === 'printed' ? 'receipt_printed' : 'receipt_error', { number: r.number, error: r.error }, s.name);
   const warning = r.status === 'printed' ? statusAfterDoc(r.order_id, s.name, 'paragonu') : null;
   res.json({ receipt: r, warning });
+});
+crm.post('/receipts/:id/fiscalize', (req, res) => {
+  const s = who(req, 'orders.payments');
+  const r = FISCAL.prepareFiscal(Number(req.params.id));
+  if (r.receipt.order_id) log('order', r.receipt.order_id, 'receipt', { id: r.receipt.id, total: r.receipt.total, fiscalize: true }, s.name);
+  res.json(r);
 });
 crm.post('/receipts/:id/manual', (req, res) => {
   const s = who(req, 'orders.payments');

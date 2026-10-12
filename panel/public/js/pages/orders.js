@@ -11,7 +11,7 @@ import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { CustomerEditor } from './customers.js';
 import { CarEditor } from './cars.js';
 import { ScanBox } from '../scan.js';
-import { ReceiptBox, sendJob } from '../fiscal.js';
+import { ReceiptBox } from '../fiscal.js';
 import { ObjectHistory } from './audit.js';
 import { OrderSlots } from './calendar.js';
 import { Recommendations } from './recs.js';
@@ -291,11 +291,8 @@ function Payments({ o, reload }) {
     const body = mixed ? { split: PAY_KINDS.map((k) => ({ method: k, amount: Number(split[k]) || 0 })).filter((x) => x.amount > 0) } : p;
     const r = await act(() => api(`orders/${o.id}/payments`, { body }), 'Оплата добавлена');
     setP({ ...p, amount: '' }); setSplit({ cash: '', card: '', blik: '', transfer: '' }); reload();
-    if (r?.receipt) { // заказ оплачен полностью — чек (paragon) создан автоматически
-      if (r.job) {
-        const x = await sendJob(r.receipt.id, r.job).catch((e) => ({ receipt: { error: e.message } }));
-        x.receipt?.status === 'printed' ? toast('Чек напечатан' + (x.receipt.number ? ' · № ' + x.receipt.number : '')) : toast('Чек не напечатан: ' + (x.receipt?.error || 'касса не ответила'), 'error');
-      } else toast('Создан чек (paragon) — пробейте его на кассе и впишите номер');
+    if (r?.receipt) { // заказ оплачен полностью — чек (paragon) создан, на кассу — кнопкой «Фискализировать»
+      toast(app.features.fiscal?.driver === 'novitus' ? 'Создан чек (paragon) — нажмите «Фискализировать»' : 'Создан чек (paragon) — пробейте его на кассе и впишите номер');
       reload();
     } else if (r?.receipt_error) toast('Чек не создан: ' + r.receipt_error, 'error');
     else if (r && app.features.fiscal?.autoOnPay && !(o.receipts || []).some((x) => x.status === 'printed')) setAskReceipt(Date.now());
