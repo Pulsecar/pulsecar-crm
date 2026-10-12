@@ -165,6 +165,7 @@ try {
   const head = fvh.j.slice(0, fvh.j.indexOf('Sprzedawca'));
   assert.ok(head.includes('Sposób płatności') && head.includes('gotówka')); assert.ok(!fvh.j.includes('Termin płatności'), 'наличные — без срока оплаты');
   const pfh = (await req('/crm-api/print/sale/' + pf.id)).j;
+  assert.ok(fvh.j.includes('Lista płatności') && fvh.j.includes('Data płatności'), 'фактура: список оплат'); assert.ok(!pfh.includes('Lista płatności'), 'pro forma — без списка оплат');
   if (/przelew/.test(pfh)) assert.ok(pfh.slice(0, pfh.indexOf('Sprzedawca')).includes('Termin płatności'), 'перевод — срок оплаты в шапке');
   const fk = ok(await req(`/crm-api/sales-docs/${fv.id}/correct`, { body: { reason: 'Zwrot', lines: [{ qty: 0 }] } }), 'fk');
   // пакет для бухгалтера: ZIP (реестр + фактуры) и печать всех одной страницей

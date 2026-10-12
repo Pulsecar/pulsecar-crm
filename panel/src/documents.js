@@ -93,7 +93,7 @@ body{font:10.5px/1.45 'Pulsecar Sans',Arial,Helvetica,sans-serif;color:#15171a;m
 .logo{height:40px;display:block}
 .co{font-size:9.5px;color:#3c4047}.co .adm{font-size:8px;color:#6b7078}.co b{font-size:12.5px;color:#15171a;display:block;line-height:1.25}
 .doc{text-align:right}.doc h1{font-size:17px;margin:0;letter-spacing:.01em}.doc .no{font-size:15px;font-weight:700;margin-top:1px}
-.doc .meta{margin-top:4px;color:#3c4047}.doc .meta div{white-space:nowrap}
+.paylist{max-width:60%}.paylist .pl-title{font-weight:700;font-size:14px;margin-bottom:6px}.doc .meta{margin-top:4px;color:#3c4047}.doc .meta div{white-space:nowrap}
 .orig{display:inline-block;margin-top:4px;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border:1px solid #15171a;border-radius:3px;padding:1px 6px}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
 .box{border:1px solid #cfd2d6;border-radius:6px;padding:8px 10px;break-inside:avoid}
@@ -143,6 +143,16 @@ function payMeta(d) {
   const sub = split?.length ? split.map((x) => `${PAY_PL[x.method] || x.method}: ${zl(x.amount)} zł`).join(', ') : '';
   const transfer = d.payment_method === 'transfer' || (split || []).some((x) => x.method === 'transfer');
   return [d.payment_method ? ['Sposób płatności', PAY_PL[d.payment_method] || d.payment_method, sub] : null, transfer && d.due_date ? ['Termin płatności', d.due_date] : null];
+}
+/** «Lista płatności» внизу фактуры (как в Motowarsztat): все оплаты по заказу — способ, дата, сумма */
+function payList(d) {
+  if (!d.order_id || d.kind !== 'vat') return ''; // только фактура VAT — не pro forma и не корректа
+  const rows = all(`SELECT method, direction, amount, substr(created_at, 1, 10) day FROM payments WHERE order_id = ? AND transfer_id IS NULL ORDER BY created_at, id`, d.order_id);
+  if (!rows.length) return '';
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  return `<div class="sec paylist"><div class="pl-title">Lista płatności</div><table><thead><tr><th>Metoda płatności</th><th class="r">Data płatności</th><th class="r">Wartość</th></tr></thead><tbody>
+    ${rows.map((p) => `<tr><td>${esc(cap(PAY_PL[p.method] || p.method))}${p.direction === 'out' ? ' (zwrot)' : ''}</td><td class="r">${esc(p.day)}</td><td class="r">${p.direction === 'out' ? '−' : ''}${zl(p.amount)} zł</td></tr>`).join('')}
+    </tbody></table></div>`;
 }
 export function page({ S, title, number, meta = [], body, badge = '', legal = false, bar = true, back = '' }) {
   const logo = on(S, 'doc_show_logo') ? `<img class="logo" src="/logo-dark.png" alt="${esc(S.company_brand || 'Pulsecar')}">` : '<div></div>';
@@ -440,6 +450,7 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
     ${ksefBox}
     ${S.company_capital ? `<div class="sec sub">Kapitał zakładowy ${esc(S.company_capital)}</div>` : ''}
     ${S.sale_footer ? `<div class="sec note">${esc(S.sale_footer)}</div>` : ''}
+    ${payList(d)}
     ${d.ksef_hash ? '' : sigBlock('Osoba upoważniona do wystawienia', 'Osoba upoważniona do odbioru', plName(S.sale_person || d.created_by || ''))}`;
   return page({
     S, title: SALE_KIND[d.kind], number: d.number, legal: true, bar, back,
