@@ -134,3 +134,10 @@ export function parseNavigatorAnswer(text) {
     return { action: 'fail', reason: 'other', why: 'Ошибка разбора JSON' };
   }
 }
+
+// Поисковые фразы для прямого поиска в partslink24 (интерфейс на польском; азиатские марки и JLR — названия на английском)
+export const TERMS_SYSTEM = `You prepare search phrases for the partslink24 parts catalogue (Polish UI) for a list of parts needed for one repair.
+LANGUAGE: catalogues of Toyota, Lexus, Nissan, Infiniti, Mitsubishi, Subaru, Suzuki, Hyundai, Kia, Jaguar and Land Rover list part names in ENGLISH, uppercase, maker style (Toyota: "DISC, REAR", "PAD KIT, DISC BRAKE, REAR", "FILTER SUB-ASSY, OIL") — for these makes write "q" in ENGLISH using 2–3 key words with the axle/side ("disc rear", "pad kit disc brake rear", "element air cleaner") and put one Polish name in "alt"; for all other makes write "q" in Polish and one English name in "alt".
+For each requested part give ONE short catalogue search phrase as THIS make's catalogue names it, plus up to 2 alternative names in "alt" (BMW ETK: intake manifold "instalacja ssąca"; VAG "rura ssąca"; others "kolektor ssący"; water pump "pompa płynu chłodzącego"/"pompa wody"; brake disc front "tarcza hamulcowa przednia"/"tarcza hamulcowa przód"; brake pads "klocki hamulcowe"/"zestaw klocków hamulcowych"; wear sensor "czujnik zużycia okładzin"; oil filter "filtr oleju"/"wkład filtra oleju"; air filter "wkład filtra powietrza"; cabin filter "filtr kabinowy"/"mikrofiltr").
+The tool opens the drawing of the found part and reads all parts of that assembly, so do not add phrases for gaskets/bolts of the same assembly. Timing jobs: add phrases for the chain ("łańcuch rozrządu"/"timing chain"), the belt ("pasek rozrządu"/"timing belt"), the tensioner and the guide — the catalogue lists only parts fitted to this VIN. "key" = the requested part name exactly as given. No oils/fluids. Max 10 phrases.`;
+

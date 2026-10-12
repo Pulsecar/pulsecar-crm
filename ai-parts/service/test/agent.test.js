@@ -246,3 +246,36 @@ test('цена клиенту: рекомендуемая цена Inter Cars, �
   assert.equal(clientPrice(r, 100, 'middle', null, null).net, 130); // без цены IC — наценка уровня
   assert.equal(clientPrice({ ...r, priceMode: 'markup' }, 100, 'oe', null, 500).net, 120);
 });
+
+test('partslink24 напрямую: фразы под язык каталога → строки расширения → задача done', async () => {
+  const pl24 = await import('../src/providers/partslink24.js');
+  const { hashKey, newExtensionKey } = await import('../src/crypto.js');
+  const { getDb } = await import('../src/db.js');
+  const key = newExtensionKey();
+  getDb().prepare('INSERT INTO extension_keys (id, workshop_id, key_hash, label) VALUES (?,?,?,?)').run('ek_d', WS, hashKey(key), 'd');
+  let sys = '';
+  setClientFactory(() => ({ messages: { create: async (p) => { sys = p.system; return { content: [{ type: 'tool_use', name: 'pl24_terms', input: { terms: [{ key: 'диск задний', q: 'disc rear', alt: ['tarcza hamulcowa tylna'] }] } }], usage: {} }; } } }));
+  const id = pl24.createTask(WS, 'j3', { vin: 'JTDKB20U703123456', make: 'Toyota', parts: [{ name: 'диск задний' }] });
+  const app = createApp();
+  const srv = app.listen(0);
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const h = { 'X-Extension-Key': key, 'Content-Type': 'application/json' };
+  try {
+    assert.equal((await (await fetch(`${base}/ext/v1/tasks/next`, { method: 'POST', headers: h })).json()).id, id);
+    const tm = await (await fetch(`${base}/ext/v1/tasks/${id}/terms`, { method: 'POST', headers: h, body: '{}' })).json();
+    assert.equal(tm.terms[0].q, 'disc rear'); assert.match(sys, /ENGLISH/);
+    const body = { ok: true, service: 'toyota', results: [{ key: 'диск задний', q: 'disc rear', rows: [{ number: '42431-0F020', name: 'DISC, REAR', best: true, qty: '2' }], bom: [{ number: '90105-10446', name: 'BOLT', pos: '3', qty: '4' }] }] };
+    const rr = await (await fetch(`${base}/ext/v1/tasks/${id}/result`, { method: 'POST', headers: h, body: JSON.stringify(body) })).json();
+    assert.equal(rr.rows, 2);
+    const r = await pl24.waitForTask(id, 5);
+    assert.equal(r.status, 'done'); assert.equal(r.result.rows[0].oe, '42431-0F020'); assert.equal(r.result.rows[0].best, true); assert.equal(r.result.rows[1].bom, true);
+    // вход не выполнен → задача failed с подсказкой
+    const id2 = pl24.createTask(WS, 'j4', { vin: 'JTDKB20U703123456', make: 'Toyota', parts: [{ name: 'x' }] });
+    await fetch(`${base}/ext/v1/tasks/next`, { method: 'POST', headers: h });
+    await fetch(`${base}/ext/v1/tasks/${id2}/result`, { method: 'POST', headers: h, body: JSON.stringify({ ok: false, stop: 'login' }) });
+    const r2 = await pl24.waitForTask(id2, 5);
+    assert.equal(r2.status, 'failed'); assert.match(r2.result.hint, /не вошёл/);
+  } finally {
+    srv.close();
+  }
+});

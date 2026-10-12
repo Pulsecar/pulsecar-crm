@@ -249,6 +249,43 @@ export function createApp() {
     res.json(a);
   }));
 
+  // ---------- Прямое чтение partslink24 расширением ----------
+  // 1) поисковые фразы под язык каталога этой марки (ИИ), 2) расширение ищет и читает строки, 3) результат → строки задачи
+  app.post('/ext/v1/tasks/:id/terms', extAuth, wrap(async (req, res) => {
+    const t = pl24.getTask(req.params.id);
+    if (!t || t.workshop_id !== req.ext.workshop_id) return res.status(404).json({ error: 'Нет задачи' });
+    const { client, model } = llmFor(t.workshop_id);
+    const resp = await client.messages.create({
+      model, max_tokens: 1500, system: pl24.TERMS_SYSTEM,
+      tools: [{ name: 'pl24_terms', description: 'Поисковые фразы', input_schema: { type: 'object', properties: { terms: { type: 'array', items: { type: 'object', properties: { key: { type: 'string' }, q: { type: 'string' }, alt: { type: 'array', items: { type: 'string' } } }, required: ['key', 'q'] } } }, required: ['terms'] } }],
+      tool_choice: { type: 'tool', name: 'pl24_terms' },
+      messages: [{ role: 'user', content: JSON.stringify({ make: t.payload.make || null, vin: t.payload.vin, parts: t.payload.parts || [] }) }],
+    });
+    const tu = resp.content.find((b) => b.type === 'tool_use');
+    const terms = (tu?.input?.terms || []).slice(0, 10).map((x) => ({ key: String(x.key || x.q || '').slice(0, 120), q: String(x.q || '').slice(0, 80), alt: (Array.isArray(x.alt) ? x.alt : []).map((a) => String(a).slice(0, 80)).slice(0, 2) })).filter((x) => x.q);
+    pl24.appendLog(t.id, { kind: 'terms', terms });
+    res.json({ terms });
+  }));
+  app.post('/ext/v1/tasks/:id/result', extAuth, wrap(async (req, res) => {
+    const t = pl24.getTask(req.params.id);
+    if (!t || t.workshop_id !== req.ext.workshop_id) return res.status(404).json({ error: 'Нет задачи' });
+    if (t.status !== 'taken') return res.json({ ok: true });
+    const r = req.body || {};
+    const s = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+    const rows = [];
+    for (const g of (Array.isArray(r.results) ? r.results : []).slice(0, 12)) {
+      for (const x of (Array.isArray(g.rows) ? g.rows : []).slice(0, 6))
+        if (x?.number) rows.push({ part: s(g.key, 120), oe: s(x.number, 40), name: s(x.name, 120), qty: s(x.qty, 10), note: [s(x.note, 200), s(x.model, 200)].filter(Boolean).join('; '), best: !!x.best, search: s(g.q, 80) });
+      for (const x of (Array.isArray(g.bom) ? g.bom : []).slice(0, 40))
+        if (x?.number) rows.push({ part: s(g.key, 120) + ' — узел (рисунок)', oe: s(x.number, 40), name: s(x.name, 120), qty: s(x.qty, 10), note: [s(x.note, 200), s(x.model, 200)].filter(Boolean).join('; '), pos: s(x.pos, 10), bom: true });
+    }
+    pl24.appendLog(t.id, { kind: 'direct', ok: !!r.ok, stop: r.stop || null, error: r.error ? s(r.error, 300) : null, rows: rows.length, service: s(r.service, 40) });
+    const result = { rows: rows.slice(0, 200), vehicle: { model: null, options: [] }, source: 'partslink24 (VIN)', note: 'Каталог показывает только детали, подходящие к этому VIN. best=true — строка, рисунок которой открыт; bom=true — детали того же узла на рисунке.' };
+    if (rows.length) pl24.finishTask(t.id, 'done', result);
+    else pl24.finishTask(t.id, 'failed', { ...result, error: r.stop || r.error || 'not_found', hint: r.stop === 'login' ? 'Менеджер не вошёл в partslink24' : r.stop === 'captcha' ? 'partslink24 показал капчу' : r.error || null });
+    res.json({ ok: true, rows: rows.length });
+  }));
+
   app.post('/ext/v1/tasks/:id/finish', extAuth, wrap(async (req, res) => {
     const t = pl24.getTask(req.params.id);
     if (!t || t.workshop_id !== req.ext.workshop_id) return res.status(404).json({ error: 'Нет задачи' });

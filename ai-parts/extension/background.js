@@ -2,6 +2,9 @@
 // в сессии менеджера, в человеческом темпе. Пароли не хранит и не читает.
 
 const PL24_START = 'https://www.partslink24.com/';
+// Прямое чтение каталога partslink24 (то же, что в расширении CRM Pulsecar 1.7.3): поиск по VIN, списки и таблицы деталей,
+// старый каталог Hyundai/Kia, выбор марки при VIN нескольких марок. ИИ только составляет поисковые фразы.
+importScripts('pl24.js');
 let busy = false;
 
 chrome.runtime.onInstalled.addListener(() => chrome.alarms.create('poll', { periodInMinutes: 0.5 }));
@@ -72,6 +75,21 @@ function waitForLoad(tabId, timeoutMs = 30000) {
 }
 
 async function runTask(task) {
+  await badge('…', '#1f55c4');
+  let done = false;
+  try {
+    const t = await api(`/ext/v1/tasks/${task.id}/terms`, {});
+    if (!t?.terms?.length) throw new Error('no_terms');
+    const r = await pl24Run({ vin: task.vin, make: task.make, terms: t.terms }, () => {});
+    await api(`/ext/v1/tasks/${task.id}/result`, r || { ok: false, error: 'empty' });
+    done = true;
+  } catch (e) {
+    if (!done) await api(`/ext/v1/tasks/${task.id}/finish`, { error: String(e.message || e) }).catch(() => {});
+  }
+}
+
+// Прежний способ: ИИ ведёт браузер по снимкам страницы (оставлен на случай другого интерфейса каталога)
+async function runTaskNavigator(task) {
   await badge('…', '#1f55c4');
   // Отдельная неактивная вкладка в окне менеджера: используется его сессия partslink24.
   const tab = await chrome.tabs.create({ url: PL24_START, active: false });
