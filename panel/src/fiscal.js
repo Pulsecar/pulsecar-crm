@@ -95,8 +95,9 @@ export function jobFor(r, c = fiscalCfg()) {
 }
 
 /** Новый чек по заказу. Возвращает строку receipts и задание для расширения (или null для «вручную»). */
-export function createReceipt(order, { nip, method } = {}, staff = '') {
-  const c = fiscalCfg();
+export function createReceipt(order, { nip, method, manualFallback } = {}, staff = '') {
+  // касса не подключена: при автоматическом чеке после оплаты — чек «вручную» (пробить на кассе и вписать номер)
+  const c = fiscalCfg() || (manualFallback ? { driver: 'manual', url: '', cashier: '', cashNumber: '1', ptu: parsePtu(''), autoOnPay: false, drawer: false } : null);
   if (!c) throw new HttpError(400, 'Фискальная касса не подключена: Настройки → Интеграции → Фискальная касса');
   const done = one("SELECT id, number FROM receipts WHERE order_id = ? AND status = 'printed'", order.id);
   if (done) throw new HttpError(409, `Чек по этому заказу уже напечатан (${done.number || '№ ' + done.id})`);

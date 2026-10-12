@@ -891,4 +891,12 @@ if (getSetting('mw_internal_comments') === null) {
     if (n) console.log(`Авто: объединено дублей — ${n}`);
     setSetting('cars_dedup_v1', '1');
   }
+  if (getSetting('receipt_on_pay', '') === '') setSetting('receipt_on_pay', '1');
+  // статья для приходов по заказам / хранению, которые записались без статьи
+  if (!getSetting('cash_article_backfill_v1')) {
+    const a100 = one("SELECT id FROM cash_articles WHERE code = '100'")?.id, a120 = one("SELECT id FROM cash_articles WHERE code = '120'")?.id;
+    if (a100) run("UPDATE payments SET article_id = ? WHERE article_id IS NULL AND direction = 'in' AND order_id IS NOT NULL AND transfer_id IS NULL AND method <> 'points'", a100);
+    if (a120) run("UPDATE payments SET article_id = ? WHERE article_id IS NULL AND direction = 'in' AND order_id IS NULL AND (note LIKE 'Parking %' OR note LIKE 'Przechowanie opon %')", a120);
+    setSetting('cash_article_backfill_v1', '1');
+  }
 }

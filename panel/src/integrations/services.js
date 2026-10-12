@@ -83,7 +83,7 @@ export async function checkPayment(order) {
   const paid = ['correct', 'paid', 'success'].includes(String(j.status).toLowerCase());
   const amount = round2(j.amountPaid ?? j.amount);
   if (paid && !one(`SELECT 1 FROM payments WHERE order_id = ? AND note LIKE ?`, order.id, `%${order.pay_ext_id}%`)) {
-    run(`INSERT INTO payments (direction, method, amount, order_id, customer_id, note, staff) VALUES ('in', 'transfer', ?, ?, ?, ?, 'Tpay')`,
+    run(`INSERT INTO payments (direction, method, amount, order_id, customer_id, note, staff, article_id) VALUES ('in', 'transfer', ?, ?, ?, ?, 'Tpay', (SELECT id FROM cash_articles WHERE code = '100'))`,
       amount, order.id, order.customer_id, `Онлайн-оплата Tpay ${order.pay_ext_id}`);
     return { status: 'paid', amount, justPaid: true };
   }

@@ -61,10 +61,10 @@ export function ReceiptBox({ o, reload, ask }) {
     } catch (e) { toast(e.message, 'error'); }
     setBusy(false); reload();
   };
-  if (!f) return html`<div class="muted small" style="margin-top:14px">Фискальная касса не подключена — ${app.perms?.['settings.manage'] ? html`<a href="#/settings/integrations">Настройки → Интеграции → Фискальная касса</a>` : 'попросите администратора подключить её'}.</div>`;
+  if (!f && !(o.receipts || []).length) return html`<div class="muted small" style="margin-top:14px">Фискальная касса не подключена — ${app.perms?.['settings.manage'] ? html`<a href="#/settings/integrations">Настройки → Интеграции → Фискальная касса</a>` : 'попросите администратора подключить её'}.</div>`;
   return html`<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
     <div class="row"><b class="grow">Чек (paragon)</b>
-      ${!printed && html`<button class="btn primary sm" disabled=${busy || !o.items?.length} onClick=${() => setOpen(true)}>${f.driver === 'manual' ? 'Чек на кассе' : 'Пробить чек'}</button>`}</div>
+      ${!printed && f && html`<button class="btn primary sm" disabled=${busy || !o.items?.length} onClick=${() => setOpen(true)}>${f.driver === 'manual' ? 'Чек на кассе' : 'Пробить чек'}</button>`}</div>
     ${(o.receipts || []).slice(0, 4).map((r) => html`<div class="row small" style="margin-top:6px">
       <span class="grow">${fdt(r.printed_at || r.created_at)} · ${zl(r.total)}${r.nip ? ' · NIP ' + r.nip : ''}${r.number ? html` · № <b>${r.number}</b>` : ''}
         ${r.error && r.status !== 'printed' ? html`<div style="color:var(--danger)">${r.error}</div>` : ''}</span>

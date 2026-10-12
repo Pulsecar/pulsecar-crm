@@ -17,6 +17,7 @@ export const SETTINGS_SCHEMA = [
     { title: 'Оплата', fields: [
       sel('payment_method_default', 'Способ оплаты по умолчанию', [['cash', 'Наличные'], ['card', 'Карта'], ['blik', 'BLIK'], ['transfer', 'Перевод'], ['mixed', 'Смешанная оплата']]),
       num('payment_term_days', 'Срок оплаты фактуры, дней'),
+      yes('receipt_on_pay', 'Чек (paragon) автоматически после полной оплаты заказа', 'Для частных клиентов без NIP. Если касса не подключена — чек ждёт номер с кассы'),
     ] },
     { title: 'Печать документов', fields: [
       txt('order_terms', 'Условия внизу карты заказа', '', { multiline: true }),

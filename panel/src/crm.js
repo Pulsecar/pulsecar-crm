@@ -834,17 +834,38 @@ crm.post('/orders/:id/payments', (req, res) => {
   if (!parts.length || parts.some((x) => !x.method || !(x.amount > 0))) throw new HttpError(400, 'Укажите способ и сумму оплаты');
   const mixed = parts.length > 1;
   tx(() => {
+    const article_id = articleByCode('100');
     for (const { method, amount } of parts) insert('payments', {
       number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, order_id: o.id, customer_id: o.customer_id,
-      note: String(req.body?.note || '') || `Płatność ${o.number}${mixed ? ' (płatność mieszana)' : ''}`, staff: s.name,
+      note: String(req.body?.note || '') || `Płatność ${o.number}${mixed ? ' (płatność mieszana)' : ''}`, staff: s.name, article_id,
     });
   });
   recalc(o.id);
   const amount = round2(parts.reduce((a, x) => a + x.amount, 0)), method = mixed ? parts.map((x) => `${x.method} ${x.amount}`).join(' + ') : parts[0].method;
   log('order', o.id, 'payment', { method, amount }, s.name);
   notify('payment', `Оплата ${o.number}: ${amount} zł (${method})`, { order: o.number, amount, method });
-  res.json({ ok: true });
+  res.json({ ok: true, ...autoReceipt(o.id, s.name) });
 });
+/** id статьи кассы по коду (100 — выручка с заказов, 120 — хранение / парковка) */
+function articleByCode(code) { return one('SELECT id FROM cash_articles WHERE code = ? AND COALESCE(active, 1) = 1', code)?.id || null; }
+/** Заказ оплачен полностью → чек (paragon) для частного клиента, если его ещё нет и нет фактуры VAT */
+function autoReceipt(orderId, staffName) {
+  if (getSetting('receipt_on_pay', '1') !== '1') return {};
+  const o = getOrder(orderId);
+  if (o.kind !== 'order' || !(o.total > 0) || o.paid < o.total - 0.01) return {};
+  if (one("SELECT 1 FROM receipts WHERE order_id = ? AND status IN ('printed', 'pending', 'manual')", o.id)) return {};
+  if (one("SELECT 1 FROM sales_docs WHERE order_id = ? AND kind IN ('vat', 'proforma')", o.id)) return {};
+  const c = o.customer_id ? one('SELECT kind, nip, company FROM customers WHERE id = ?', o.customer_id) : null;
+  if (c && (c.kind === 'company' || String(c.nip || '').replace(/\D/g, '').length === 10)) return {}; // фирме — фактура
+  try {
+    const r = FISCAL.createReceipt(o, { manualFallback: true }, staffName);
+    log('order', o.id, 'receipt', { id: r.receipt.id, total: r.receipt.total, auto: true }, staffName);
+    return { receipt: r.receipt, job: r.job };
+  } catch (e) {
+    log('order', o.id, 'receipt_error', 'Автоматический чек: ' + e.message, staffName);
+    return { receipt_error: e.message };
+  }
+}
 crm.delete('/orders/:id/payments/:pid', (req, res) => {
   const s = who(req, 'admin');
   const p = one('SELECT * FROM payments WHERE id = ? AND order_id = ?', Number(req.params.pid), Number(req.params.id));
@@ -1309,7 +1330,7 @@ crm.post('/storage/:id/pay', (req, res) => {
   const method = PAY_METHODS.includes(req.body?.method) ? req.body.method : 'cash';
   const what = st.kind === 'parking' ? 'Parking' : 'Przechowanie opon';
   tx(() => {
-    insert('payments', { number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, note: `${what} ${st.number}`, staff: s.name, customer_id: st.customer_id || null });
+    insert('payments', { number: method === 'cash' ? nextNumber('KP') : null, direction: 'in', method, amount, note: `${what} ${st.number}`, staff: s.name, customer_id: st.customer_id || null, article_id: articleByCode('120') });
     run('UPDATE storage SET paid = ROUND(COALESCE(paid,0) + ?, 2) WHERE id = ?', amount, st.id);
   });
   log('storage', st.id, 'payment', `${amount} ${method}`, s.name);

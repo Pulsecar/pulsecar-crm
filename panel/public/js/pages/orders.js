@@ -11,7 +11,7 @@ import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { CustomerEditor } from './customers.js';
 import { CarEditor } from './cars.js';
 import { ScanBox } from '../scan.js';
-import { ReceiptBox } from '../fiscal.js';
+import { ReceiptBox, sendJob } from '../fiscal.js';
 import { ObjectHistory } from './audit.js';
 import { OrderSlots } from './calendar.js';
 import { Recommendations } from './recs.js';
@@ -291,7 +291,14 @@ function Payments({ o, reload }) {
     const body = mixed ? { split: PAY_KINDS.map((k) => ({ method: k, amount: Number(split[k]) || 0 })).filter((x) => x.amount > 0) } : p;
     const r = await act(() => api(`orders/${o.id}/payments`, { body }), 'Оплата добавлена');
     setP({ ...p, amount: '' }); setSplit({ cash: '', card: '', blik: '', transfer: '' }); reload();
-    if (r && app.features.fiscal?.autoOnPay && !(o.receipts || []).some((x) => x.status === 'printed')) setAskReceipt(Date.now());
+    if (r?.receipt) { // заказ оплачен полностью — чек (paragon) создан автоматически
+      if (r.job) {
+        const x = await sendJob(r.receipt.id, r.job).catch((e) => ({ receipt: { error: e.message } }));
+        x.receipt?.status === 'printed' ? toast('Чек напечатан' + (x.receipt.number ? ' · № ' + x.receipt.number : '')) : toast('Чек не напечатан: ' + (x.receipt?.error || 'касса не ответила'), 'error');
+      } else toast('Создан чек (paragon) — пробейте его на кассе и впишите номер');
+      reload();
+    } else if (r?.receipt_error) toast('Чек не создан: ' + r.receipt_error, 'error');
+    else if (r && app.features.fiscal?.autoOnPay && !(o.receipts || []).some((x) => x.status === 'printed')) setAskReceipt(Date.now());
   };
   const onScan = async (data) => {
     try {
@@ -320,7 +327,7 @@ function Payments({ o, reload }) {
         <div class="small ${Math.abs(splitSum - due) < 0.01 ? 'pos' : 'muted'}">Итого ${zl(splitSum)} из ${zl(due)}${due - splitSum > 0.01 ? html` · <a href="#" onClick=${(e) => { e.preventDefault(); const k = PAY_KINDS.find((x) => !(Number(split[x]) > 0)) || 'card'; setSplit({ ...split, [k]: String(Math.round((due - splitSum + (Number(split[k]) || 0)) * 100) / 100) }); }}>дополнить остаток</a>` : ''}</div>
       </div>`}
       <${ReceiptBox} o=${o} reload=${reload} ask=${askReceipt} />
-      ${!app.features.fiscal && html`<label class="f" style="margin-top:14px;max-width:260px">Номер чека с кассового аппарата<input value=${o.receipt_no || ''} onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { receipt_no: e.target.value } }), 'Сохранено'); }} placeholder="например 000123" /></label>`}
+      ${!app.features.fiscal && !(o.receipts || []).length && html`<label class="f" style="margin-top:14px;max-width:260px">Номер чека с кассового аппарата<input value=${o.receipt_no || ''} onChange=${async (e) => { await act(() => api('orders/' + o.id, { method: 'PUT', body: { receipt_no: e.target.value } }), 'Сохранено'); }} placeholder="например 000123" /></label>`}
     </div>
 
     <div class="stack">

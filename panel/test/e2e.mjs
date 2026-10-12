@@ -349,8 +349,13 @@ try {
   ok(await req('/crm-api/balances', { method: 'PUT', body: { kind: 'plate', count: 14 } }), 'set plate balance');
   // BLIK и смешанная оплата: несколько платежей за раз, фактура → «Płatność mieszana»
   const mo = ok(await req('/crm-api/orders', { body: { customer_id: jan.id, items: [{ kind: 'labor', name: 'Diagnostyka', price: 300 }] } }), 'order mixed');
-  ok(await req(`/crm-api/orders/${mo.id}/payments`, { body: { split: [{ method: 'cash', amount: 100 }, { method: 'blik', amount: 150 }, { method: 'card', amount: 50 }] } }), 'mixed pay');
+  const mpay = ok(await req(`/crm-api/orders/${mo.id}/payments`, { body: { split: [{ method: 'cash', amount: 100 }, { method: 'blik', amount: 150 }, { method: 'card', amount: 50 }] } }), 'mixed pay');
   const mof = ok(await req('/crm-api/orders/' + mo.id), 'order mixed get');
+  // полная оплата частного клиента → чек (paragon) создаётся сам; приход по заказу — статья «100 Przychód z usług»
+  assert.ok(mpay.receipt, 'auto receipt: ' + JSON.stringify(mpay));
+  assert.equal(mpay.receipt.total, 300); assert.ok(mpay.job, 'задание для кассы'); assert.ok(mof.receipts.some((r) => r.id === mpay.receipt.id));
+  const kpRow = ok(await req('/crm-api/cash/' + mof.payments.find((x) => x.method === 'cash').id), 'kp of order');
+  assert.match(kpRow.article_name || kpRow.article || '', /Przychód z usług/);
   assert.equal(mof.paid, 300); assert.equal(mof.payments.length, 3);
   assert.ok(mof.payments.some((x) => x.method === 'blik' && x.amount === 150));
   const cash3 = ok(await req('/crm-api/cash?from=2000-01-01&to=2100-01-01'), 'cash3');
