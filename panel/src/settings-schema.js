@@ -43,7 +43,7 @@ export const SETTINGS_SCHEMA = [
     { title: 'Автоматическая смена статуса', fields: [
       { k: 'status_on_first_job', label: 'Когда начата первая работа — статус', type: 'status' },
       { k: 'status_on_all_jobs', label: 'Когда все работы выполнены — статус', type: 'status' },
-      { k: 'status_on_sale_doc', label: 'После выставления фактуры — статус', type: 'status' },
+      { k: 'status_on_sale_doc', label: 'После фактуры или чека (paragon) — статус', type: 'status' },
     ] },
   ] },
   { id: 'orders', title: 'Заказы и выцены', icon: 'file', sections: [

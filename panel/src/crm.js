@@ -841,9 +841,8 @@ crm.post('/orders/:id/invoice', async (req, res) => {
   const s = who(req, 'invoices.create');
   const r = await issueInvoice(Number(req.params.id), req.body || {});
   log('order', Number(req.params.id), 'invoice', r.number, s.name);
-  const target = Number(getSetting('status_on_sale_doc', '')) || null;
-  if (target) try { setStatus(Number(req.params.id), target, s.name); } catch (e) { log('order', Number(req.params.id), 'invoice_error', 'Статус после фактуры: ' + e.message, s.name); }
-  res.json(r);
+  const stWarn = statusAfterDoc(Number(req.params.id), s.name, 'faktury');
+  res.json({ ...r, ...(stWarn ? { warning: 'Заказ не закрыт: ' + stWarn } : {}) });
 });
 crm.get('/orders/:id/invoice.pdf', async (req, res) => {
   who(req);
@@ -1534,17 +1533,26 @@ crm.get('/receipts/:id/job', (req, res) => {
   if (!r) throw new HttpError(404, 'Чек не найден');
   res.json({ receipt: FISCAL.publicReceipt(r), job: r.status === 'printed' ? null : FISCAL.jobFor(r) });
 });
+/** После фактуры VAT или пробитого чека (paragon) — статус заказа из настройки «status_on_sale_doc» (обычно «Завершён») */
+function statusAfterDoc(orderId, staffName, what) {
+  const target = Number(getSetting('status_on_sale_doc', '')) || null;
+  if (!target || !orderId) return null;
+  const o = one('SELECT kind, status_id FROM orders WHERE id = ?', orderId);
+  if (!o || o.kind !== 'order' || o.status_id === target) return null;
+  try { setStatus(orderId, target, staffName); return null; } catch (e) { log('order', orderId, 'invoice_error', `Статус после ${what}: ` + e.message, staffName); return e.message; }
+}
 crm.post('/receipts/:id/result', (req, res) => {
   const s = who(req, 'orders.payments');
   const r = FISCAL.saveResult(Number(req.params.id), req.body || {});
   if (r.order_id) log('order', r.order_id, r.status === 'printed' ? 'receipt_printed' : 'receipt_error', { number: r.number, error: r.error }, s.name);
-  res.json({ receipt: r });
+  const warning = r.status === 'printed' ? statusAfterDoc(r.order_id, s.name, 'paragonu') : null;
+  res.json({ receipt: r, warning });
 });
 crm.post('/receipts/:id/manual', (req, res) => {
   const s = who(req, 'orders.payments');
   const r = FISCAL.setManual(Number(req.params.id), req.body?.number);
   if (r.order_id) log('order', r.order_id, 'receipt_printed', { number: r.number, manual: true }, s.name);
-  res.json({ receipt: r });
+  res.json({ receipt: r, warning: statusAfterDoc(r.order_id, s.name, 'paragonu') });
 });
 crm.get('/fiscal/daily-job', (req, res) => { who(req, 'cash.edit'); res.json({ job: FISCAL.dailyJob(String(req.query.date || '')) }); });
 crm.get('/fiscal/ping-job', (req, res) => {
@@ -2586,16 +2594,13 @@ crm.post('/orders/:id/sales-docs', async (req, res) => {
   }
   const d = DOC.createSaleDoc({ kind, orderId: o.id, buyer, issue_date: b.issue_date, sale_date: b.sale_date, payment_method: b.payment_method, due_days: b.due_days, notes: b.notes, ext }, s.name);
   log('order', o.id, kind === 'vat' ? 'invoice' : 'proforma', d.number, s.name);
-  if (kind === 'vat') {
-    const target = Number(getSetting('status_on_sale_doc', '')) || null;
-    if (target) try { setStatus(o.id, target, s.name); } catch (e) { log('order', o.id, 'invoice_error', 'Статус после фактуры: ' + e.message, s.name); }
-  }
+  const stWarn = kind === 'vat' ? statusAfterDoc(o.id, s.name, 'faktury') : null;
   let ks = null, warning = null;
   if (viaKsef && (cfg('ksef')?.autoSend ?? true)) {
     try { ks = await KSEF.sendToKsef(d.id); } catch (e) { run('UPDATE sales_docs SET ksef_status = ?, ksef_error = ? WHERE id = ?', 'error', e.message, d.id); warning = e.message; }
     if (ks?.ksef_status === 'rejected') warning = 'KSeF отклонил фактуру: ' + ks.ksef_error;
   } else if (kind === 'vat' && !ext && !viaKsef) warning = 'Фактура выставлена в CRM, но не отправлена в KSeF. С 2026 года фактуры VAT нужно передавать в KSeF — подключите KSeF (Настройки → Интеграции).';
-  res.json({ ...d, ...(ks || {}), ksef: !!ext, warning });
+  res.json({ ...d, ...(ks || {}), ksef: !!ext, warning: [stWarn && 'Заказ не закрыт: ' + stWarn, warning].filter(Boolean).join(' · ') || null });
 });
 crm.post('/sales-docs/:id/correct', async (req, res) => {
   const s = who(req, 'invoices.create');
@@ -2730,8 +2735,7 @@ crm.post('/sales-docs/:id/to-vat', async (req, res) => {
   run('UPDATE sales_docs SET proforma_id = ?, car = COALESCE(car, ?), pay_split = COALESCE(pay_split, ?) WHERE id = ?', pf.id, pf.car, pf.pay_split, d.id);
   if (pf.order_id) {
     log('order', pf.order_id, 'invoice', `${d.number} на основании ${pf.number}`, s.name);
-    const target = Number(getSetting('status_on_sale_doc', '')) || null;
-    if (target) try { setStatus(pf.order_id, target, s.name); } catch {}
+    statusAfterDoc(pf.order_id, s.name, 'faktury');
   }
   let ks = null, warning = null;
   if (viaKsef && (cfg('ksef')?.autoSend ?? true)) {

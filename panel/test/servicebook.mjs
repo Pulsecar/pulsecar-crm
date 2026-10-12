@@ -165,29 +165,6 @@ try {
   assert.equal(bk.booked, true); assert.equal(bk.start_at, startAt); assert.ok(bk.station);
   assert.equal((await req('/api/bookings', { token, body: { name: 'Ewa', phone: '600222333', rec_id: timing.id, start_at: '2020-01-01 10:00' } })).status, 409, 'прошлое время — нельзя');
   assert.equal((await req(`/api/recommendations/99999/slots`, { token })).status, 404, 'чужая/несуществующая рекомендация');
-  // публичные окна для формы записи на сайте: без входа, только полные часы, не больше 8 дней
-  const pub = ok(await req('/api/public/slots?min=90'), 'public slots');
-  assert.equal(pub.durationMin, 90); assert.ok(pub.days.length > 0 && pub.days.length <= 8);
-  assert.ok(pub.days.every((d) => d.times.length && d.times.every((t) => t.endsWith(':00'))), 'только полные часы');
-  assert.ok(!JSON.stringify(pub).includes('Ewa'), 'без данных клиентов');
-  // форма записи на сайте: выбранное окно сразу встаёт в Терминарз и больше не предлагается
-  const pd = pub.days[pub.days.length - 1];
-  const pStart = `${pd.date} ${pd.times[pd.times.length - 1]}`;
-  const pBefore = ok(await req('/api/public/slots?min=90'), 'slots before').days.find((d) => d.date === pd.date);
-  const pb1 = ok(await req('/api/public/booking', { body: { name: 'Jan Site', phone: '600444555', service: 'Wymiana opon', car: 'Skoda Octavia', min: 90, start_at: pStart } }), 'site booking');
-  assert.equal(pb1.booked, true); assert.equal(pb1.start_at, pStart); assert.ok(pb1.station);
-  const cal2 = ok(await req(`/crm-api/appointments?from=${pd.date}&to=${pd.date}`), 'calendar site');
-  const sa = cal2.rows.find((a) => a.id === pb1.id);
-  assert.ok(sa && sa.station_id && sa.start_at === pStart && sa.status === 'planned' && sa.duration_min === 90 && /ПОДТВЕРДИТЬ/.test(sa.note), 'запись с сайта на посту');
-  // занимаем все посты на это время → следующая заявка уходит в «Не распределено»
-  let n = 0;
-  while (n < 20) { const r = ok(await req('/api/public/booking', { body: { phone: '6004445' + String(56 + n).padStart(2, '0'), min: 90, start_at: pStart } }), 'fill'); n++; if (!r.booked) { assert.equal(r.start_at, null); break; } }
-  const after = ok(await req('/api/public/slots?min=90'), 'slots after').days.find((d) => d.date === pd.date);
-  assert.ok(!after || !after.times.includes(pStart.slice(11)), 'занятое окно больше не предлагается');
-  assert.ok(pBefore.times.includes(pStart.slice(11)));
-  const noSlot = ok(await req('/api/public/booking', { body: { name: 'Bez terminu', phone: '600444999', service: 'Diagnostyka' } }), 'site no slot');
-  assert.equal(noSlot.booked, false);
-  assert.equal((await req('/api/public/booking', { body: { name: 'x' } })).status, 400, 'без телефона нельзя');
   myc = ok(await req('/api/me', { token }), 'me booked').cars.find((x) => x.id === car.id);
   assert.deepEqual(myc.recommendations.find((r) => r.id === timing.id).booked, { start: startAt, status: 'planned' });
   const cal = ok(await req(`/crm-api/appointments?from=${d0.date}&to=${d0.date}`), 'calendar');

@@ -479,6 +479,17 @@ try {
   const khist = ok(await req('/crm-api/audit?entity=payments&id=' + k2.id), 'kw history');
   assert.ok(khist.rows.some((h) => h.action === 'update' && h.changes.some((c) => c.field === 'Месяц в отчётности')), 'история изменений документа');
   ok(await req('/crm-api/cash/' + k2.id, { method: 'DELETE' }), 'kw rent delete');
+  // после фактуры VAT заказ закрывается статусом из настройки «После фактуры или чека»
+  {
+    const fin = me.statuses.find((x) => x.scope === 'order' && x.is_final);
+    ok(await req('/crm-api/settings', { method: 'PUT', body: { status_on_sale_doc: String(fin.id) } }), 'status after doc');
+    const oc = ok(await req('/crm-api/orders', { body: { kind: 'order', customer_id: jan.id } }), 'order for close');
+    ok(await req(`/crm-api/orders/${oc.id}/items`, { body: { kind: 'part', name: 'Filtr', qty: 1, price: 50 } }), 'item');
+    ok(await req(`/crm-api/orders/${oc.id}/sales-docs`, { body: { kind: 'vat', payment_method: 'cash' } }), 'fv close');
+    const ocd = ok(await req('/crm-api/orders/' + oc.id), 'closed order');
+    assert.equal(ocd.status_id, fin.id, 'после фактуры заказ закрыт'); assert.ok(ocd.closed_at);
+    ok(await req('/crm-api/settings', { method: 'PUT', body: { status_on_sale_doc: '' } }), 'reset');
+  }
   console.log('✓ BLIK и смешанная оплата, включение/выключение сотрудника');
   console.log('✓ KP/KW: статья платежа, получатель (контрагент / сотрудник / клиент), способ по кассе, дата операции и месяц в отчётности, P&L');
   console.log('✓ работы: порядок перетаскиванием, отметка фото/видео до/после, обзвон выцены с причиной и комментариями, парковка с оплатой в кассу');
