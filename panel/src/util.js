@@ -32,6 +32,7 @@ export function normPhone(input) {
   let d = s.replace(/\D/g, '');
   if (s.startsWith('00')) d = d.slice(2);
   if (!plus && d.length === 9) d = '48' + d; // польский номер без кода страны
+  if (d.length === 13 && d.startsWith('4848')) d = d.slice(2); // код страны вставлен дважды: +48 + «48730…»
   if (d.length < 10 || d.length > 15) return null;
   return '+' + d;
 }

@@ -336,6 +336,11 @@ for (const [c, t] of [['first_reg', 'TEXT'], ['engine_no', 'TEXT'], ['category',
 for (const [c, t] of [['kind', "TEXT NOT NULL DEFAULT 'person'"], ['first_name', 'TEXT'], ['last_name', 'TEXT'], ['country', "TEXT NOT NULL DEFAULT 'PL'"],
   ['default_car_id', 'INTEGER'], ['payment_method', 'TEXT'], ['payment_term_days', 'INTEGER']]) addColumn('customers', c, t);
 addColumn('cars', 'mileage_unit', "TEXT NOT NULL DEFAULT 'km'");
+// телефоны с дважды вставленным кодом страны: +4848730509577 → +48730509577 (если такой номер ещё не занят)
+for (const c of db.prepare("SELECT id, phone FROM customers WHERE phone GLOB '+4848[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'").all()) {
+  const fixed = '+48' + c.phone.slice(5);
+  if (!db.prepare('SELECT 1 FROM customers WHERE phone = ?').get(fixed)) db.prepare('UPDATE customers SET phone = ? WHERE id = ?').run(fixed, c.id);
+}
 if (!getSetting('customers_kind_migrated')) {
   run("UPDATE customers SET kind = 'company' WHERE COALESCE(company,'') <> '' OR COALESCE(nip,'') <> ''");
   setSetting('customers_kind_migrated', '1');

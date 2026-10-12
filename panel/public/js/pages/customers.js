@@ -46,11 +46,24 @@ export function CustomersList() {
     <${BulkBar} sel=${sel} entity="customers" actions=${bulkActions} csv=${csv} csvName="klienci" onDone=${reload} />`;
 }
 
-/** Телефон «+48600111222» → ['+48', '600111222'] */
+/** Вставленный/набранный номер → { prefix, phone }: «+48 730 509 577», «0048730509577», «48730509577» → +48 / 730509577 */
+function cleanPhone(raw, prefix) {
+  let s = String(raw || '').replace(/[\s\-().\/]/g, '');
+  if (s.startsWith('00')) s = '+' + s.slice(2);
+  if (s.startsWith('+')) {
+    const pre = PREFIXES.slice().sort((a, b) => b.length - a.length).find((x) => s.startsWith(x));
+    if (pre) return { prefix: pre, phone: s.slice(pre.length).replace(/\D/g, '') };
+    return { prefix, phone: s.replace(/\D/g, '') };
+  }
+  const d = s.replace(/\D/g, ''), cc = prefix.slice(1);
+  // польский номер — 9 цифр: «48» + 9 цифр = скопирован с кодом страны без плюса
+  if (prefix === '+48' ? d.length === 11 && d.startsWith('48') : d.length > 9 && d.startsWith(cc)) return { prefix, phone: d.slice(cc.length) };
+  return { prefix, phone: d };
+}
+/** Телефон «+48600111222» → ['+48', '600111222']; без кода — польский */
 function splitPhone(p) {
-  const s = String(p || '').replace(/\s+/g, '');
-  const pre = PREFIXES.slice().sort((a, b) => b.length - a.length).find((x) => s.startsWith(x));
-  return pre ? [pre, s.slice(pre.length)] : ['+48', s.replace(/^\+/, '')];
+  const r = cleanPhone(p, '+48');
+  return [r.prefix, cleanPhone(r.phone, r.prefix).phone];
 }
 function initial(c) {
   let first = c.first_name || '', last = c.last_name || '';
@@ -105,7 +118,7 @@ export function CustomerEditor({ c = {}, cars = [], onSaved, onCancel }) {
         ${inp('street', 'Улица')}
         <div class="g2">
           <label class="f">Номер телефона<div class="ig"><select class="addon" value=${f.prefix} onChange=${(e) => set({ prefix: e.target.value })}>${PREFIXES.map((p) => html`<option value=${p}>${p}</option>`)}</select>
-            <input type="tel" value=${f.phone} placeholder="Номер телефона" onInput=${(e) => set({ phone: e.target.value })} /></div></label>
+            <input type="tel" value=${f.phone} placeholder="Номер телефона" onInput=${(e) => set(cleanPhone(e.target.value, f.prefix))} /></div></label>
           <label class="f">E-mail<div class="ig"><span class="addon">@</span><input type="email" value=${f.email} placeholder="E-mail" onInput=${(e) => set({ email: e.target.value })} /></div></label></div>
       </div>
       <div class="mwf-col">

@@ -260,6 +260,11 @@ try {
   assert.equal(ok(await req('/crm-api/cars/' + lone.id), 'lone').customer_id, nc.id);
   const solo = ok(await req('/crm-api/customers', { body: { first_name: 'Solo', phone: '600555444' } }), 'solo');
   const soloCar = ok(await req('/crm-api/cars', { body: { customer_id: solo.id, plate: 'WA 55555' } }), 'solo car');
+  // номер, вставленный с кодом страны при уже выбранном +48, не дублирует код
+  const dbl = ok(await req('/crm-api/customers', { body: { first_name: 'Dbl', phone: '+4848730509577' } }), 'double cc');
+  assert.equal(ok(await req('/crm-api/customers/' + dbl.id), 'dbl').phone, '+48730509577');
+  const cc11 = ok(await req('/crm-api/customers', { body: { first_name: 'Cc', phone: '48 731 509 577' } }), 'cc11');
+  assert.equal(ok(await req('/crm-api/customers/' + cc11.id), 'cc11').phone, '+48731509577');
   const q2 = ok(await req('/crm-api/orders', { body: { kind: 'quote', customer_id: solo.id } }), 'quote auto car');
   assert.equal(ok(await req('/crm-api/orders/' + q2.id), 'q2').car_id, soloCar.id);
   const q3 = ok(await req('/crm-api/orders', { body: { kind: 'quote', car_id: soloCar.id } }), 'quote owner from car');
