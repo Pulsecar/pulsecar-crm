@@ -1,6 +1,7 @@
 // Схема базы, миграции и начальные данные. Выполняется для главной базы и для базы каждого филиала (db.js → openDb).
 import { MW_SERVICES } from './data/services-mw.js';
 import { db, one, all, run, insert, getSetting, setSetting, quoteConvertedStatus } from './db.js';
+import { dedupAllCars } from './car-dedup.js';
 
 export function migrate() {
 db.exec(`
@@ -884,4 +885,10 @@ if (getSetting('mw_internal_comments') === null) {
     customer_id INTEGER, source TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS site_reminders_phone ON site_reminders(phone)');
+  // одна машина — одна карточка: объединяем накопившиеся дубли (по VIN, по номеру без конфликта VIN)
+  if (!getSetting('cars_dedup_v1')) {
+    const n = dedupAllCars('system');
+    if (n) console.log(`Авто: объединено дублей — ${n}`);
+    setSetting('cars_dedup_v1', '1');
+  }
 }

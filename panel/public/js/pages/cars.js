@@ -1,6 +1,6 @@
 // Автомобили как в Motowarsztat: карточка с вкладками (Данные авто, Файлы, История заказов, История работ, Пробеги, Хранение),
 // форма: слева Aztec, тип, марка/модель/цвет, номер, год, владелец; справа первая регистрация, топливо, VIN, двигатель, объём, мощность kW/KM, пробег, описание.
-import { html, useState, useEffect, useData, go, qs, Loading, ErrorBox, Badge, Icon, Pager, useDebounced, zl, num, fdate, carName, Picker, api, act, toast } from '../lib.js';
+import { html, useState, useEffect, useData, go, qs, Loading, ErrorBox, Badge, Icon, Pager, useDebounced, zl, num, fdate, carName, Picker, api, act, toast, ConfirmButton } from '../lib.js';
 import { AztecButton, PlateButton, mergeCar } from '../vehicle.js';
 import { ObjectHistory } from './audit.js';
 import { Recommendations } from './recs.js';
@@ -51,10 +51,22 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
   const [more, setMore] = useState(!!(k.inspection_until || k.insurance_until || k.key_no || k.paint_code || k.reg_doc || k.engine));
   const [busy, setBusy] = useState(false);
   const set = (patch) => setF((v) => ({ ...v, ...patch }));
+  // одно авто — одна карточка: проверяем VIN и номер, пока вводят
+  const [dup, setDup] = useState(null);
+  const dVin = useDebounced(String(f.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, ''), 400), dPlate = useDebounced(String(f.plate || '').trim(), 400);
+  useEffect(() => {
+    if (dVin.length !== 17 && !dPlate) { setDup(null); return; }
+    api('cars-dup?' + qs({ vin: dVin.length === 17 ? dVin : '', plate: dPlate, id: k.id || '' })).then(setDup).catch(() => {});
+  }, [dVin, dPlate]);
+  const mergeInto = async () => {
+    await act(() => api('cars/' + dup.id + '/merge', { body: { from: k.id } }), 'Объединено');
+    go('/cars/' + dup.id);
+  };
   const power = unit === 'kW' ? f.power_kw : f.power_kw ? Math.round(Number(f.power_kw) / KM) : '';
   const save = async (e) => {
     e?.preventDefault();
     const body = Object.fromEntries(Object.entries(f).map(([x, v]) => [x, v === '' ? null : v]));
+    if (dup) return toast('Это авто уже есть в базе: ' + dup.label, 'error');
     setBusy(true);
     try {
       if (!body.customer_id && newOwner?.create && newOwner.name) {
@@ -64,7 +76,7 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
       }
       const r = await act(() => (k.id ? api('cars/' + k.id, { method: 'PUT', body }) : api('cars', { body })), 'Сохранено');
       onSaved?.(k.id || r.id);
-    } catch {} finally { setBusy(false); }
+    } catch (err) { if (err.data?.car_id) setDup({ id: err.data.car_id, label: String(err.message).replace(/^.*?:\s*/, '') }); } finally { setBusy(false); }
   };
   const onAztec = (r) => {
     if (r.existing && r.existing.id !== k.id) toast('Это авто уже есть в базе: ' + (r.car.plate || r.car.vin), 'error');
@@ -81,6 +93,10 @@ export function CarEditor({ k = {}, owner0 = null, onSaved, onCancel }) {
   };
   const inp = (key, l, attrs = {}) => html`<label class="f">${l}<input value=${f[key] ?? ''} placeholder=${l} onInput=${(e) => set({ [key]: e.target.value })} ...${attrs} /></label>`;
   return html`<form class="mwf" onSubmit=${save}>
+    ${dup && html`<div class="warn-bg" style="padding:10px 14px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+      <span>Это авто уже есть в базе: <b>${dup.label}</b></span><span>Второй раз его добавить нельзя.</span><span class="grow"></span>
+      <a class="btn sm" href=${'#/cars/' + dup.id}>Открыть карточку</a>
+      ${k.id ? html`<${ConfirmButton} cls="btn sm" label="Перенести всё туда и удалить эту?" onConfirm=${mergeInto}>Объединить с ней</${ConfirmButton}>` : ''}</div>`}
     <div class="mwf-cols">
       <div class="mwf-col">
         <div class="f">Код Aztec (техпаспорт)<div class="ig aztec"><span class="addon"><${Icon} n="qr" /></span>

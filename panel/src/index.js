@@ -96,7 +96,7 @@ app.get(/^\/(?!api|crm-api|mw-import|chat-api|chat\/|vendor|ical|hooks|k\/|rezer
 app.use((err, _req, res, _next) => {
   const status = err.status || 500;
   if (status >= 500) console.error(err);
-  res.status(status).json({ error: status >= 500 ? 'Ошибка сервера' : err.message });
+  res.status(status).json({ error: status >= 500 ? 'Ошибка сервера' : err.message, ...(status < 500 && err.data ? err.data : {}) });
 });
 
 app.listen(config.port, () => console.log(`Pulsecar panel: http://localhost:${config.port}`));

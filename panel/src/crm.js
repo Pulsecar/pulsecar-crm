@@ -8,6 +8,7 @@ import multer from 'multer';
 import { all, one, run, tx, insert, update, log, getSetting, setSetting, mainDb, withDb, curDb as curDbRef } from './db.js';
 import { MAIN, listBranches, branchDb, allDbs, curBranch, createBranch, updateBranch, ownerIn, branchName, branchSettings, saveBranchSettings } from './branches.js';
 import { config } from './config.js';
+import { findDupCar, carLabel, mergeCars } from './car-dedup.js';
 import {
   HttpError, currentNumber, checkPassword, hashPassword, normPhone, normPlate, normVin, newCardNo, nextNumber, parseCookies, readSession,
   signSession, round2, today,
@@ -508,22 +509,57 @@ function carData(b) {
   }
   return o;
 }
-export function createCar(b) {
+function dupCarError(r) {
+  const e = new HttpError(409, 'Это авто уже есть в базе: ' + carLabel(r));
+  e.data = { car_id: r.id };
+  return e;
+}
+/** Новое авто. Если такое (VIN / номер) уже есть: strict — ошибка 409, иначе — id существующего (дубль не создаём) */
+export function createCar(b, { strict = false } = {}) {
   const d = carData(b);
   if (!d.plate && !d.vin && !d.make) throw new HttpError(400, 'Укажите номер, VIN или марку');
+  const dup = findDupCar(d);
+  if (dup) {
+    if (strict) throw dupCarError(dup);
+    const fill = {};
+    for (const [k, v] of Object.entries(d)) if (v !== null && v !== undefined && v !== '') fill[k] = v;
+    const cur = one('SELECT * FROM cars WHERE id = ?', dup.id);
+    const patch = Object.fromEntries(Object.entries(fill).filter(([k]) => cur[k] === null || cur[k] === ''));
+    if (Object.keys(patch).length) update('cars', dup.id, patch);
+    return dup.id;
+  }
   return insert('cars', { ...d, car_key: normVin(d.vin) || d.plate || `ID${Date.now()}` });
 }
+crm.get('/cars-dup', (req, res) => {
+  who(req, 'cars.view');
+  const vin = String(req.query.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const r = findDupCar({ vin: vin.length === 17 ? vin : null, plate: normPlate(req.query.plate || '') || null }, Number(req.query.id) || 0);
+  res.json(r ? { ...r, label: carLabel(r) } : null);
+});
+crm.post('/cars/:id/merge', (req, res) => {
+  const s = who(req, 'cars.edit');
+  const keep = Number(req.params.id), drop = Number(req.body?.from);
+  if (!one('SELECT 1 FROM cars WHERE id = ?', keep) || !one('SELECT 1 FROM cars WHERE id = ?', drop)) throw new HttpError(404, 'Авто не найдено');
+  tx(() => mergeCars(keep, [drop], s.name));
+  res.json({ ok: true });
+});
 crm.post('/cars', (req, res) => {
   const s = who(req, 'cars.create');
-  const id = createCar(req.body || {});
+  const id = createCar(req.body || {}, { strict: true });
   log('car', id, 'create', null, s.name);
   res.json({ id });
 });
 crm.put('/cars/:id', (req, res) => {
   who(req, 'cars.edit');
   const d = carData(req.body || {});
-  if (d.vin || d.plate) d.car_key = d.vin || d.plate;
-  update('cars', Number(req.params.id), d);
+  const id = Number(req.params.id);
+  if (d.vin || d.plate) {
+    const cur = one('SELECT vin, plate FROM cars WHERE id = ?', id) || {};
+    const dup = findDupCar({ vin: d.vin !== undefined ? d.vin : cur.vin, plate: d.plate !== undefined ? d.plate : cur.plate }, id);
+    if (dup) throw dupCarError(dup);
+    d.car_key = d.vin || d.plate;
+  }
+  update('cars', id, d);
   res.json({ ok: true });
 });
 

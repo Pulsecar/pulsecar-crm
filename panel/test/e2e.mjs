@@ -260,6 +260,12 @@ try {
   assert.equal(ok(await req('/crm-api/cars/' + lone.id), 'lone').customer_id, nc.id);
   const solo = ok(await req('/crm-api/customers', { body: { first_name: 'Solo', phone: '600555444' } }), 'solo');
   const soloCar = ok(await req('/crm-api/cars', { body: { customer_id: solo.id, plate: 'WA 55555' } }), 'solo car');
+  // одно авто — одна карточка: тот же номер второй раз не добавить
+  const dupR = await req('/crm-api/cars', { body: { plate: 'wa55555', make: 'Opel' } });
+  assert.equal(dupR.status, 409);
+  assert.equal(dupR.j.car_id, soloCar.id);
+  assert.equal(ok(await req('/crm-api/cars-dup?plate=WA%2055555'), 'dup check').id, soloCar.id);
+  assert.equal(ok(await req('/crm-api/cars-dup?plate=WA%2055555&id=' + soloCar.id), 'dup self'), null);
   // номер, вставленный с кодом страны при уже выбранном +48, не дублирует код
   const dbl = ok(await req('/crm-api/customers', { body: { first_name: 'Dbl', phone: '+4848730509577' } }), 'double cc');
   assert.equal(ok(await req('/crm-api/customers/' + dbl.id), 'dbl').phone, '+48730509577');

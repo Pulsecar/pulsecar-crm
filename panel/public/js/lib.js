@@ -12,7 +12,7 @@ export async function api(path, { method, body, form } = {}) {
   });
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && !path.includes('login')) window.dispatchEvent(new Event('pc-logout'));
-  if (!r.ok) throw new Error(j.error || 'Ошибка ' + r.status);
+  if (!r.ok) { const e = new Error(j.error || 'Ошибка ' + r.status); e.data = j; e.status = r.status; throw e; }
   return j;
 }
 export const qs = (o) => Object.entries(o).filter(([, v]) => v !== '' && v !== null && v !== undefined).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
@@ -217,5 +217,5 @@ export const ErrorBox = ({ error }) => html`<div class="card err">${error}</div>
 export function ConfirmButton({ children, onConfirm, cls = 'btn danger sm', label = 'Точно?' }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => { if (armed) { const t = setTimeout(() => setArmed(false), 3000); return () => clearTimeout(t); } }, [armed]);
-  return html`<button class=${cls} onClick=${() => (armed ? (setArmed(false), onConfirm()) : setArmed(true))}>${armed ? label : children}</button>`;
+  return html`<button type="button" class=${cls} onClick=${() => (armed ? (setArmed(false), onConfirm()) : setArmed(true))}>${armed ? label : children}</button>`;
 }
