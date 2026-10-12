@@ -46,6 +46,10 @@ export default function Sales() {
       <label class="f" style="width:150px">С<input type="date" value=${from} onInput=${(e) => setFrom(e.target.value)} /></label>
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
       <button class="btn sm" onClick=${() => { setFrom(t); setTo(t); }}>Сегодня</button></div></div>
+    <${BulkBar} sel=${sel} entity="sales" extra=${[
+      { label: 'Скачать ZIP', icon: 'download', onClick: (ids) => { location.href = '/crm-api/sales-docs/export.zip?' + qs({ ids: ids.join(','), receipts: 0 }); } },
+      { label: 'Печать / один PDF', icon: 'print', onClick: (ids) => window.open('/crm-api/sales-docs/print-all?' + qs({ ids: ids.join(',') }), '_blank') },
+    ]} />
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="sales">
       <thead><tr><${SelHead} sel=${sel} rows=${(data?.rows || []).filter((r) => r.type !== 'receipt')} /><th data-c="doc">Документ</th><th data-c="date">Дата</th><th data-c="buyer">Покупатель</th><th data-c="order">Заказ</th><th data-c="pay">Оплата</th><th data-c="net" class="r">Нетто</th><th data-c="gross" class="r">Брутто</th><th data-c="status">Статус</th><th></th></tr></thead>
       <tbody>${(data?.rows || []).map((r) => {
@@ -64,10 +68,6 @@ export default function Sales() {
             ${canDeleteDoc(app, r) && (r.type !== 'receipt' || r.receipt_status !== 'manual') && html`<${ConfirmButton} cls="icon-btn" label=${r.type === 'receipt' ? 'Удалить непробитый чек?' : `Удалить ${r.number}?`} onConfirm=${async () => { await act(() => api((r.type === 'receipt' ? 'receipts/' : 'sales-docs/') + r.id, { method: 'DELETE' }), 'Удалено'); reload(); }}><${Icon} n="trash" /></${ConfirmButton}>`}</td></tr>`;
       })}</tbody></table></div>
       ${!data?.rows?.length ? html`<div class="empty">За период документов нет</div>` : ''}</div>`}
-    <${BulkBar} sel=${sel} entity="sales" extra=${[
-      { label: 'Скачать ZIP', icon: 'download', onClick: (ids) => { location.href = '/crm-api/sales-docs/export.zip?' + qs({ ids: ids.join(','), receipts: 0 }); } },
-      { label: 'Печать / один PDF', icon: 'print', onClick: (ids) => window.open('/crm-api/sales-docs/print-all?' + qs({ ids: ids.join(',') }), '_blank') },
-    ]} />
     ${pack && html`<${AccountantPack} onClose=${() => setPack(false)} />`}
     ${inv && html`<${InvoiceForm} kind=${inv.kind} onClose=${() => setInv(null)} onDone=${(id) => { setInv(null); go('/sales/' + id); }} />`}`;
 }

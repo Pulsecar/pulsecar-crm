@@ -27,6 +27,7 @@ export function CarsList() {
     <div class="page-head"><h1>Автомобили</h1><span class="muted">${data ? num(data.total) : ''}</span>
       <div class="actions"><a class="btn primary" href="#/cars/new"><${Icon} n="plus" />Новое авто</a></div></div>
     <div class="card" style="margin-bottom:12px"><input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Номер, VIN, марка, модель, владелец…" aria-label="Поиск авто" /></div>
+    <${BulkBar} sel=${sel} entity="cars" actions=${bulkActions} csv=${csv} csvName="samochody" onDone=${reload} />
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="cars">
       <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="name">Марка / модель</th><th data-c="plate">Номер</th><th data-c="vin">VIN</th><th data-c="owner">Владелец</th><th data-c="year" class="r">Год</th><th data-c="engine" class="r">Объём</th><th data-c="fuel">Топливо</th><th data-c="power" class="r">Мощность</th><th data-c="mileage" class="r">Пробег</th></tr></thead>
       <tbody>${(data?.rows || []).map((k) => html`<tr class=${'click' + (sel.has(k.id) ? ' on' : '')} onClick=${() => go('/cars/' + k.id)}>
@@ -34,8 +35,7 @@ export function CarsList() {
         <td>${k.owner_name || '—'}<div class="sub">${k.owner_phone || ''}</div></td><td class="r">${k.year || ''}</td><td class="r">${k.capacity || ''}</td>
         <td class="sub">${k.fuel || ''}</td><td class="r">${k.power_kw ? k.power_kw + ' kW' : ''}</td><td class="r">${k.last_mileage ? num(k.last_mileage) + ' ' + (k.mileage_unit || 'km') : ''}</td></tr>`)}</tbody></table></div>
       ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
-      ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
-    <${BulkBar} sel=${sel} entity="cars" actions=${bulkActions} csv=${csv} csvName="samochody" onDone=${reload} />`;
+      ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}`;
 }
 
 const KEYS = ['plate', 'vin', 'make', 'model', 'year', 'engine', 'capacity', 'power_kw', 'fuel', 'color', 'last_mileage', 'mileage_unit', 'notes', 'first_reg', 'engine_no',

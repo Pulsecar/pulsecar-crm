@@ -54,6 +54,7 @@ function Products({ openId }) {
       <button class="btn" onClick=${() => setEdit({})}><${Icon} n="plus" />Товар</button>
       ${data && html`<span class="muted small">Склад по закупке: <b>${zl(data.stockValue)}</b> нетто</span>`}
     </div></div>
+    <${BulkBar} sel=${sel} entity="products" actions=${bulkActions} csv=${csv} csvName="towary" onDone=${reload} />
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="stock">
       <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="name">Товар</th><th data-c="code">Индекс</th><th data-c="brand">Производитель</th><th data-c="qty" class="r">Остаток</th><th data-c="reserved" class="r">В резерве</th><th data-c="free" class="r">Доступно</th><th data-c="buy" class="r">Закупка нетто</th><th data-c="sell" class="r">Продажа брутто</th><th data-c="place">Место</th></tr></thead>
       <tbody>${(data?.rows || []).map((p) => {
@@ -66,7 +67,6 @@ function Products({ openId }) {
       })}</tbody></table></div>
       ${!loading && !data?.rows?.length ? html`<div class="empty">Товаров нет — добавьте через «Приход товара» или импорт</div>` : ''}
       ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
-    <${BulkBar} sel=${sel} entity="products" actions=${bulkActions} csv=${csv} csvName="towary" onDone=${reload} />
     ${edit && html`<${ProductForm} p=${edit} onClose=${() => setEdit(null)} onSaved=${() => { setEdit(null); reload(); }} />`}
     ${open && html`<${ProductCard} id=${open} onClose=${() => { setOpen(null); reload(); }} onEdit=${(p) => { setOpen(null); setEdit(p); }} />`}`;
 }

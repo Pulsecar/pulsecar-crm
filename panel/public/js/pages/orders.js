@@ -82,6 +82,7 @@ export function OrdersList({ kind, query }) {
       <label class="f" style="width:150px">С<input type="date" value=${from} onInput=${(e) => setFrom(e.target.value)} /></label>
       <label class="f" style="width:150px">По<input type="date" value=${to} onInput=${(e) => setTo(e.target.value)} /></label>
     </div></div>
+    <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="orders">
       <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><${Th} k="number">Номер</${Th}><${Th} k="created">Создан</${Th}><${Th} k="status">Статус</${Th}>${kind === 'quote' && html`<${Th} k="followup">Обзвон</${Th}>`}<${Th} k="customer">Клиент</${Th}><${Th} k="car">Авто</${Th}>${kind === 'quote' ? html`<${Th} k="comment" c="intake">Комментарий</${Th}>` : html`<${Th} k="planned" c="intake">Приём</${Th}><${Th} k="comment">Комментарий</${Th}>`}<${Th} k="source">Источник</${Th}>${kind === 'quote' && html`<${Th} k="labor_sum" r=${1}>Работы</${Th}><${Th} k="parts_sum" r=${1}>Запчасти</${Th}>`}<${Th} k="total" r=${1}>${kind === 'quote' ? 'Итого' : 'Сумма'}</${Th}><${Th} k="paid" r=${1}>Оплачено</${Th}></tr></thead>
       <tbody>${(data?.rows || []).map((o) => html`<tr class=${'click' + (sel.has(o.id) ? ' on' : '')} onClick=${() => go(base + '/' + o.id)}>
@@ -109,7 +110,6 @@ export function OrdersList({ kind, query }) {
     </table></div>
     ${!loading && !data?.rows?.length ? html`<div class="empty">Ничего не найдено</div>` : ''}
     ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
-    <${BulkBar} sel=${sel} entity="orders" actions=${bulkActions} csv=${csv} csvName=${kind === 'quote' ? 'wyceny' : 'zlecenia'} onDone=${reload} />
     ${fuOpen && html`<${FollowUpModal} id=${fuOpen.id} number=${fuOpen.number} kind=${kind} onClose=${() => { setFuOpen(null); reload(); }} />`}
     ${decline && html`<${Modal} title=${'Отказался · ' + decline.o.number} onClose=${() => setDecline(null)} foot=${html`
         <button class="btn" onClick=${() => setDecline(null)}>Отмена</button>

@@ -695,8 +695,8 @@ a.brand { display: block; cursor: pointer; } a.brand:hover img { opacity: .85; }
 .tbl .sel-col { width: 34px; padding-right: 0; }
 .tbl .sel-col input { width: 16px; height: 16px; cursor: pointer; }
 .tbl tr.on > td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-.bulk-bar { position: sticky; bottom: 12px; z-index: 40; margin-top: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px;
-  background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.bulk-bar { position: sticky; top: 66px; z-index: 15; margin-bottom: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
 
 /* ════════════════════════════════════════════════════════════════════
    Premium — строгий вид: Inter, графит, тонкие линии, акцент только по делу
@@ -827,6 +827,7 @@ th.on { color: var(--text); }
 .modal-bg { background: rgba(4,5,6,.7); backdrop-filter: blur(3px); }
 .toast { border-radius: var(--r-sm); border-left-width: 2px; background: var(--surface2); }
 .bulk-bar { border-radius: var(--radius); }
+.bulk-bar.idle { position: static; border-color: var(--border); border-style: dashed; box-shadow: none; background: transparent; min-height: 46px; font-size: 13px; }
 
 /* Карта заказа */
 .order-head { margin-bottom: 4px; padding-bottom: 16px; }

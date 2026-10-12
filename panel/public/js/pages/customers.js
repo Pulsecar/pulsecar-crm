@@ -32,6 +32,7 @@ export function CustomersList() {
     <div class="page-head"><h1>Клиенты</h1><span class="muted">${data ? num(data.total) : ''}</span>
       <div class="actions"><a class="btn primary" href="#/customers/new"><${Icon} n="plus" />Новый клиент</a></div></div>
     <div class="card" style="margin-bottom:12px"><input type="search" value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Имя, телефон, номер авто, VIN, NIP, e-mail, карта PC…" aria-label="Поиск клиентов" /></div>
+    <${BulkBar} sel=${sel} entity="customers" actions=${bulkActions} csv=${csv} csvName="klienci" onDone=${reload} />
     ${error ? html`<${ErrorBox} error=${error} />` : html`<div class="card tight"><div class="tbl-wrap"><table class="tbl" data-cols="customers">
       <thead><tr><${SelHead} sel=${sel} rows=${data?.rows || []} /><th data-c="name">Данные клиента</th><th data-c="nip">NIP</th><th data-c="phone">Телефон</th><th data-c="email">E-mail</th><th data-c="address">Адрес</th><th data-c="cars">Авто</th><th data-c="orders" class="r">Заказов</th><th data-c="app">Приложение</th><th data-c="consent">Согласие</th></tr></thead>
       <tbody>${(data?.rows || []).map((c) => html`<tr class=${'click' + (sel.has(c.id) ? ' on' : '')} onClick=${() => go('/customers/' + c.id)}>
@@ -42,8 +43,7 @@ export function CustomersList() {
         <td>${c.registered_at ? html`<span class="pos">✓ ${num(c.points)}</span>` : html`<span class="faint">—</span>`}</td>
         <td>${c.marketing_consent ? html`<span class="pos">✓</span>` : html`<span class="faint">—</span>`}</td></tr>`)}</tbody></table></div>
       ${!loading && !data?.rows?.length ? html`<div class="empty">Никого не нашли</div>` : ''}
-      ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}
-    <${BulkBar} sel=${sel} entity="customers" actions=${bulkActions} csv=${csv} csvName="klienci" onDone=${reload} />`;
+      ${data && html`<${Pager} page=${page} total=${data.total} size=${data.pageSize} onPage=${setPage} />`}</div>`}`;
 }
 
 /** Вставленный/набранный номер → { prefix, phone }: «+48 730 509 577», «0048730509577», «48730509577» → +48 / 730509577 */

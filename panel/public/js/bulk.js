@@ -36,7 +36,8 @@ export function BulkBar({ sel, entity, actions = [], csv, csvName, onDone, extra
   const [ask, setAsk] = useState(null);
   const [val, setVal] = useState('');
   const [report, setReport] = useState(null);
-  if (!sel.size) return null;
+  // пустая плашка того же размера — таблица не прыгает, когда отмечаешь первую строку
+  if (!sel.size) return html`<div class="bulk-bar idle"><span class="faint">Отметьте строки галочкой — здесь появятся действия</span></div>`;
   const run = async (a, value) => {
     const r = await act(() => api('bulk/' + entity, { body: { ids: [...sel.ids.keys()], action: a.key, value } }));
     setAsk(null); setVal('');
