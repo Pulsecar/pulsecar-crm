@@ -2,7 +2,9 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev
+# better-sqlite3 собирается из исходников, если нет готовой сборки под эту версию Node — нужны python3/make/g++
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/* \
+ && (npm ci --omit=dev || npm install --omit=dev)
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
