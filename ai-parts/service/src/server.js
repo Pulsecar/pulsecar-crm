@@ -279,5 +279,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   getDb()
     .prepare(`UPDATE jobs SET status='error', error='Сервис был перезапущен во время подбора — запустите подбор снова' WHERE status='running'`)
     .run();
+  // задачи partslink24 от прерванных подборов — закрываем, чтобы расширение не тратило на них время и не держало очередь
+  getDb().prepare(`UPDATE pl24_tasks SET status='failed', result_json='{"error":"service_restarted"}', finished_at=datetime('now') WHERE status IN ('pending','taken')`).run();
   createApp().listen(config.port, () => console.log(`ИИ-запчастист слушает порт ${config.port}`));
 }

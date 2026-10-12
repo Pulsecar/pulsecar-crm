@@ -61,14 +61,17 @@ export function finishTask(id, status, result) {
     .run(status, JSON.stringify(result ?? null), id);
 }
 
-export async function waitForTask(id, timeoutSec, onTick) {
-  const until = Date.now() + timeoutSec * 1000;
+// timeoutSec — сколько ждать, пока расширение заберёт задачу; workSec — сколько даём на сам поиск после этого
+// (навигация по каталогу в человеческом темпе: 15–25 шагов по 5–15 с; раньше общий таймер обрывал уже идущий поиск)
+export async function waitForTask(id, timeoutSec, onTick, workSec = Number(process.env.PL24_WORK_SECONDS || 480)) {
+  let until = Date.now() + timeoutSec * 1000;
   let lastStatus = null;
   while (Date.now() < until) {
     const t = getTask(id);
     if (!t) return { status: 'missing' };
     if (t.status !== lastStatus) {
       lastStatus = t.status;
+      if (t.status === 'taken') until = Math.max(until, Date.now() + workSec * 1000);
       onTick?.(t.status);
     }
     if (t.status === 'done' || t.status === 'failed') return { status: t.status, result: t.result };
