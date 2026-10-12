@@ -11,6 +11,7 @@ import { startIntercarsSync } from './intercars.js';
 import { startSupplierSync } from './suppliers.js';
 import { forEachDb } from '../branches.js';
 import { runSiteReminders } from '../site-reminders.js';
+import { runDueCampaigns } from '../sms-campaigns.js';
 import { config } from '../config.js';
 
 const warsaw = () => {
@@ -79,6 +80,9 @@ export async function runJobs() {
 
   // 6. Напоминания с сайта (шины, кондиционер, масло, техосмотр) — SMS клиенту, 10:00–18:00
   if (S('sms_site_reminders_on', '1') === '1' && (now.hour >= 10 && now.hour < 18 || process.env.NODE_ENV === 'test')) runSiteReminders(now.date, config.publicUrl);
+
+  // 7. SMS-рассылки по расписанию (9:00–20:00)
+  runDueCampaigns(config.publicUrl, now.hour);
 }
 
 const fmtDate = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');

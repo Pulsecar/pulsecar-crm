@@ -899,4 +899,13 @@ if (getSetting('mw_internal_comments') === null) {
     if (a120) run("UPDATE payments SET article_id = ? WHERE article_id IS NULL AND direction = 'in' AND order_id IS NULL AND (note LIKE 'Parking %' OR note LIKE 'Przechowanie opon %')", a120);
     setSetting('cash_article_backfill_v1', '1');
   }
+  // SMS-рассылки (sms-campaigns.js)
+  db.exec(`CREATE TABLE IF NOT EXISTS sms_campaigns (
+    id INTEGER PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL, audience TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'scheduled',
+    scheduled_at TEXT, started_at TEXT, sent_at TEXT, recipients INTEGER, sent_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS sms_campaign_log (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL, phone TEXT NOT NULL, status TEXT NOT NULL, error TEXT, at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec('CREATE INDEX IF NOT EXISTS sms_campaign_log_c ON sms_campaign_log(campaign_id)');
+  db.exec(`CREATE TABLE IF NOT EXISTS sms_stop (token TEXT PRIMARY KEY, customer_id INTEGER, phone TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 }

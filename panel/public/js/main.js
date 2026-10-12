@@ -22,6 +22,7 @@ import { ClipPage } from './pages/suppliers.js';
 import { initI18n, LangSwitch } from './i18n.js';
 import { applyUi } from './ui.js';
 import { MyAccount, Reminders, Changelog, ScreenSettings, applyScreen, isDark, setTheme } from './pages/account.js';
+import Campaigns from './pages/campaigns.js';
 
 const NAV = [
   { to: '/', icon: 'home', label: 'Главная' },
@@ -52,6 +53,7 @@ const USER_MENU = [
     { to: '/sms', icon: 'chat', label: 'SMS', perm: 'sms.view' },
     { to: '/settings/messages', icon: 'mail', label: 'Шаблоны SMS и e-mail', perm: 'settings.manage' },
     { to: '/reminders', icon: 'bell', label: 'Запланированные напоминания', perm: 'sms.view' },
+    { to: '/campaigns', icon: 'megaphone', label: 'SMS-рассылки', perm: 'sms.view' },
     { to: '/marketing', icon: 'megaphone', label: 'Маркетинг', perm: 'marketing.view' }],
   [{ to: '/changelog', icon: 'file', label: 'Что нового в CRM' }, { screen: true, icon: 'monitor', label: 'Настройки экрана' }],
 ];
@@ -209,6 +211,7 @@ function Shell({ app }) {
   else if (p0 === 'audit') page = html`<${AuditPage} query=${route.query} key=${JSON.stringify(route.query)} />`;
   else if (p0 === 'account') page = html`<${MyAccount} />`;
   else if (p0 === 'reminders') page = html`<${Reminders} />`;
+  else if (p0 === 'campaigns') page = html`<${Campaigns} />`;
   else if (p0 === 'changelog') page = html`<${Changelog} />`;
   else if (p0 === 'search') page = html`<${Search} q=${route.query.q || ''} key=${route.query.q} />`;
   else page = html`<div class="empty">Страница не найдена</div>`;

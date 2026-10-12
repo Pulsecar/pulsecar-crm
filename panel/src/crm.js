@@ -1,6 +1,7 @@
 // API панели panel.pulsecar.tech (CRM для сотрудников)
 import { localShift } from './integrations/jobs.js';
 import { nextPlan as siteNextPlan, describe as siteDescribe } from './site-reminders.js';
+import { AUDIENCES as SMS_AUDIENCES, audience as smsAudience, sendCampaign, render as campaignRender } from './sms-campaigns.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -1724,6 +1725,41 @@ crm.get('/reminders', (req, res) => {
   }));
   res.json({ on, hours, rows, sent, site, siteOn: S('sms_site_reminders_on', '1') === '1' });
 });
+// ── SMS-рассылки (только с согласием, с отпиской) ─────────────────────────────
+crm.get('/sms-campaigns', (req, res) => {
+  who(req, 'sms.view');
+  const counts = Object.fromEntries(Object.keys(SMS_AUDIENCES).map((k) => [k, smsAudience(k).length]));
+  res.json({ audiences: SMS_AUDIENCES, counts, rows: all('SELECT * FROM sms_campaigns ORDER BY id DESC LIMIT 100') });
+});
+crm.post('/sms-campaigns', (req, res) => {
+  const s = who(req, 'sms.send');
+  const b = req.body || {};
+  const title = String(b.title || '').trim().slice(0, 120);
+  const text = String(b.text || '').trim().slice(0, 600);
+  if (!title || !text) throw new HttpError(400, 'Укажите название и текст рассылки');
+  if (!SMS_AUDIENCES[b.audience]) throw new HttpError(400, 'Выберите получателей');
+  const at = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/.test(String(b.scheduled_at || '')) ? String(b.scheduled_at).replace('T', ' ') : null;
+  const n = smsAudience(b.audience).length;
+  if (!n) throw new HttpError(400, 'Нет получателей с согласием');
+  const id = insert('sms_campaigns', { title, text, audience: b.audience, status: 'scheduled', scheduled_at: at, recipients: n, created_by: s.name || s.login || null });
+  if (!at) sendCampaign(id, config.publicUrl);
+  res.json({ ok: true, id, recipients: n, scheduled_at: at });
+});
+crm.post('/sms-campaigns/:id/cancel', (req, res) => {
+  who(req, 'sms.send');
+  run(`UPDATE sms_campaigns SET status = 'cancelled' WHERE id = ? AND status IN ('scheduled', 'sending')`, Number(req.params.id));
+  res.json({ ok: true });
+});
+crm.post('/sms-campaigns/test', async (req, res) => {
+  who(req, 'sms.send');
+  const b = req.body || {};
+  const phone = normPhone(b.phone);
+  if (!phone || !String(b.text || '').trim()) throw new HttpError(400, 'Укажите номер и текст');
+  const text = String(b.text).trim().replace(/\{imie\}|\{имя\}|\{name\}/gi, 'Anna') + ` STOP: ${config.publicUrl}/r/TEST`;
+  const r = await sendSms(phone, text, { kind: 'campaign_test' });
+  res.json({ ok: true, status: r.status, text });
+});
+
 crm.post('/site-reminders/:id', (req, res) => {
   who(req, 'sms.view');
   run('UPDATE site_reminders SET active = ? WHERE id = ?', req.body?.active ? 1 : 0, Number(req.params.id));

@@ -211,7 +211,31 @@ try {
   assert.ok(rem && rem.active && /техосмотр/.test(rem.what) && rem.next && /масл/.test(rem.next.items.join()), 'в CRM видно подписку и следующую SMS: ' + JSON.stringify(rem));
   const stop = await req('/r/' + sub.token);
   assert.ok(String(stop.j).includes('Wypisano'), 'отписка по ссылке');
-  console.log('✓ запись с сайта: окно сразу в терминарзе; напоминания с сайта: SMS в срок, без повторов, отписка');
+  // SMS-рассылки: только с согласием, отписка по ссылке, без повторов
+  ok(await req('/api/public/reminders', { body: { name: 'Piotr Lis', phone: '600999111', tyres: true, consent: true } }), 'sub for campaign');
+  const camp0 = ok(await req('/crm-api/sms-campaigns'), 'campaigns');
+  assert.ok(camp0.counts.site >= 1 && camp0.counts.both >= camp0.counts.site, 'получатели: ' + JSON.stringify(camp0.counts));
+  assert.equal((await req('/crm-api/sms-campaigns', { body: { title: 'x', text: '', audience: 'both' } })).status, 400, 'без текста нельзя');
+  const before2 = out.length;
+  const cp = ok(await req('/crm-api/sms-campaigns', { body: { title: 'Zima test', text: 'Pulsecar: {imie}, czas na opony zimowe!', audience: 'both' } }), 'campaign send');
+  assert.equal(cp.recipients, camp0.counts.both);
+  for (let i = 0; i < 40 && ok(await req('/crm-api/sms-campaigns'), 'poll').rows[0].status !== 'sent'; i++) await wait(100);
+  const camp1 = ok(await req('/crm-api/sms-campaigns'), 'campaigns after');
+  assert.equal(camp1.rows[0].status, 'sent'); assert.equal(camp1.rows[0].sent_count, cp.recipients);
+  const lines = out.slice(before2).split('\n').filter((l) => l.includes('czas na opony zimowe'));
+  assert.equal(lines.length, cp.recipients, 'по одной SMS каждому');
+  const piotr = lines.find((l) => l.includes('+48600999111'));
+  assert.ok(piotr && piotr.includes('Pulsecar: Piotr, czas') && /STOP: \S+\/r\/[a-f0-9]{16}/.test(piotr), 'имя и ссылка отписки: ' + piotr);
+  const custLine = lines.find((l) => !l.includes('+48600999111'));
+  if (custLine) {
+    const tok = custLine.match(/\/r\/([a-f0-9]{16})/)[1];
+    assert.ok(String((await req('/r/' + tok)).j).includes('Wypisano'), 'отписка клиента CRM');
+    assert.equal(ok(await req('/crm-api/sms-campaigns'), 'after stop').counts.consent, camp0.counts.consent - 1, 'согласие снято');
+  }
+  const sched = ok(await req('/crm-api/sms-campaigns', { body: { title: 'Wiosna', text: 'Pulsecar: klima', audience: 'site', scheduled_at: '2099-04-15 10:00' } }), 'scheduled');
+  ok(await req(`/crm-api/sms-campaigns/${sched.id}/cancel`, { body: {} }), 'cancel');
+  assert.equal(ok(await req('/crm-api/sms-campaigns'), 'cancelled').rows[0].status, 'cancelled');
+  console.log('✓ запись с сайта: окно сразу в терминарзе; напоминания с сайта: SMS в срок, без повторов, отписка; SMS-рассылки с согласием и отпиской');
   myc = ok(await req('/api/me', { token }), 'me booked').cars.find((x) => x.id === car.id);
   assert.deepEqual(myc.recommendations.find((r) => r.id === timing.id).booked, { start: startAt, status: 'planned' });
   const cal = ok(await req(`/crm-api/appointments?from=${d0.date}&to=${d0.date}`), 'calendar');
