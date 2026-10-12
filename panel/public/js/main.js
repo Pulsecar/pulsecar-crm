@@ -23,6 +23,7 @@ import { initI18n, LangSwitch } from './i18n.js';
 import { applyUi } from './ui.js';
 import { MyAccount, Reminders, Changelog, ScreenSettings, applyScreen, isDark, setTheme } from './pages/account.js';
 import Campaigns from './pages/campaigns.js';
+import LivePage from './pages/live.js';
 
 const NAV = [
   { to: '/', icon: 'home', label: 'Главная' },
@@ -35,6 +36,7 @@ const NAV = [
   { to: '/stock', icon: 'box', label: 'Склад', perm: 'products.view' },
   { to: '/purchases', icon: 'cart', label: 'Закупки', perm: 'purchases.view' },
   { to: '/storage', icon: 'tire', label: 'Хранение и парковка', perm: 'storage.view' },
+  { to: '/live', icon: 'camera', label: 'Камеры онлайн', perm: 'orders.edit', feature: 'live' },
   { to: '/sales', icon: 'file', label: 'Продажи', perm: 'invoices.create' },
   { to: '/cash', icon: 'cash', label: 'Касса', perm: 'cash.view' },
   { to: '/pos', icon: 'qr', label: 'Pulse Points', perm: 'loyalty.use' },
@@ -199,6 +201,7 @@ function Shell({ app }) {
   else if (p0 === 'stock') page = html`<${Stock} sub=${p1} id=${route.parts[2]} />`;
   else if (p0 === 'purchases') page = html`<${Purchases} />`;
   else if (p0 === 'storage') page = html`<${Storage} />`;
+  else if (p0 === 'live') page = html`<${LivePage} />`;
   else if (p0 === 'cash') page = html`<${Cash} />`;
   else if (p0 === 'sales') page = p1 ? html`<${SaleDocPage} id=${p1} key=${p1} />` : html`<${Sales} />`;
   else if (p0 === 'pos') page = html`<${Pos} />`;
@@ -222,7 +225,7 @@ function Shell({ app }) {
       <button class="side-toggle" onClick=${toggleMini} title=${mini ? 'Развернуть меню' : 'Свернуть меню'} aria-label=${mini ? 'Развернуть меню' : 'Свернуть меню'}><${Icon} n=${mini ? 'right' : 'left'} /></button>
       <a class="brand" href="#/" title="На главную" onClick=${() => setMenu(false)}><img data-logo src=${isDark() ? '/logo.png' : '/logo-dark.png'} alt="Pulsecar — на главную" /></a>
       ${app.owner && html`<a class=${'nav-item' + (active('/owner') ? ' on' : '')} href="#/owner" title="Все сервисы" data-ui="menu.owner"><${Icon} n="chart" /><span class="nl">Все сервисы</span></a>`}
-      ${NAV.filter((n) => n.sep || !n.perm || app.perms?.[n.perm]).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
+      ${NAV.filter((n) => n.sep || ((!n.perm || app.perms?.[n.perm]) && (!n.feature || app.features?.[n.feature]))).map((n, i) => n.sep ? html`<div class="nav-sep" key=${'s' + i}></div>` : html`
         <a class=${'nav-item' + (active(n.to) ? ' on' : '')} href=${'#' + n.to} key=${n.to} title=${n.label} data-ui=${'menu.' + (n.to.slice(1) || 'home')}>
           <${Icon} n=${n.icon} /><span class="nl">${n.label}</span>${n.badge && requests ? html`<span class="count">${requests}</span>` : ''}</a>`)}
       <div class="nav-foot">${app.settings.company_brand || 'Pulsecar'}</div>

@@ -15,6 +15,7 @@ import { ReceiptBox } from '../fiscal.js';
 import { ObjectHistory } from './audit.js';
 import { OrderSlots } from './calendar.js';
 import { Recommendations } from './recs.js';
+import { LiveButton } from './live.js';
 
 
 // ── Выцены: обзвон клиента (статус, причина отказа, когда перезвонить) ─────────
@@ -243,6 +244,7 @@ export function OrderPage({ id }) {
           const w = window.open('', '_blank');
           try { const r = await api(`orders/${o.id}/card`, { body: {} }); navigator.clipboard?.writeText(r.url).catch(() => {}); if (w) w.location = r.url; else location.href = r.url; toast('Ссылка на карту скопирована'); }
           catch (e) { w?.close(); toast(e.message, 'error'); } }}><${Icon} n="file" />${isQuote ? 'Электронная выцена' : 'Электронная карта заказа'}</button>
+        <span data-ui="order.btn.live" style="display:contents"><${LiveButton} o=${o} /></span>
         <span data-ui="order.btn.docs" style="display:contents"><${DocsMenu} o=${o} /></span>
         <button class="btn" data-ui="order.btn.copy" title="Копия с теми же клиентом, авто и позициями" onClick=${async () => { const r = await act(() => api(`orders/${o.id}/copy`, { body: {} }), isQuote ? 'Выцена скопирована' : 'Заказ скопирован'); go((isQuote ? '/quotes/' : '/orders/') + r.id); }}><${Icon} n="file" />Копировать</button>
         ${isQuote && !o.linked_orders?.length && html`<span data-ui="order.btn.toorder" style="display:contents"><${QuoteToOrder} o=${o} /></span>`}

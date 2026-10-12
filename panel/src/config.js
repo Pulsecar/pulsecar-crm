@@ -20,6 +20,9 @@ export const config = {
   reviewPhone: env('REVIEW_PHONE', ''),
   reviewCode: env('REVIEW_CODE', ''),
 
+  // модуль «Pulsecar Live» (трансляции с камер): адрес для запросов с сервера, ключ CRM_API_KEY модуля, публичный адрес для браузера
+  live: { url: env('PULSECAR_LIVE_URL', ''), key: env('PULSECAR_LIVE_API_KEY', ''), publicUrl: env('PULSECAR_LIVE_PUBLIC', 'https://live.pulsecar.tech') },
+
   // модуль «ИИ-запчастист» (отдельный сервис pulsecar-ai-parts): публичный адрес для браузера, внутренний для сервера, общий секрет токенов
   aiPartsSvc: { url: env('AI_PARTS_URL', ''), internalUrl: env('AI_PARTS_INTERNAL_URL', ''), secret: env('AI_PARTS_SECRET', '') },
 

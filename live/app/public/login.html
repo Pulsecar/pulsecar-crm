@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pulsecar Live — logowanie</title><meta name="robots" content="noindex"><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="login"><div class="card">
+  <div class="eyebrow">Pulsecar · Kamery</div>
+  <h1 style="margin-bottom:16px">Podgląd na żywo</h1>
+  <form method="post" action="/admin/login" class="form">
+    <div class="fld"><label for="password">Hasło administratora</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus></div>
+    <div class="err" id="err"></div>
+    <button class="btn btn-primary" type="submit">Zaloguj</button>
+    <p class="hint" style="margin:0">Jeśli otwierasz moduł z CRM, odśwież stronę w CRM — logowanie nastąpi automatycznie.</p>
+  </form>
+</div></div>
+<script src="/static/login.js"></script>
+</body></html>

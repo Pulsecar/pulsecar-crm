@@ -1,0 +1,38 @@
+# Pulsecar Live — модуль трансляций для CRM.
+# Оба сервиса слушают только 127.0.0.1; наружу их публикует nginx/Caddy сервера (см. deploy/).
+# network_mode: host нужен, чтобы go2rtc видел камеры через Tailscale-маршрут в сеть мастерской.
+
+services:
+  app:
+    build: ./app
+    container_name: pulsecar-live
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: ${APP_HOST:-127.0.0.1}       # на сервере Pulsecar — адрес шлюза docker-сети Caddy/CRM (см. deploy/install.sh)
+      PORT: ${APP_PORT:-3010}
+      GO2RTC_URL: http://127.0.0.1:11984
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data              # db.json: камеры, ссылки, настройки — бэкапить
+    depends_on: [go2rtc]
+
+  go2rtc:
+    image: alexxit/go2rtc:1.9.13
+    container_name: pulsecar-go2rtc
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc:/config              # go2rtc.yaml; модуль сам добавляет туда камеры
+
+  # Тестовая камера для проверки без настоящих камер (картинка + звук, звук должен отсекаться).
+  # Запуск: docker compose --profile demo up -d   Адрес в панели: Tapo, IP 127.0.0.1, порт 18554, login demo / hasło demo12345
+  fakecam:
+    profiles: [demo]
+    image: alexxit/go2rtc:1.9.13
+    container_name: pulsecar-fakecam
+    network_mode: host
+    restart: "no"
+    volumes:
+      - ./demo/fakecam.yaml:/config/go2rtc.yaml:ro

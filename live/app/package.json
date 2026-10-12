@@ -1,0 +1,12 @@
+{
+  "name": "pulsecar-live",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Pulsecar Live — podgląd napraw na żywo dla klientów (moduł CRM)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node test/e2e.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

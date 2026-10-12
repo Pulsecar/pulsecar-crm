@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pulsecar Live</title><meta name="robots" content="noindex"><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<div class="wrap">
+
+  <!-- ===== Полная панель ===== -->
+  <div id="page-main" hidden>
+    <header class="top">
+      <div><div class="eyebrow">Kamery</div><h1>Podgląd na żywo</h1></div>
+      <div class="toolbar hide-embed" style="margin:0"><span class="hint" id="me"></span><form method="post" action="/admin/logout"><button class="btn btn-outline btn-sm" type="submit">Wyloguj</button></form></div>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="links" aria-selected="true">Linki dla klientów<span class="count" id="cnt-links">0</span></button>
+      <button role="tab" data-tab="cameras" aria-selected="false">Kamery<span class="count" id="cnt-cams">0</span></button>
+      <button role="tab" data-tab="settings" aria-selected="false">Ustawienia</button>
+    </nav>
+
+    <section id="tab-links">
+      <div class="toolbar">
+        <button class="btn btn-primary" id="btn-new-link" type="button">+ Nowy link</button>
+        <input class="search" id="q" type="search" placeholder="Szukaj: nr rej., klient, zlecenie" aria-label="Szukaj">
+        <div class="seg" id="filter"><button type="button" data-f="active" aria-pressed="true">Aktywne</button><button type="button" data-f="all" aria-pressed="false">Wszystkie</button></div>
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Samochód / klient</th><th>Kamera</th><th>Okres dostępu</th><th>Godziny</th><th>Status</th><th>Otwarcia</th><th>Akcje</th></tr></thead>
+        <tbody id="links"><tr><td colspan="7" class="empty">Ładowanie…</td></tr></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-cameras" hidden>
+      <div class="toolbar"><button class="btn btn-primary" id="btn-new-cam" type="button">+ Dodaj kamerę</button><span class="grow"></span><span class="hint">Obraz z kamer odświeża się po otwarciu zakładki. Dźwięk nie jest przesyłany.</span></div>
+      <div class="cams" id="cams"></div>
+    </section>
+
+    <section id="tab-settings" hidden>
+      <div class="grid2" style="align-items:start">
+        <div class="card form">
+          <div><h2 style="margin:0">Godziny pracy warsztatu</h2><p class="hint" style="margin:4px 0 0">Domyślne godziny dostępu dla linków. Czas warszawski.</p></div>
+          <div class="days" id="set-hours"></div>
+          <div class="fld"><label for="set-closed">Dni zamknięte (święta) — jedna data w linii, RRRR-MM-DD</label><textarea id="set-closed" rows="4" placeholder="2026-11-01&#10;2026-11-11&#10;2026-12-25"></textarea></div>
+        </div>
+        <div class="card form">
+          <h2 style="margin:0">Dla klienta</h2>
+          <div class="fld"><label for="set-phone">Telefon warsztatu (widoczny na stronie i w SMS)</label><input id="set-phone" placeholder="+48 …"></div>
+          <div class="fld"><label for="set-max">Ile urządzeń może jednocześnie oglądać jeden link</label><input id="set-max" type="number" min="1" max="20"></div>
+          <div class="err" id="set-err"></div>
+          <div><button class="btn btn-primary" id="set-save" type="button">Zapisz ustawienia</button></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===== Только форма новой ссылки (окно из zlecenia в CRM) ===== -->
+  <div id="page-new" class="page-new" hidden>
+    <div class="card">
+      <div class="eyebrow">Podgląd na żywo</div>
+      <h1 style="margin-bottom:16px">Nowy link dla klienta</h1>
+      <div id="new-host"></div>
+    </div>
+  </div>
+</div>
+
+<!-- форма ссылки (используется в окне и на странице /admin/new) -->
+<template id="tpl-link-form">
+  <form class="form link-form" novalidate>
+    <div class="fld"><label>Kamera</label><select name="cameraId" required></select><span class="hint no-cams" hidden>Najpierw dodaj kamerę w zakładce „Kamery”.</span></div>
+    <div class="grid2">
+      <div class="fld"><label>Nr rejestracyjny *</label><input name="plate" class="plate" required autocomplete="off" placeholder="WB 4721K"></div>
+      <div class="fld"><label>Klient</label><input name="client" autocomplete="off"></div>
+    </div>
+    <div class="grid3">
+      <div class="fld"><label>Samochód</label><input name="car" autocomplete="off"></div>
+      <div class="fld"><label>Nr zlecenia</label><input name="orderNo" autocomplete="off"></div>
+      <div class="fld"><label>Telefon klienta</label><input name="phone" autocomplete="off" inputmode="tel"></div>
+    </div>
+    <div class="grid2">
+      <div class="fld"><label>Dostęp od</label><input name="validFrom" type="datetime-local" required></div>
+      <div class="fld"><label>Dostęp do</label><input name="validTo" type="datetime-local" required></div>
+    </div>
+    <div class="chips"><span class="hint">Szybko „do”:</span>
+      <button type="button" class="chip" data-to="0">końca dnia</button>
+      <button type="button" class="chip" data-to="1">+1 dzień</button>
+      <button type="button" class="chip" data-to="3">+3 dni</button>
+      <button type="button" class="chip" data-to="7">+7 dni</button>
+    </div>
+    <div class="fld"><span class="lbl">Godziny dostępu w tym okresie</span>
+      <div class="seg mode"><button type="button" data-m="workshop" aria-pressed="true">Godziny pracy warsztatu</button><button type="button" data-m="always" aria-pressed="false">Całą dobę</button><button type="button" data-m="custom" aria-pressed="false">Własne</button></div>
+      <span class="hint mode-hint"></span>
+      <div class="days custom-days" hidden></div>
+    </div>
+    <div class="err form-err"></div>
+  </form>
+</template>
+
+<dialog id="dlg-link">
+  <div class="dhead"><h2 style="margin:0" id="dlg-link-title">Nowy link</h2><button class="x" type="button" data-close aria-label="Zamknij">×</button></div>
+  <div class="dbody" id="dlg-link-body"></div>
+  <div class="dfoot" id="dlg-link-foot"><button class="btn btn-outline" type="button" data-close>Anuluj</button><button class="btn btn-primary" type="button" id="dlg-link-save">Utwórz link</button></div>
+</dialog>
+
+<dialog id="dlg-cam">
+  <div class="dhead"><h2 style="margin:0" id="dlg-cam-title">Nowa kamera</h2><button class="x" type="button" data-close aria-label="Zamknij">×</button></div>
+  <div class="dbody">
+    <form class="form" id="cam-form" novalidate>
+      <div class="grid2">
+        <div class="fld"><label for="c-name">Nazwa</label><input id="c-name" name="name" placeholder="Stanowisko 1" required></div>
+        <div class="fld"><span class="lbl">Rodzaj</span><div class="seg" id="c-type"><button type="button" data-t="tapo" aria-pressed="true">Tapo</button><button type="button" data-t="rtsp" aria-pressed="false">Inna kamera (RTSP)</button></div></div>
+      </div>
+      <div id="c-tapo" class="form">
+        <div class="grid2">
+          <div class="fld"><label for="c-host">Adres IP kamery</label><input id="c-host" name="host" placeholder="192.168.3.20" inputmode="decimal"></div>
+          <div class="fld"><span class="lbl">Jakość</span><div class="seg" id="c-stream"><button type="button" data-s="stream1" aria-pressed="true">Wysoka</button><button type="button" data-s="stream2" aria-pressed="false">Niska (oszczędza internet)</button></div></div>
+        </div>
+        <div class="grid3">
+          <div class="fld"><label for="c-user">Login konta kamery</label><input id="c-user" name="user" autocomplete="off"></div>
+          <div class="fld"><label for="c-pass">Hasło konta kamery</label><input id="c-pass" name="pass" type="password" autocomplete="new-password"></div>
+          <div class="fld"><label for="c-port">Port</label><input id="c-port" name="port" type="number" value="554"></div>
+        </div>
+      </div>
+      <div id="c-rtsp" class="fld" hidden><label for="c-url">Adres strumienia</label><input id="c-url" name="url" placeholder="rtsp://login:hasło@192.168.3.30:554/ścieżka" autocomplete="off"></div>
+      <label class="check"><input type="checkbox" id="c-enabled" checked> Kamera włączona</label>
+      <div id="c-test"></div>
+      <div class="err" id="c-err"></div>
+      <div class="note">
+        <b>Przygotowanie kamery Tapo</b>
+        <ol>
+          <li>Aplikacja Tapo → kamera → <b>Ustawienia zaawansowane → Konto kamery</b>: utwórz login i hasło (to nie jest hasło do konta Tapo).</li>
+          <li>Aplikacja Tapo → <b>Ja → Tapo Lab → Zgodność z rozwiązaniami innych firm</b>: włącz.</li>
+          <li><b>Wideo i Wyświetlacz</b>: wyłącz znak wodny „tapo”, jakość 1080p.</li>
+          <li><b>Informacje o urządzeniu</b>: przepisz adres IP i zarezerwuj go w routerze.</li>
+          <li>Tryb prywatności w godzinach pracy musi być wyłączony.</li>
+        </ol>
+      </div>
+    </form>
+  </div>
+  <div class="dfoot">
+    <button class="btn btn-danger left" type="button" id="c-del" hidden>Usuń kamerę</button>
+    <button class="btn btn-outline" type="button" id="c-test-btn">Sprawdź połączenie</button>
+    <button class="btn btn-primary" type="button" id="c-save">Zapisz</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="/static/player.js"></script>
+<script src="/static/admin.js"></script>
+</body></html>
