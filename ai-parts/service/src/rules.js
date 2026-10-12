@@ -17,6 +17,10 @@ export const DEFAULT_RULES = {
     },
   },
   blacklistBrands: [],
+  // Цена клиенту: 'ic_list' — рекомендуемая цена Inter Cars (как во встроенном подборе CRM), но не ниже
+  // закупки + minMarginPercent; если рекомендуемой цены нет — наценка ниже. 'markup' — всегда наценка на закупку.
+  priceMode: 'ic_list',
+  minMarginPercent: 30,
   // Наценка в % на закупку netto: по уровню и (необязательно) по группе.
   markup: { default: 30, byLevel: { economy: 35, middle: 30, oe: 20 }, byGroup: {} },
   vatPercent: 23,
@@ -60,10 +64,16 @@ export function markupFor(rules, level, group) {
   return Number(m.default ?? 30);
 }
 
-export function clientPrice(rules, purchaseNet, level, group) {
+export function clientPrice(rules, purchaseNet, level, group, listNet) {
   if (purchaseNet === null || purchaseNet === undefined) return null;
+  const vat = 1 + (rules.vatPercent ?? 23) / 100;
+  if ((rules.priceMode ?? 'ic_list') === 'ic_list' && Number(listNet) > 0) {
+    const floor = Math.round(purchaseNet * (1 + Number(rules.minMarginPercent ?? 30) / 100) * 100) / 100;
+    const net = Math.max(Math.round(Number(listNet) * 100) / 100, floor);
+    return { net, gross: Math.round(net * vat * 100) / 100, markupPercent: purchaseNet > 0 ? Math.round((net / purchaseNet - 1) * 1000) / 10 : null, source: net > floor || Number(listNet) >= floor ? 'ic_list' : 'min_margin' };
+  }
   const pct = markupFor(rules, level, group);
   const net = Math.round(purchaseNet * (1 + pct / 100) * 100) / 100;
   const gross = Math.round(net * (1 + (rules.vatPercent ?? 23) / 100) * 100) / 100;
-  return { net, gross, markupPercent: pct };
+  return { net, gross, markupPercent: pct, source: 'markup' };
 }

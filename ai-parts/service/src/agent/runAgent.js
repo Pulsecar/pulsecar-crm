@@ -5,6 +5,8 @@ import { CLIENT_TOOLS, serverTools, runClientTool } from './tools.js';
 import { getRules, clientPrice } from '../rules.js';
 import { config } from '../config.js';
 import { bumpUsage } from '../db.js';
+import { getIntegration } from '../integrations.js';
+import { quotePrices } from '../providers/intercars.js';
 
 const LEVEL_LABEL = { economy: 'Эконом', middle: 'Средний', oe: 'OE' };
 
@@ -80,6 +82,7 @@ export async function runAgent({ workshopId, jobId, input, messages = [], pendin
       let ask = null;
       for (const tu of toolUses) {
         if (tu.name === 'submit_result') {
+          await enrichIcPrices(workshopId, tu.input, ctx.fetchImpl);
           const result = postProcess(tu.input, rules, input.level || rules.defaultLevel);
           return { status: 'done', result, messages, usage };
         }
@@ -116,6 +119,23 @@ export async function runAgent({ workshopId, jobId, input, messages = [], pendin
   }
 }
 
+// Цены Inter Cars из API по SKU предложений: закупка и рекомендуемая цена IC (модель их не всегда передаёт)
+export async function enrichIcPrices(workshopId, raw, fetchImpl) {
+  const offers = (raw?.items || []).flatMap((it) => Object.values(it.offers || {})).filter((o) => o && o.sku && (!o.supplier || o.supplier === 'intercars'));
+  if (!offers.length) return;
+  try {
+    const it = getIntegration(workshopId, 'intercars');
+    if (!it.enabled) return;
+    const prices = await quotePrices(workshopId, it.values, [...new Set(offers.map((o) => o.sku))], fetchImpl);
+    for (const o of offers) {
+      const p = prices.find((x) => x.sku === o.sku);
+      if (!p) continue;
+      if (p.purchaseNet !== null && p.purchaseNet !== undefined) o.purchaseNet = p.purchaseNet;
+      if (p.listNet) o.listNet = p.listNet;
+    }
+  } catch { /* без цен IC — останется наценка на закупку */ }
+}
+
 // Цены клиенту по правилам наценки, выбор уровня, нормализация.
 export function postProcess(raw, rules, wantedLevel) {
   const items = (raw.items || []).map((it, i) => {
@@ -125,7 +145,7 @@ export function postProcess(raw, rules, wantedLevel) {
       if (!o || !o.articleNumber) continue;
       const blacklisted = (rules.blacklistBrands || []).some((b) => String(o.brand || '').toLowerCase() === String(b).toLowerCase());
       if (blacklisted) continue;
-      offers[lvl] = { ...o, client: clientPrice(rules, o.purchaseNet, lvl, it.group) };
+      offers[lvl] = { ...o, client: clientPrice(rules, o.purchaseNet, lvl, it.group, o.listNet) };
     }
     let chosen = it.chosenLevel && offers[it.chosenLevel] ? it.chosenLevel : null;
     if (!chosen) chosen = offers[wantedLevel] ? wantedLevel : ['middle', 'economy', 'oe'].find((l) => offers[l]) || null;

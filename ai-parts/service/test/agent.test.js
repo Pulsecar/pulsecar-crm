@@ -237,3 +237,12 @@ test('Inter Cars: токен со scope=allinone и поиск по индекс
   assert.ok(calls.find((c) => c.url.includes('oauth2/token')).body.includes('scope=allinone'));
   assert.equal(r.matches[0].sku, 'API1'); assert.equal(r.matches[0].purchaseNet, 99.5);
 });
+
+test('цена клиенту: рекомендуемая цена Inter Cars, но не ниже закупки + минимальная маржа', async () => {
+  const { clientPrice, DEFAULT_RULES } = await import('../src/rules.js');
+  const r = structuredClone(DEFAULT_RULES);
+  assert.deepEqual([clientPrice(r, 100, 'middle', null, 180).net, clientPrice(r, 100, 'middle', null, 180).source], [180, 'ic_list']);
+  assert.equal(clientPrice(r, 100, 'middle', null, 110).net, 130); // рекомендуемая ниже минимума — минимум 30 %
+  assert.equal(clientPrice(r, 100, 'middle', null, null).net, 130); // без цены IC — наценка уровня
+  assert.equal(clientPrice({ ...r, priceMode: 'markup' }, 100, 'oe', null, 500).net, 120);
+});

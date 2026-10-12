@@ -212,14 +212,24 @@ export function createApp() {
     }
     const snapshot = req.body?.snapshot || {};
     const { client, model } = llmFor(t.workshop_id);
-    const resp = await client.messages.create({
-      model,
-      max_tokens: 3000,
-      system: pl24.NAVIGATOR_SYSTEM,
-      messages: [{ role: 'user', content: pl24.buildNavigatorUserMessage(t, snapshot) }],
-    });
-    const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-    const a = pl24.parseNavigatorAnswer(text);
+    // таблица деталей в extract бывает длинной: 3000 токенов не хватало, ответ обрывался («Навигатор вернул не JSON»).
+    // Даём больше места и один повтор с напоминанием отвечать только JSON; причину сбоя пишем в журнал задачи.
+    const ask = async (extra) => {
+      const resp = await client.messages.create({
+        model,
+        max_tokens: 8000,
+        system: pl24.NAVIGATOR_SYSTEM,
+        messages: [{ role: 'user', content: pl24.buildNavigatorUserMessage(t, snapshot) + (extra || '') }],
+      });
+      const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+      return { a: pl24.parseNavigatorAnswer(text), text, stop: resp.stop_reason };
+    };
+    let r = await ask();
+    if (r.a.action === 'fail' && r.a.reason === 'other') {
+      pl24.appendLog(t.id, { kind: 'retry', why: r.a.why, stop: r.stop, sample: String(r.text || '').slice(0, 300) });
+      r = await ask('\n\nВАЖНО: ответь ровно одним JSON-объектом по формату из инструкции, без пояснений и без markdown. Если строк много — верни не больше 40 самых нужных.');
+    }
+    const a = r.a;
     if (a.action === 'extract') {
       pl24.appendLog(t.id, { kind: 'extract', rows: a.rows || [], vehicle: a.vehicle || null, url: snapshot.url });
       // после extract — продолжаем поиск остальных деталей
