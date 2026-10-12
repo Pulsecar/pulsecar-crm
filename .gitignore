@@ -9,3 +9,6 @@ app/dist/
 *.db-wal
 app/.claude/
 app/AGENTS.md
+ai-parts/service/.env
+ai-parts/service/data/
+ai-parts/service/docker-compose.yml

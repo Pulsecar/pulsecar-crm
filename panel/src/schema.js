@@ -863,6 +863,13 @@ addColumn('ai_lines', 'purpose', 'TEXT');
 addColumn('ai_lines', 'hours', 'REAL');
 addColumn('ai_lines', 'kind', "TEXT NOT NULL DEFAULT 'part'");   // part | labor
 addColumn('ai_lines', 'link', 'TEXT');                             // ссылка на предложение Allegro (заказывает менеджер)
+// модуль «ИИ-запчастист» (сервис): откуда строка, ссылки на подбор сервиса, источники номера, «заказать оба варианта»
+addColumn('ai_lines', 'src', 'TEXT');
+addColumn('ai_lines', 'ext_job_id', 'TEXT');
+addColumn('ai_lines', 'ext_item_id', 'TEXT');
+addColumn('ai_lines', 'evidence', 'TEXT');
+addColumn('ai_lines', 'order_both', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('ai_lines', 'alt_variants', 'TEXT');
 // знания из истории сервиса: какие детали ставят вместе с работой и сколько часов она занимает
 db.exec(`CREATE TABLE IF NOT EXISTS ai_job_parts (job_key TEXT NOT NULL, job_name TEXT, part_name TEXT NOT NULL, n INTEGER NOT NULL, jobs INTEGER NOT NULL, PRIMARY KEY (job_key, part_name))`);
 db.exec(`CREATE TABLE IF NOT EXISTS ai_job_hours (job_key TEXT PRIMARY KEY, job_name TEXT, hours REAL, n INTEGER NOT NULL)`);
@@ -909,4 +916,6 @@ if (getSetting('mw_internal_comments') === null) {
   db.exec('CREATE INDEX IF NOT EXISTS sms_campaign_log_c ON sms_campaign_log(campaign_id)');
   db.exec(`CREATE TABLE IF NOT EXISTS sms_stop (token TEXT PRIMARY KEY, customer_id INTEGER, phone TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
   if (getSetting('block_finish_no_cost', '') === '') setSetting('block_finish_no_cost', '1');
+  if (getSetting('ai_svc_on', '') === '') setSetting('ai_svc_on', '1');
+  if (getSetting('ai_svc_level', '') === '') setSetting('ai_svc_level', 'middle');
 }

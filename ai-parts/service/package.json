@@ -1,0 +1,19 @@
+{
+  "name": "pulsecar-ai-parts",
+  "version": "1.0.0",
+  "description": "ИИ-запчастист для CRM Pulsecar: подбор запчастей по VIN и тексту работ прямо из wyceny",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "try": "node scripts/try.js",
+    "import-ic": "node scripts/import-ic-csv.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.3.0"
+  }
+}

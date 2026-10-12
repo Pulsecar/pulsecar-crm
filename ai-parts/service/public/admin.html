@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ИИ-запчастист — Интеграции</title>
+<style>
+  :root{--ink:#1b1f27;--muted:#5b6372;--line:#e2e5ea;--bg:#f3f4f6;--acc:#1f55c4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:1120px;margin:0 auto;padding:24px 16px 48px;display:flex;flex-direction:column;gap:18px}
+  h1{margin:0;font-size:24px} h2{margin:0;font-size:17px}
+  .tabs{display:flex;gap:20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .tabs button{border:0;background:none;padding:10px 2px;font:inherit;font-size:14px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+  .tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--acc)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px}
+  .muted{color:var(--muted);font-size:13px}
+  label{font-size:13px;font-weight:600;display:block;margin-bottom:4px}
+  input[type=text],input[type=password],textarea{width:100%;font:inherit;font-size:14px;border:1px solid #cdd2da;border-radius:8px;padding:9px 11px;min-height:42px}
+  textarea{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;min-height:420px}
+  .row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .btn{min-height:42px;padding:8px 14px;border-radius:8px;border:1px solid #d5d9e0;background:#fff;font:inherit;font-size:14px;cursor:pointer}
+  .btn.p{background:var(--acc);border-color:var(--acc);color:#fff}
+  .chip{display:inline-block;font-size:12px;font-weight:600;padding:3px 8px;border-radius:999px}
+  .ok{background:#e3f2e8;color:#1d6436}.off{background:#eef0f3;color:#4a5262}.error{background:#fde7e4;color:#8e2a1c}.unknown{background:#e8eefb;color:#163f94}
+  .req{background:#e8eefb;color:#163f94}.stub{background:#fff0c7;color:#6b4200}
+  .msg{padding:10px 14px;border-radius:8px;background:#eef7f1;border:1px solid #cbe6d4}
+  .msg.e{background:#fde7e4;border-color:#f3b7ae}
+  code{background:#f3f4f6;padding:2px 6px;border-radius:4px}
+  table{border-collapse:collapse;width:100%;font-size:14px} td,th{padding:8px;border-bottom:1px solid var(--line);text-align:left}
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>Ustawienia · ИИ-запчастист</h1>
+    <div class="tabs" role="tablist">
+      <button class="on" data-tab="int">Интеграции</button>
+      <button data-tab="rules">Правила подбора</button>
+      <button data-tab="ext">Расширение partslink24</button>
+      <button data-tab="stats">Статистика</button>
+    </div>
+  </div>
+  <div id="msg"></div>
+  <section id="int" class="grid"></section>
+  <section id="rules" hidden>
+    <div class="card">
+      <h2>Правила подбора</h2>
+      <div class="muted">Бренды по уровням и группам, чёрный список, наценки, стандартные комплекты, политика неподтверждённых вариантов (<code>ask</code> — спросить, <code>both</code> — заказать оба с возвратом).</div>
+      <textarea id="rulesJson" spellcheck="false"></textarea>
+      <div class="row"><span class="muted">Формат JSON. Ошибка формата — сохранение не пройдёт.</span><button class="btn p" id="saveRules">Сохранить правила</button></div>
+    </div>
+  </section>
+  <section id="ext" hidden>
+    <div class="card">
+      <h2>Ключи расширения partslink24</h2>
+      <div class="muted">Каждый менеджер ставит расширение в свой Chrome и вводит ключ. Расширение работает в его собственной сессии partslink24 — пароли нигде не хранятся.</div>
+      <div class="row"><input type="text" id="extLabel" placeholder="Имя менеджера / компьютера" style="max-width:320px"><button class="btn p" id="newKey">Выдать ключ</button></div>
+      <div id="newKeyOut"></div>
+      <table><thead><tr><th>Кому</th><th>Создан</th><th>Последняя связь</th><th></th></tr></thead><tbody id="keys"></tbody></table>
+    </div>
+  </section>
+  <section id="stats" hidden>
+    <div class="card"><h2>Статистика за месяц</h2><div id="statsOut" class="muted">Загрузка…</div></div>
+  </section>
+</main>
+<script>
+(function(){
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function api(path, method, body){
+    return fetch(path, {method: method||'GET', headers: Object.assign({Authorization:'Bearer '+token}, body?{'Content-Type':'application/json'}:{}), body: body?JSON.stringify(body):undefined})
+      .then(function(r){ return r.text().then(function(t){ var j=t?JSON.parse(t):null; if(!r.ok) throw new Error((j&&j.error)||('Ошибка '+r.status)); return j; }); });
+  }
+  function el(tag, attrs, kids){ var e=document.createElement(tag); for (var k in (attrs||{})){ var v=attrs[k]; if(v==null||v===false) continue; if(k==='text') e.textContent=v; else if(k.indexOf('on')===0) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v===true?'':v);} (kids||[]).forEach(function(c){ if(c!=null) e.appendChild(typeof c==='string'?document.createTextNode(c):c); }); return e; }
+  function msg(t, err){ var m=document.getElementById('msg'); m.innerHTML=''; if(t) m.appendChild(el('div',{class:'msg'+(err?' e':''),text:t})); }
+  var STATUS = {ok:'Подключено', off:'Выключено', error:'Ошибка', unknown:'Не проверено'};
+
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.onclick=function(){
+    document.querySelectorAll('.tabs button').forEach(function(x){x.classList.toggle('on', x===b);});
+    ['int','rules','ext','stats'].forEach(function(id){ document.getElementById(id).hidden = id!==b.dataset.tab; });
+    if(b.dataset.tab==='rules') loadRules(); if(b.dataset.tab==='ext') loadKeys(); if(b.dataset.tab==='stats') loadStats();
+  };});
+
+  function loadInt(){
+    api('/api/integrations').then(function(list){
+      var root=document.getElementById('int'); root.innerHTML='';
+      list.forEach(function(s){
+        var inputs = {};
+        var enabled = el('input',{type:'checkbox', id:'en-'+s.service}); enabled.checked = s.enabled;
+        var fields = s.fields.map(function(f){
+          var i = el('input',{type: f.type==='secret'?'password':'text', id:'f-'+s.service+'-'+f.key, placeholder: f.isSet && f.type==='secret' ? f.value+' (оставьте пустым, чтобы не менять)' : ''});
+          if (f.type!=='secret') i.value = f.value || '';
+          inputs[f.key]=i;
+          return el('div',null,[el('label',{for:i.id,text:f.label}), i]);
+        });
+        var note = el('div',{class:'muted', text: s.note ? s.note + (s.checkedAt ? ' · '+s.checkedAt : '') : ''});
+        root.appendChild(el('div',{class:'card'},[
+          el('div',{class:'row'},[
+            el('div',null,[el('h2',{text:s.title}), el('div',{class:'muted',text:s.purpose})]),
+            el('label',{style:'display:flex;gap:6px;align-items:center;font-weight:500'},[enabled,'вкл.'])
+          ]),
+          el('div',null,[
+            s.required ? el('span',{class:'chip req',text:'обязательно'}) : null, ' ',
+            s.stub ? el('span',{class:'chip stub',text:'после договора с поставщиком'}) : null, ' ',
+            el('span',{class:'chip '+(s.status||'unknown'), text: STATUS[s.status]||s.status})
+          ])
+        ].concat(fields).concat([note, el('div',{class:'row'},[
+          el('button',{class:'btn', text:'Проверить подключение', onclick:function(){
+            note.textContent='Проверяю…';
+            api('/api/integrations/'+s.service+'/test','POST',{}).then(function(r){ note.textContent=r.note; loadInt(); }).catch(function(e){ note.textContent=e.message; });
+          }}),
+          el('button',{class:'btn p', text:'Сохранить', onclick:function(){
+            var payload={enabled: enabled.checked, fields:{}};
+            Object.keys(inputs).forEach(function(k){ payload.fields[k]=inputs[k].value; });
+            api('/api/integrations/'+s.service,'PUT',payload).then(function(){ msg('Сохранено: '+s.title); loadInt(); }).catch(function(e){ msg(e.message,true); });
+          }})
+        ])])));
+      });
+    }).catch(function(e){ msg(e.message, true); });
+  }
+  function loadRules(){ api('/api/rules').then(function(r){ document.getElementById('rulesJson').value = JSON.stringify(r, null, 2); }).catch(function(e){ msg(e.message,true); }); }
+  document.getElementById('saveRules').onclick=function(){
+    var j; try { j = JSON.parse(document.getElementById('rulesJson').value); } catch(e){ return msg('Ошибка формата JSON: '+e.message, true); }
+    api('/api/rules','PUT',j).then(function(){ msg('Правила сохранены'); }).catch(function(e){ msg(e.message,true); });
+  };
+  function loadKeys(){
+    api('/api/extension-keys').then(function(list){
+      var tb=document.getElementById('keys'); tb.innerHTML='';
+      list.forEach(function(k){ tb.appendChild(el('tr',null,[el('td',{text:k.label}),el('td',{text:k.created_at}),el('td',{text:k.last_seen||'—'}),el('td',null,[el('button',{class:'btn',text:'Отозвать',onclick:function(){ api('/api/extension-keys/'+k.id,'DELETE').then(loadKeys); }})])])); });
+    });
+  }
+  document.getElementById('newKey').onclick=function(){
+    api('/api/extension-keys','POST',{label: document.getElementById('extLabel').value || 'Менеджер'}).then(function(r){
+      var o=document.getElementById('newKeyOut'); o.innerHTML='';
+      o.appendChild(el('div',{class:'msg'},['Ключ (показывается один раз): ', el('code',{text:r.key}), el('div',{class:'muted',text:'Адрес сервиса для расширения: '+location.origin})]));
+      loadKeys();
+    }).catch(function(e){ msg(e.message,true); });
+  };
+  function loadStats(){
+    api('/api/stats').then(function(s){
+      document.getElementById('statsOut').textContent =
+        'Подборов: '+s.usage.jobs+' · поисков в интернете: '+s.usage.web_searches+' · токены: '+s.usage.input_tokens+' / '+s.usage.output_tokens+
+        ' · строк истории: '+(s.history.rows||0)+' (подтверждено установкой: '+(s.history.verified||0)+', возвратов: '+(s.history.returned||0)+')'+
+        ' · товаров Inter Cars в каталоге: '+s.icCatalog;
+    }).catch(function(e){ msg(e.message,true); });
+  }
+  if(!token) msg('Нет токена доступа: откройте эту страницу из раздела «Интеграции» CRM.', true); else loadInt();
+})();
+</script>
+</body>
+</html>

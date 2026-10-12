@@ -7,6 +7,7 @@ import { CarDiagram, DMG } from './order-docs.js';
 import { detectBody, BODY_TYPES } from '../car-shapes.js';
 import { LaborBlock } from './labor.js';
 import { useAi, AiButton, AiBanner, AiItemInfo, AiModal } from './ai-parts.js';
+import { AiSvcButton } from '../ai-svc.js';
 
 export const FLAGS = [['return_parts', 'Возврат деталей клиенту'], ['reg_doc', 'Техпаспорт'], ['test_drive', 'Согласие на тест-драйв'], ['fluids', 'Долить жидкости'], ['lights', 'Проверить освещение']];
 export const FUEL = ['', 'резерв', '1/4', '1/2', '3/4', 'полный'];
@@ -172,7 +173,7 @@ export function ItemsMW({ o, reload }) {
   const vats = String(S.vat_rates || '23,8,5,0').split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
   const labor = o.items.filter((i) => i.kind === 'labor');
   const parts = o.items.filter((i) => i.kind === 'part');
-  const aiOn = !!app.features?.aiParts && !mech;
+  const aiOn = !!(app.features?.aiParts || app.features?.aiSvc) && !mech; // позиции ИИ (встроенный подбор или модуль-сервис)
   const partCols = 6 + (quote ? 0 : 1) + (seePrice ? 4 + (showCost ? 1 : 0) + (showDisc ? 1 : 0) : 0);
   const ai = useAi(o, aiOn);
   const [aiOpen, setAiOpen] = useState(false);
@@ -219,7 +220,8 @@ export function ItemsMW({ o, reload }) {
           render=${(p) => html`<b>${p.name}</b> <span class="sub">${p.code || ''} · в наличии ${num(p.stock - p.reserved, 2)} ${p.unit} · ${zl(p.sell_price)}</span>`}
           onPick=${(p) => add({ kind: 'part', product_id: p.id, name: p.name, code: p.code, qty: 1, unit: p.unit, price: p.sell_price, vat: p.vat, discount: discP })}
           extra=${{ label: 'Без склада (заказать / своя)', onClick: (q) => q && add({ kind: 'part', name: q, qty: 1, unit: 'szt.', price: 0, discount: discP }) }} /></div>
-        ${aiOn && html`<${AiButton} ai=${ai} onClick=${() => setAiOpen(true)} />`}
+        ${aiOn && app.features?.aiParts && html`<${AiButton} ai=${ai} onClick=${() => setAiOpen(true)} />`}
+        ${!mech && app.features?.aiSvc && app.features?.aiSvcUrl && html`<${AiSvcButton} o=${o} url=${app.features.aiSvcUrl} reload=${reload} />`}
         <button class="btn sm" onClick=${() => setIc(true)}><${Icon} n="box" />От поставщика</button>
         <button class="btn sm" onClick=${() => add({ kind: 'part', name: 'Nowy towar', qty: 1, unit: 'szt.', price: 0, discount: discP })}><${Icon} n="plus" />Добавить позицию</button></div>`}
     </div>

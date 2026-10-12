@@ -15,6 +15,7 @@ import { startDistill, distillState } from './knowledge.js';
 import { minMargin } from './pricing.js';
 import { cfg } from '../integrations/index.js';
 
+import { svcOn } from '../ai-svc.js';
 export const aiParts = express.Router();
 export const aiEnabled = () => getSetting('ai_parts_enabled') === '1' || process.env.AI_PARTS_MOCK === '1';
 
@@ -24,8 +25,9 @@ const ev = (kind, data, x = {}) => insert('ai_events', { kind, data: JSON.string
 
 /** who — функция проверки прав из crm.js (передаётся при подключении, чтобы не было циклических импортов) */
 export function mountAiParts(crm, who) {
-  const gate = (req, perm = 'orders.view') => {
-    if (!aiEnabled()) throw new HttpError(404, 'Модуль «ИИ-запчастист» выключен');
+  // lines — позиции ИИ в заказе (просмотр, статусы): нужны и модулю-сервису, даже если встроенный подбор выключен
+  const gate = (req, perm = 'orders.view', lines = false) => {
+    if (!aiEnabled() && !(lines && svcOn())) throw new HttpError(404, 'Модуль «ИИ-запчастист» выключен');
     return who(req, perm);
   };
   const lineView = (l) => ({ ...l, oe: J(l.oe, []), variants: J(l.variants, {}) });
@@ -33,7 +35,7 @@ export function mountAiParts(crm, who) {
 
   /** Состояние подбора в заказе: история подборов и позиции ИИ */
   crm.get('/ai-parts/orders/:id', (req, res) => {
-    gate(req);
+    gate(req, 'orders.view', true);
     const o = getOrder(Number(req.params.id));
     // позиции, которые менеджер удалил из выцены вручную, — «удалены» (это тоже данные для обучения)
     for (const l of all("SELECT l.id, l.job_id FROM ai_lines l WHERE l.order_id = ? AND l.status <> 'removed' AND l.order_item_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM order_items i WHERE i.id = l.order_item_id)", o.id)) {
@@ -157,7 +159,7 @@ export function mountAiParts(crm, who) {
 
   /** Позиция ИИ: сменить вариант (eco/mid/oe), принять, сменить статус, удалить */
   crm.post('/ai-parts/lines/:id', (req, res) => {
-    const s = gate(req, 'orders.edit');
+    const s = gate(req, 'orders.edit', true);
     const l = one('SELECT * FROM ai_lines WHERE id = ?', Number(req.params.id));
     if (!l) throw new HttpError(404, 'Нет такой позиции');
     const b = req.body || {};
@@ -180,16 +182,19 @@ export function mountAiParts(crm, who) {
     if (b.status) {
       const ST = ['draft', 'accepted', 'ordered', 'delivered', 'checked', 'installed', 'returned'];
       if (!ST.includes(b.status)) throw new HttpError(400, 'Неизвестный статус');
+      // позицию «проверьте» нельзя заказать, пока менеджер её не подтвердил («заказать оба варианта» — можно)
+      if (b.status === 'ordered' && l.status === 'draft' && l.confidence === 'check') throw new HttpError(400, 'Позиция помечена «проверьте» — сначала подтвердите её, потом заказывайте');
       run("UPDATE ai_lines SET status = ?, updated_at = datetime('now') WHERE id = ?", b.status, l.id);
       ev('status', { from: l.status, to: b.status }, { line_id: l.id, order_id: l.order_id, staff: s.name });
       if (b.status === 'accepted' && l.status === 'draft') learn([l.id]);
+      if (b.status === 'returned') import('../ai-svc.js').then((m) => m.pushOrderHistory(l.order_id)).catch(() => {});
     }
     res.json({ ok: true });
   });
 
   /** Принять все черновики заказа */
   crm.post('/ai-parts/orders/:id/accept-all', (req, res) => {
-    const s = gate(req, 'orders.edit');
+    const s = gate(req, 'orders.edit', true);
     const ids = all("SELECT id FROM ai_lines WHERE order_id = ? AND status = 'draft'", Number(req.params.id)).map((x) => x.id);
     const n = run("UPDATE ai_lines SET status = 'accepted', updated_at = datetime('now') WHERE order_id = ? AND status = 'draft'", Number(req.params.id)).changes;
     learn(ids);

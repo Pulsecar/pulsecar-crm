@@ -174,6 +174,8 @@ export function setStatus(orderId, statusId, staffName) {
     }
     log('order', o.id, 'status', st.name, staffName);
   });
+  // ИИ-запчастист (сервис): закрытый заказ → «деталь установлена» в историю подбора
+  if (o.kind === 'order' && st.is_final && !wasFinal) import('./ai-svc.js').then((m) => m.pushOrderHistory(o.id)).catch(() => {});
   // SMS/e-mail по шаблону статуса: 'auto' — сразу, 'ask' — окно в панели с готовым текстом
   const sms = statusSmsPreview(o.id, st.id);
   const email = statusEmailPreview(o.id, st.id);

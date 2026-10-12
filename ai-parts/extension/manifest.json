@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Pulsecar — ИИ-запчастист (partslink24)",
+  "version": "1.0.0",
+  "description": "Помощник ИИ-запчастиста: ищет оригинальные номера в partslink24 в вашей сессии по задаче из wyceny. Пароли не хранит.",
+  "permissions": ["storage", "alarms", "tabs", "scripting", "webNavigation"],
+  "host_permissions": ["https://*.partslink24.com/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "action": { "default_title": "ИИ-запчастист", "default_popup": "options.html" }
+}

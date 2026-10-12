@@ -20,6 +20,9 @@ export const config = {
   reviewPhone: env('REVIEW_PHONE', ''),
   reviewCode: env('REVIEW_CODE', ''),
 
+  // модуль «ИИ-запчастист» (отдельный сервис pulsecar-ai-parts): публичный адрес для браузера, внутренний для сервера, общий секрет токенов
+  aiPartsSvc: { url: env('AI_PARTS_URL', ''), internalUrl: env('AI_PARTS_INTERNAL_URL', ''), secret: env('AI_PARTS_SECRET', '') },
+
   // раздел «Маркетинг»: адрес текущей панели бота (Instagram/TikTok)
   marketingUrl: env('MARKETING_URL', ''),
 

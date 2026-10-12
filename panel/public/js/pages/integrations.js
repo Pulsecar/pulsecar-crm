@@ -1,6 +1,29 @@
 import { html, useState, useData, api, act, useApp, Icon, fdt, toast } from '../lib.js';
 import { runJob } from '../fiscal.js';
 
+/** «Integracje» модуля «ИИ-запчастист» (отдельный сервис): ключи, правила подбора, ключи расширения, статистика — страница сервиса во фрейме */
+function AiSvcAdmin() {
+  const app = useApp();
+  const [t, setT] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState('');
+  if (!app.features?.aiSvc) return '';
+  const show = async () => { if (!open) setT(await api('ai-svc/admin-token')); setOpen(!open); };
+  const run = async (what, path, msg) => {
+    setBusy(what);
+    try { const r = await api(path, { body: {} }); toast(msg(r)); if (open) setT(await api('ai-svc/admin-token')); } catch (e) { toast(e.message, 'error'); }
+    setBusy('');
+  };
+  return html`<div class="card" style="margin-bottom:14px">
+    <div class="row"><b class="grow">ИИ-запчастист (сервис ai-parts)</b>
+      <button class="btn sm" disabled=${!!busy} onClick=${() => run('keys', 'ai-svc/sync-keys', (r) => r.done.length ? 'Ключи перенесены: ' + r.done.join(', ') : 'В CRM нет ключей для переноса')}>${busy === 'keys' ? '…' : 'Перенести ключи из CRM'}</button>
+      <button class="btn sm" disabled=${!!busy} onClick=${() => run('hist', 'ai-svc/history-export', (r) => `История выгружена: ${r.imported} из ${r.rows} строк`)}>${busy === 'hist' ? 'Выгружаю…' : 'Выгрузить историю'}</button>
+      <button class="btn sm primary" onClick=${show}>${open ? 'Скрыть' : 'Открыть настройки модуля'}</button></div>
+    <div class="muted small" style="margin-top:6px">Ключи Claude и Inter Cars, правила подбора, ключи расширения partslink24 и статистика. Ключи хранятся в модуле зашифрованно и после сохранения видны маской.</div>
+    ${open && t && html`<iframe src=${t.url.replace(/\/$/, '') + '/admin?token=' + encodeURIComponent(t.token)} style="width:100%;height:900px;border:1px solid var(--border);border-radius:10px;margin-top:12px;background:#fff"></iframe>`}
+  </div>`;
+}
+
 export default function Integrations() {
   const { data, reload } = useData('integrations');
   const [open, setOpen] = useState(null);
@@ -8,6 +31,7 @@ export default function Integrations() {
   const groups = [...new Set(data.list.map((i) => i.group))];
   const on = data.list.filter((i) => i.enabled).length;
   return html`
+    <${AiSvcAdmin} />
     <div class="muted" style="margin-bottom:12px">Подключено ${on} из ${data.list.length}. Токены хранятся на вашем сервере и в браузер не передаются — после сохранения видны только последние 4 символа.</div>
     ${groups.map((g) => html`<h3 style="margin:18px 0 8px">${g}</h3>
       <div class="grid g2">${data.list.filter((i) => i.group === g).map((it) => html`<${Card} it=${it} open=${open === it.key} onToggle=${() => setOpen(open === it.key ? null : it.key)} reload=${reload} feed=${data.calendarFeed} stations=${data.stations} />`)}</div>`)}

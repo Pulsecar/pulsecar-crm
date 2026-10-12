@@ -1,0 +1,21 @@
+# Пример: отдельный проект Docker на том же VPS, что и CRM.
+# Сервис слушает 127.0.0.1:3200 — наружу его публикует существующий обратный прокси (Caddy)
+# по адресу, например, https://ai-parts.pulsecar.pl (или по пути /ai-parts на домене CRM).
+services:
+  ai-parts:
+    build: .
+    container_name: pulsecar-ai-parts
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /app/data/ai-parts.db
+    ports:
+      - "127.0.0.1:3200:3200"
+    volumes:
+      - ai-parts-data:/app/data
+
+volumes:
+  ai-parts-data:
+
+# Ежедневный импорт каталога Inter Cars (cron на хосте, после 05:30):
+# 45 5 * * * docker exec pulsecar-ai-parts node scripts/import-ic-csv.js --ws <WORKSHOP_ID> --url <URL файла ProductInformation>
