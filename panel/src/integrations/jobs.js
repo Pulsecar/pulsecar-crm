@@ -10,6 +10,8 @@ import { render, orderContext } from '../messaging.js';
 import { startIntercarsSync } from './intercars.js';
 import { startSupplierSync } from './suppliers.js';
 import { forEachDb } from '../branches.js';
+import { runSiteReminders } from '../site-reminders.js';
+import { config } from '../config.js';
 
 const warsaw = () => {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false })
@@ -74,6 +76,9 @@ export async function runJobs() {
 
   // 5. Сервисная книжка: SMS о рекомендациях и техосмотре за N дней до срока, 10:00–18:00, по одной на рекомендацию
   if (now.hour >= 10 && now.hour < 18 || process.env.NODE_ENV === 'test') remindServiceBook(now.date, S);
+
+  // 6. Напоминания с сайта (шины, кондиционер, масло, техосмотр) — SMS клиенту, 10:00–18:00
+  if (S('sms_site_reminders_on', '1') === '1' && (now.hour >= 10 && now.hour < 18 || process.env.NODE_ENV === 'test')) runSiteReminders(now.date, config.publicUrl);
 }
 
 const fmtDate = (d) => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)}` : '');

@@ -1,4 +1,5 @@
 // Публичные страницы для клиентов: электронная карта заказа / выцены (/k/<токен>) и онлайн-запись (/rezerwacja)
+import { unsubscribe as reminderUnsubscribe } from './site-reminders.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import { all, one, run, insert, log, getSetting } from './db.js';
@@ -395,6 +396,12 @@ function hours(s) {
   return out;
 }
 const embedCss = (s) => `<style>header,footer{display:none}body{background:transparent}.btn{background:${esc(s.booking_color || '#12b85a')}}</style>`;
+
+// Отписка от SMS-напоминаний по ссылке из SMS
+pub.get('/r/:token', (req, res) => {
+  const ok = reminderUnsubscribe(req.params.token);
+  res.send(page('Przypomnienia', `<div class="card ${ok ? 'ok' : ''}"><h1>${ok ? 'Wypisano z przypomnień' : 'Link nieaktywny'}</h1><p style="margin:0">${ok ? 'Nie wyślemy więcej przypomnień SMS. Możesz zapisać się ponownie na pulsecar.pl/przypomnienia.' : 'Ten link jest nieprawidłowy lub już nieaktywny.'}</p></div>`, S()));
+});
 
 pub.get('/rezerwacja', (req, res) => {
   const s = S();

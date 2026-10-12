@@ -1,4 +1,6 @@
 // API панели panel.pulsecar.tech (CRM для сотрудников)
+import { localShift } from './integrations/jobs.js';
+import { nextPlan as siteNextPlan, describe as siteDescribe } from './site-reminders.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -1657,8 +1659,18 @@ crm.get('/reminders', (req, res) => {
       const state = a.reminded ? 'sent' : !on ? 'off' : !phone ? 'no_phone' : a.status !== 'planned' ? 'request' : 'planned';
       return { ...a, phone, send_at: sendAt, state };
     });
-  const sent = all(`SELECT id, phone, text, status, created_at, customer_id, order_id FROM sms_log WHERE kind = 'reminder' ORDER BY id DESC LIMIT 50`);
-  res.json({ on, hours, rows, sent });
+  const sent = all(`SELECT id, phone, text, status, created_at, customer_id, order_id FROM sms_log WHERE kind IN ('reminder', 'site_reminder') ORDER BY id DESC LIMIT 50`);
+  const today = localShift(0).slice(0, 10);
+  const site = all('SELECT * FROM site_reminders ORDER BY active DESC, id DESC LIMIT 500').map((r) => ({
+    id: r.id, name: r.name, phone: r.phone, car: r.car, lang: r.lang, active: !!r.active, customer_id: r.customer_id, created_at: r.created_at,
+    what: siteDescribe(r), next: siteNextPlan(r, today),
+  }));
+  res.json({ on, hours, rows, sent, site, siteOn: S('sms_site_reminders_on', '1') === '1' });
+});
+crm.post('/site-reminders/:id', (req, res) => {
+  who(req, 'sms.view');
+  run('UPDATE site_reminders SET active = ? WHERE id = ?', req.body?.active ? 1 : 0, Number(req.params.id));
+  res.json({ ok: true });
 });
 
 crm.post('/me/ext-token', (req, res) => {

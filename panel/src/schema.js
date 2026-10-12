@@ -871,4 +871,12 @@ if (getSetting('mw_internal_comments') === null) {
     AND NOT EXISTS (SELECT 1 FROM order_comments x WHERE x.mw_id = 'ic:' || o.mw_id)`);
   setSetting('mw_internal_comments', '1');
 }
+  // напоминания с сайта (pulsecar.pl/przypomnienia) — SMS отправляет site-reminders.js
+  db.exec(`CREATE TABLE IF NOT EXISTS site_reminders (
+    id INTEGER PRIMARY KEY, name TEXT, phone TEXT NOT NULL, email TEXT, car TEXT, lang TEXT NOT NULL DEFAULT 'pl',
+    tyres INTEGER NOT NULL DEFAULT 0, ac INTEGER NOT NULL DEFAULT 0, oil_month TEXT, inspection_date TEXT,
+    token TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1, sent TEXT NOT NULL DEFAULT '{}',
+    customer_id INTEGER, source TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS site_reminders_phone ON site_reminders(phone)');
 }

@@ -165,6 +165,53 @@ try {
   assert.equal(bk.booked, true); assert.equal(bk.start_at, startAt); assert.ok(bk.station);
   assert.equal((await req('/api/bookings', { token, body: { name: 'Ewa', phone: '600222333', rec_id: timing.id, start_at: '2020-01-01 10:00' } })).status, 409, 'прошлое время — нельзя');
   assert.equal((await req(`/api/recommendations/99999/slots`, { token })).status, 404, 'чужая/несуществующая рекомендация');
+  // публичные окна для формы записи на сайте: без входа, только полные часы, не больше 8 дней
+  const pub = ok(await req('/api/public/slots?min=90'), 'public slots');
+  assert.equal(pub.durationMin, 90); assert.ok(pub.days.length > 0 && pub.days.length <= 8);
+  assert.ok(pub.days.every((d) => d.times.length && d.times.every((t) => t.endsWith(':00'))), 'только полные часы');
+  assert.ok(!JSON.stringify(pub).includes('Ewa'), 'без данных клиентов');
+  // форма записи на сайте: выбранное окно сразу встаёт в Терминарз и больше не предлагается
+  const pd = pub.days[pub.days.length - 1];
+  const pStart = `${pd.date} ${pd.times[pd.times.length - 1]}`;
+  const pBefore = ok(await req('/api/public/slots?min=90'), 'slots before').days.find((d) => d.date === pd.date);
+  const pb1 = ok(await req('/api/public/booking', { body: { name: 'Jan Site', phone: '600444555', service: 'Wymiana opon', car: 'Skoda Octavia', min: 90, start_at: pStart } }), 'site booking');
+  assert.equal(pb1.booked, true); assert.equal(pb1.start_at, pStart); assert.ok(pb1.station);
+  const cal2 = ok(await req(`/crm-api/appointments?from=${pd.date}&to=${pd.date}`), 'calendar site');
+  const sa = cal2.rows.find((a) => a.id === pb1.id);
+  assert.ok(sa && sa.station_id && sa.start_at === pStart && sa.status === 'planned' && sa.duration_min === 90 && /ПОДТВЕРДИТЬ/.test(sa.note), 'запись с сайта на посту');
+  // занимаем все посты на это время → следующая заявка уходит в «Не распределено»
+  let n = 0;
+  while (n < 20) { const r = ok(await req('/api/public/booking', { body: { phone: '6004445' + String(56 + n).padStart(2, '0'), min: 90, start_at: pStart } }), 'fill'); n++; if (!r.booked) { assert.equal(r.start_at, null); break; } }
+  const after = ok(await req('/api/public/slots?min=90'), 'slots after').days.find((d) => d.date === pd.date);
+  assert.ok(!after || !after.times.includes(pStart.slice(11)), 'занятое окно больше не предлагается');
+  assert.ok(pBefore.times.includes(pStart.slice(11)));
+  const noSlot = ok(await req('/api/public/booking', { body: { name: 'Bez terminu', phone: '600444999', service: 'Diagnostyka' } }), 'site no slot');
+  assert.equal(noSlot.booked, false);
+  assert.equal((await req('/api/public/booking', { body: { name: 'x' } })).status, 400, 'без телефона нельзя');
+
+  // напоминания с сайта: подписка → SMS автоматически в срок, без повторов, отписка по ссылке из SMS
+  assert.equal((await req('/api/public/reminders', { body: { phone: '600777888', tyres: true } })).status, 400, 'без согласия нельзя');
+  assert.equal((await req('/api/public/reminders', { body: { phone: '600777888', consent: true } })).status, 400, 'ничего не выбрано');
+  const insp = day(5);
+  const sub = ok(await req('/api/public/reminders', { body: { name: 'Olga Nowak', phone: '600 777 888', carMakeModel: 'Kia Ceed', inspectionDate: insp, oilMonth: day(60).slice(0, 7), lang: 'ru', consent: true } }), 'reminder sub');
+  assert.ok(sub.token && sub.updated === false);
+  const re = ok(await req('/api/public/reminders', { body: { phone: '+48600777888', inspectionDate: insp, oilMonth: day(60).slice(0, 7), lang: 'ru', consent: true } }), 'reminder resub');
+  assert.equal(re.token, sub.token, 'повторная подписка обновляет ту же запись');
+  const n0 = (out.match(/\[SMS → \+48600777888\]/g) || []).length;
+  ok(await req('/crm-api/_jobs', { body: {} }), 'jobs reminders');
+  await wait(300);
+  const rs = out.split('\n').filter((l) => l.includes('[SMS → +48600777888]'));
+  assert.equal(rs.length - n0, 1, 'одна SMS о техосмотре (масло ещё не скоро)');
+  const last = rs[rs.length - 1];
+  assert.ok(last.includes('техосмотр') && last.includes(insp.split('-').reverse().join('.')) && last.includes('/r/' + sub.token), 'текст на языке клиента со сроком и ссылкой отписки: ' + last);
+  ok(await req('/crm-api/_jobs', { body: {} }), 'jobs reminders again');
+  await wait(300);
+  assert.equal((out.match(/\[SMS → \+48600777888\]/g) || []).length - n0, 1, 'повторно не шлём');
+  const rem = ok(await req('/crm-api/reminders'), 'crm reminders').site.find((x) => x.phone === '+48600777888' || x.phone === '48600777888');
+  assert.ok(rem && rem.active && /техосмотр/.test(rem.what) && rem.next && /масл/.test(rem.next.items.join()), 'в CRM видно подписку и следующую SMS: ' + JSON.stringify(rem));
+  const stop = await req('/r/' + sub.token);
+  assert.ok(String(stop.j).includes('Wypisano'), 'отписка по ссылке');
+  console.log('✓ запись с сайта: окно сразу в терминарзе; напоминания с сайта: SMS в срок, без повторов, отписка');
   myc = ok(await req('/api/me', { token }), 'me booked').cars.find((x) => x.id === car.id);
   assert.deepEqual(myc.recommendations.find((r) => r.id === timing.id).booked, { start: startAt, status: 'planned' });
   const cal = ok(await req(`/crm-api/appointments?from=${d0.date}&to=${d0.date}`), 'calendar');

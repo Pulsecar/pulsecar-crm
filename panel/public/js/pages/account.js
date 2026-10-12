@@ -38,7 +38,7 @@ export function MyAccount() {
 const ST = { planned: ['запланировано', 'var(--info)'], sent: ['отправлено', 'var(--accent)'], off: ['напоминания выключены', 'var(--muted)'], no_phone: ['нет телефона', 'var(--warn)'], request: ['заявка — не подтверждена', 'var(--warn)'] };
 export function Reminders() {
   const app = useApp();
-  const { data, error } = useData('reminders');
+  const { data, error, reload } = useData('reminders');
   if (error) return html`<${ErrorBox} error=${error} />`;
   if (!data) return html`<${Loading} />`;
   return html`<div class="page-head"><h1>Запланированные напоминания</h1>
@@ -55,6 +55,15 @@ export function Reminders() {
         <td class="sub">${a.station || ''}</td><td class="nowrap">${a.state === 'sent' ? '—' : fdt(a.send_at)}</td>
         <td><span class="badge" style=${`border-color:${ST[a.state][1]};color:${ST[a.state][1]}`}>${ST[a.state][0]}</span></td></tr>`)}</tbody></table></div>
       ${!data.rows.length ? html`<div class="empty">Ближайших визитов в терминарзе нет</div>` : ''}</div>
+    <div class="card tight" style="margin-top:14px"><div class="row" style="padding:12px 14px;flex-wrap:wrap;gap:6px"><h2 style="margin:0">Напоминания с сайта</h2>
+      <span class="muted small">Клиенты сами подписались на pulsecar.pl/przypomnienia — SMS уходят автоматически 10:00–18:00 (шины: 15.10 и 20.03, кондиционер: 15.04, масло и техосмотр — по дате клиента)${!data.siteOn ? ' · сейчас выключено' : ''}</span></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Клиент</th><th>Авто</th><th>О чём</th><th>Следующая SMS</th><th></th></tr></thead>
+      <tbody>${(data.site || []).map((r) => html`<tr style=${r.active ? '' : 'opacity:.55'}>
+        <td>${r.customer_id ? html`<a href=${'#/customers/' + r.customer_id}>${r.name || '—'}</a>` : r.name || '—'}<div class="sub">${r.phone} · ${String(r.lang).toUpperCase()}</div></td>
+        <td class="sub">${r.car || ''}</td><td class="small">${r.what}</td>
+        <td class="nowrap">${!r.active ? html`<span class="sub">отписан / выключен</span>` : r.next ? html`<b>${r.next.date.split('-').reverse().join('.')}</b><div class="sub">${r.next.items.join(', ')}</div>` : html`<span class="sub">—</span>`}</td>
+        <td><button class="btn sm" onClick=${() => act(() => api('site-reminders/' + r.id, { body: { active: !r.active } }), r.active ? 'Напоминания выключены' : 'Напоминания включены').then(reload)}>${r.active ? 'Выключить' : 'Включить'}</button></td></tr>`)}</tbody></table></div>
+      ${!(data.site || []).length ? html`<div class="empty">Пока никто не подписался</div>` : ''}</div>
     ${data.sent.length ? html`<div class="card tight" style="margin-top:14px"><div class="row" style="padding:12px 14px"><h2 style="margin:0">Последние отправленные</h2></div>
       <table class="tbl"><tbody>${data.sent.map((m) => html`<tr><td class="nowrap sub">${fdt(m.created_at)}</td><td class="nowrap">${m.phone}</td><td style="white-space:pre-wrap">${m.text}</td>
         <td class="sub">${{ sent: 'отправлено', failed: 'ошибка', logged: 'без шлюза' }[m.status] || m.status}</td></tr>`)}</tbody></table></div>` : ''}`;
