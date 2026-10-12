@@ -136,6 +136,14 @@ export function companyBlock(S, { legal = false } = {}) {
     ${legal && S.company_bank ? `<br>Nr konta: <b style="display:inline;font-size:10px">${esc(S.company_bank)}</b>${S.company_bank_name ? ' (' + esc(S.company_bank_name) + ')' : ''}` : ''}</div>`;
 }
 
+/** Шапка фактуры: способ оплаты (+ разбивка смешанной) и срок оплаты — только при оплате переводом */
+function payMeta(d) {
+  if (d.kind === 'correction') return [];
+  const split = safeJson(d.pay_split, null);
+  const sub = split?.length ? split.map((x) => `${PAY_PL[x.method] || x.method}: ${zl(x.amount)} zł`).join(', ') : '';
+  const transfer = d.payment_method === 'transfer' || (split || []).some((x) => x.method === 'transfer');
+  return [d.payment_method ? ['Sposób płatności', PAY_PL[d.payment_method] || d.payment_method, sub] : null, transfer && d.due_date ? ['Termin płatności', d.due_date] : null];
+}
 export function page({ S, title, number, meta = [], body, badge = '', legal = false, bar = true, back = '' }) {
   const logo = on(S, 'doc_show_logo') ? `<img class="logo" src="/logo-dark.png" alt="${esc(S.company_brand || 'Pulsecar')}">` : '<div></div>';
   return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -144,7 +152,7 @@ ${bar ? `<div class="bar">${back ? `<a class="alt" href="${esc(back)}">← Wró�
 <div class="sheet">
 <div class="head">${logo}${companyBlock(S, { legal })}
   <div class="doc"><h1>${esc(title)}</h1>${number ? `<div class="no">${esc(number)}</div>` : ''}
-    <div class="meta">${meta.filter(Boolean).map(([k, v]) => `<div>${esc(k)}: <b>${esc(v)}</b></div>`).join('')}</div>${badge}</div>
+    <div class="meta">${meta.filter(Boolean).map(([k, v, sub]) => `<div>${esc(k)}: <b>${esc(v)}</b></div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}`).join('')}</div>${badge}</div>
 </div>
 ${body}
 ${S.doc_footer ? `<div class="foot">${esc(S.doc_footer)}</div>` : ''}
@@ -427,7 +435,7 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
       return t.length ? `<div class="sec box kv"><span>Pojazd</span><b>${esc(t.join(' · '))}</b></div>` : ''; })()}
     ${o && S.sale_order_line !== '0' ? `<div class="sub" style="margin-bottom:6px">Zlecenie ${esc(o.number)}${o.make ? ` · ${esc([o.make, o.model, o.plate].filter(Boolean).join(' '))}` : ''}${o.vin ? ` · VIN ${esc(o.vin)}` : ''}${o.mileage ? ` · przebieg ${esc(o.mileage)} km` : ''}</div>` : ''}
     ${items}${totals}
-    <div class="cols" style="margin-top:10px"><div class="box kv"><span>Sposób płatności</span><b>${esc(PAY_PL[d.payment_method] || d.payment_method)}${(() => { const p = safeJson(d.pay_split, null); return p?.length ? `<br><span class="sub">${esc(p.map((x) => `${PAY_PL[x.method] || x.method}: ${zl(x.amount)} zł`).join(', '))}</span>` : ''; })()}</b><span>Termin płatności</span><b>${esc(d.due_date)}</b>${S.company_bank && d.payment_method === 'transfer' ? `<span>Rachunek</span><b>${esc(S.company_bank)}</b>` : ''}</div>
+    <div class="cols" style="margin-top:10px"><div></div>
       ${(() => { const t = `${mpp ? '<b>Mechanizm podzielonej płatności</b><br>' : ''}${d.kind === 'proforma' ? '<b>Dokument nie jest fakturą VAT</b> i nie stanowi podstawy do odliczenia podatku.<br>' : ''}${d.ksef && d.ext_id ? 'Faktura przekazana do KSeF przez Fakturownia.<br>' : ''}${d.ksef_number ? 'Faktura przyjęta w KSeF.<br>' : ''}${esc(d.notes || '')}`; return t ? `<div class="box">${t}</div>` : '<div></div>'; })()}</div>
     ${ksefBox}
     ${S.company_capital ? `<div class="sec sub">Kapitał zakładowy ${esc(S.company_capital)}</div>` : ''}
@@ -435,7 +443,7 @@ export function saleDocHtml(id, { S = settingsMap(), bar = true, back = '' } = {
     ${d.ksef_hash ? '' : sigBlock('Osoba upoważniona do wystawienia', 'Osoba upoważniona do odbioru', plName(S.sale_person || d.created_by || ''))}`;
   return page({
     S, title: SALE_KIND[d.kind], number: d.number, legal: true, bar, back,
-    meta: [['Data wystawienia', d.issue_date], d.kind !== 'proforma' ? ['Data sprzedaży', d.sale_date] : null, ['Miejsce wystawienia', d.place || 'Warszawa']],
+    meta: [['Data wystawienia', d.issue_date], d.kind !== 'proforma' ? ['Data sprzedaży', d.sale_date] : null, ['Miejsce wystawienia', d.place || 'Warszawa'], ...payMeta(d)],
     badge: d.kind === 'proforma' ? '' : '<div class="orig">Oryginał</div>', body,
   });
 }

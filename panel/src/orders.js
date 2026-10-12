@@ -149,6 +149,12 @@ export function setStatus(orderId, statusId, staffName) {
     const jobs = all(`SELECT * FROM order_items WHERE order_id = ? AND kind = 'labor'`, o.id);
     if (getSetting('block_finish_open_jobs') === '1' && jobs.some((j) => !j.done)) throw new HttpError(400, 'Нельзя завершить заказ: есть невыполненные работы');
     if (getSetting('require_mechanic_all') === '1' && jobs.some((j) => !j.mechanic_id)) throw new HttpError(400, 'Нельзя завершить заказ: не во всех работах выбран механик');
+    // без закупочной цены (кошта) у запчастей нельзя закрыть — иначе маржа и P&L врут. Отмена («не приехал») — без проверки
+    const cancel = /anul/i.test(st.client_label || '') || /отмен|не приехал|anul/i.test(st.name);
+    if (!cancel && getSetting('block_finish_no_cost', '1') === '1') {
+      const noCost = all(`SELECT name FROM order_items WHERE order_id = ? AND kind = 'part' AND qty > 0 AND COALESCE(cost, 0) <= 0`, o.id);
+      if (noCost.length) throw new HttpError(400, `Нельзя завершить заказ: у запчастей не указана закупочная цена (кошт) — ${noCost.slice(0, 5).map((x) => x.name).join(', ')}${noCost.length > 5 ? ` и ещё ${noCost.length - 5}` : ''}`);
+    }
     if (getSetting('stock_negative', '1') !== '1') {
       const short = all(`SELECT i.name, i.qty, p.stock FROM order_items i JOIN products p ON p.id = i.product_id WHERE i.order_id = ? AND i.kind = 'part' AND p.stock < i.qty`, o.id);
       if (short.length && !one(`SELECT 1 FROM stock_docs WHERE order_id = ? AND type = 'WZ'`, o.id)) throw new HttpError(400, `Не хватает на складе: ${short.map((x) => `${x.name} (есть ${x.stock}, нужно ${x.qty})`).join(', ')}. Сделайте приход или разрешите минусовой остаток в настройках.`);

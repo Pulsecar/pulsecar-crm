@@ -908,4 +908,5 @@ if (getSetting('mw_internal_comments') === null) {
   db.exec(`CREATE TABLE IF NOT EXISTS sms_campaign_log (id INTEGER PRIMARY KEY, campaign_id INTEGER NOT NULL, phone TEXT NOT NULL, status TEXT NOT NULL, error TEXT, at TEXT NOT NULL DEFAULT (datetime('now')))`);
   db.exec('CREATE INDEX IF NOT EXISTS sms_campaign_log_c ON sms_campaign_log(campaign_id)');
   db.exec(`CREATE TABLE IF NOT EXISTS sms_stop (token TEXT PRIMARY KEY, customer_id INTEGER, phone TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  if (getSetting('block_finish_no_cost', '') === '') setSetting('block_finish_no_cost', '1');
 }

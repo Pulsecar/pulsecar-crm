@@ -125,6 +125,10 @@ try {
   ok(await req(`/crm-api/orders/${o.id}/payments`, { body: { method: 'cash', amount: 2025 } }), 'pay');
   o = ok(await req('/crm-api/orders/' + order.id), 'order get3');
   assert.equal(o.paid, 2055); assert.match(o.payments.find((x) => x.method === 'cash').number, /^KP 1\//);
+  // запчасть без закупочной цены (кошта) — закрыть нельзя; дальше в тестах правило выключено
+  const noCostR = await req(`/crm-api/orders/${o.id}/status`, { body: { status_id: done.id } });
+  assert.equal(noCostR.status, 400); assert.match(noCostR.j.error, /закупочная цена/);
+  ok(await req('/crm-api/settings', { method: 'PUT', body: { block_finish_no_cost: '0' } }), 'no-cost rule off');
   const fin = ok(await req(`/crm-api/orders/${o.id}/status`, { body: { status_id: done.id } }), 'close');
   assert.equal(fin.earned, 1012); // (2055 − 30 баллами) × 0,5
   p = ok(await req('/crm-api/products/' + prod.id), 'prod2'); assert.equal(p.stock, 8); assert.equal(p.reserved, 0);
@@ -157,6 +161,11 @@ try {
   assert.match(pf.number, /^PRO /); assert.match(fv.number, /^FV /);
   assert.equal((await req(`/crm-api/orders/${o.id}/sales-docs`, { body: { kind: 'vat' } })).status, 409, 'вторая фактура VAT — нельзя');
   const fvh = await req('/crm-api/print/sale/' + fv.id); assert.ok(fvh.j.includes('Faktura VAT') && fvh.j.includes('Słownie') && fvh.j.includes('Nabywca'));
+  // способ оплаты — в шапке; срок оплаты только при переводе
+  const head = fvh.j.slice(0, fvh.j.indexOf('Sprzedawca'));
+  assert.ok(head.includes('Sposób płatności') && head.includes('gotówka')); assert.ok(!fvh.j.includes('Termin płatności'), 'наличные — без срока оплаты');
+  const pfh = (await req('/crm-api/print/sale/' + pf.id)).j;
+  if (/przelew/.test(pfh)) assert.ok(pfh.slice(0, pfh.indexOf('Sprzedawca')).includes('Termin płatności'), 'перевод — срок оплаты в шапке');
   const fk = ok(await req(`/crm-api/sales-docs/${fv.id}/correct`, { body: { reason: 'Zwrot', lines: [{ qty: 0 }] } }), 'fk');
   // пакет для бухгалтера: ZIP (реестр + фактуры) и печать всех одной страницей
   {
