@@ -68,6 +68,9 @@ export function widgetData(orderId) {
 }
 
 /** onAddItems: позиции подбора → запчасти заказа + строки ИИ (статус «черновик ИИ»). Повтор не дублирует. */
+// заглушка поставщика «0,01 zł» — это не цена: оставляем пусто, менеджер укажет сам (иначе заказ закроется без кошта)
+const real = (x) => { const n = Number(x); return Number.isFinite(n) && n >= 0.5 ? round2(n) : 0; };
+
 export function saveItems(orderId, items, staffName) {
   const o = getOrder(orderId);
   const have = all("SELECT code FROM order_items WHERE order_id = ? AND kind = 'part'", o.id).map((x) => norm(x.code)).filter(Boolean);
@@ -95,7 +98,7 @@ export function saveItems(orderId, items, staffName) {
     ].filter(Boolean).join('\n').slice(0, 900);
     const itemId = addItem(o.id, {
       kind: 'part', name: [name, brand].filter(Boolean).join(' ').slice(0, 300), code: it.articleNumber || null, qty, unit: it.unit || 'szt.',
-      price: round2(Number(it.priceGross ?? v?.sellGross ?? 0) || 0), cost: round2(Number(it.purchaseNet ?? v?.priceNet ?? 0) || 0), vat: 23, note,
+      price: real(it.priceGross ?? v?.sellGross), cost: real(it.purchaseNet ?? v?.priceNet), vat: 23, note,
     });
     insert('ai_lines', {
       job_id: null, order_id: o.id, order_item_id: itemId, kind: 'part', src: 'svc',

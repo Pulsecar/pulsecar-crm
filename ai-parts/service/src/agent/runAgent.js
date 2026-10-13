@@ -28,7 +28,14 @@ ${input.text}
 Срочность: ${input.urgency || 'не важно'}
 ${input.note ? 'Комментарий менеджера: ' + input.note : ''}
 ${input.pastedCatalogText ? 'Менеджер вставил текст из каталога (partslink24/HaynesPro), используй как источник:\n' + input.pastedCatalogText.slice(0, 15000) : ''}
-${input.knownOptions?.length ? 'Известные коды опций/комплектации: ' + input.knownOptions.join(', ') : ''}`;
+${input.knownOptions?.length ? 'Известные коды опций/комплектации: ' + input.knownOptions.join(', ') : ''}
+${existingList(input.existingItems)}`;
+}
+
+function existingList(items) {
+  if (!Array.isArray(items) || !items.length) return '';
+  const lines = items.slice(0, 60).map((x) => '- ' + (typeof x === 'string' ? x : [x.name, x.oeNumber ? 'OE ' + x.oeNumber : '', x.articleNumber || ''].filter(Boolean).join(' · ')));
+  return 'Уже есть в wycenie / уже подобрано (не дублировать):\n' + lines.join('\n');
 }
 
 function summarizeServerTool(block) {
@@ -145,18 +152,22 @@ export function postProcess(raw, rules, wantedLevel) {
       if (!o || !o.articleNumber) continue;
       const blacklisted = (rules.blacklistBrands || []).some((b) => String(o.brand || '').toLowerCase() === String(b).toLowerCase());
       if (blacklisted) continue;
-      offers[lvl] = { ...o, client: clientPrice(rules, o.purchaseNet, lvl, it.group, o.listNet) };
+      const issue = priceIssue(o, rules);
+      const clean = issue ? { ...o, purchaseNet: null, priceIssue: issue } : o;
+      offers[lvl] = { ...clean, client: issue ? null : clientPrice(rules, o.purchaseNet, lvl, it.group, o.listNet) };
     }
     let chosen = it.chosenLevel && offers[it.chosenLevel] ? it.chosenLevel : null;
     if (!chosen) chosen = offers[wantedLevel] ? wantedLevel : ['middle', 'economy', 'oe'].find((l) => offers[l]) || null;
-    return {
-      id: `ai-${i + 1}`,
-      ...it,
-      offers,
-      chosenLevel: chosen,
-      // Неподтверждённую позицию нельзя заказывать — CRM должна это соблюдать.
-      orderable: (it.status === 'confirmed' || !!it.orderBoth) && !!chosen,
-    };
+    const out = { id: `ai-${i + 1}`, ...it, offers, chosenLevel: chosen };
+    // Без надёжной цены позиция не может быть «подтверждена»: менеджер уточняет цену сам.
+    const pi = chosen && offers[chosen].priceIssue;
+    if (pi && out.status === 'confirmed') {
+      out.status = 'check';
+      out.checkReason = [pi, out.checkReason].filter(Boolean).join('. ');
+    } else if (pi && !String(out.checkReason || '').includes(pi)) out.checkReason = [pi, out.checkReason].filter(Boolean).join('. ');
+    // Неподтверждённую позицию нельзя заказывать — CRM должна это соблюдать.
+    out.orderable = (out.status === 'confirmed' || !!out.orderBoth) && !!chosen && !pi;
+    return out;
   });
   return {
     vehicle: raw.vehicle,
@@ -165,6 +176,18 @@ export function postProcess(raw, rules, wantedLevel) {
     notes: raw.notes || '',
     totals: totals(items),
   };
+}
+
+// Inter Cars иногда отдаёт заглушку 0,01 zł (цены нет) или явно ошибочную цену — такие цены не используем.
+export function priceIssue(o, rules = {}) {
+  const p = o.purchaseNet;
+  if (p === null || p === undefined || p === '') return 'Цена не получена — уточните в Inter Cars';
+  const n = Number(p);
+  if (!Number.isFinite(n) || n < 0.5) return 'Цена не получена (Inter Cars вернул ' + n + ' zł) — уточните в Inter Cars';
+  const list = Number(o.listNet);
+  const max = Number(rules.maxPartPriceNet ?? 15000);
+  if ((list > 0 && n > list * 3) || n > max) return 'Цена Inter Cars выглядит ошибочной (' + n.toFixed(2) + ' zł netto) — уточните перед wyceną';
+  return null;
 }
 
 function totals(items) {

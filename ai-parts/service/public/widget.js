@@ -450,7 +450,7 @@ tr.check td{background:#fffbf0}\
         ]),
         h('td', null, [seg]),
         h('td', null, offer ? [h('div', { style: 'font-weight:500', text: offer.brand + ' ' + offer.articleNumber }), h('div', { class: 'hint', text: (offer.supplier || '') + (offer.availability ? ' · ' + offer.availability : '') })] : [h('span', { class: 'hint', text: 'нет предложения' })]),
-        h('td', { style: 'text-align:right' , text: offer ? money(offer.purchaseNet) : '—' }),
+        h('td', { style: 'text-align:right', text: offer && offer.purchaseNet != null ? money(offer.purchaseNet) : offer ? 'нет цены' : '—' }),
         h('td', { style: 'text-align:right;font-weight:600', text: offer && offer.client ? money(offer.client.net) : '—' }),
         h('td', null, [badge]),
       ]);
@@ -469,7 +469,7 @@ tr.check td{background:#fffbf0}\
 
     return h('div', { style: 'display:flex;flex-direction:column;gap:14px' }, [
       h('div', { class: 'note' }, [h('b', { text: r.vehicle && r.vehicle.summary ? r.vehicle.summary : '' }), r.vehicle && r.vehicle.options && r.vehicle.options.length ? ' · опции: ' + r.vehicle.options.join(', ') : '', r.notes ? h('div', { style: 'margin-top:6px', text: r.notes }) : null]),
-      r.questions && r.questions.length ? h('div', { class: 'q' }, [h('b', { text: 'Осталось уточнить: ' }), r.questions.join(' · ')]) : null,
+      r.questions && r.questions.length ? this.renderFollowup(r) : null,
       h('div', { class: 'tw' }, [
         h('table', null, [
           h('thead', null, [h('tr', null, ['', 'Позиция', 'Уровень', 'Бренд · поставщик', 'Закупка netto', 'Клиенту netto', 'Статус'].map(function (t) { return h('th', { text: t }); }))]),
@@ -483,6 +483,37 @@ tr.check td{background:#fffbf0}\
             h('button', { type: 'button', class: 'btn', onclick: function () { self.set({ phase: 'form', job: null, sel: {}, levelSel: {} }); } }, ['Новый подбор']),
             h('button', { type: 'button', class: 'btn p', disabled: !selectedCount, onclick: function () { self.addToWycena(); } }, ['Добавить в wycenę (' + selectedCount + ')']),
           ]),
+    ]);
+  };
+
+  // «Осталось уточнить»: менеджер отмечает, что нужно, и одной кнопкой дозаказывает подбор только этих позиций
+  Widget.prototype.renderFollowup = function (r) {
+    var self = this;
+    var s = this.state;
+    s.qYes = s.qYes || {};
+    var ta = h('textarea', { rows: '2', placeholder: 'Или напишите своими словами, что добавить (например: масло 5W-30 5 л и фильтр)' });
+    ta.value = s.qText || '';
+    ta.addEventListener('input', function () { s.qText = ta.value; });
+    var list = r.questions.map(function (q, i) {
+      var cb = h('input', { type: 'checkbox', 'aria-label': 'Да: ' + q });
+      cb.checked = !!s.qYes[i];
+      cb.addEventListener('change', function () { s.qYes[i] = cb.checked; });
+      return h('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer' }, [cb, h('span', { text: q })]);
+    });
+    var go = function () {
+      var yes = r.questions.filter(function (q, i) { return s.qYes[i]; }).map(function (q) { return q + ' — ДА, добавить'; });
+      var answer = yes.concat(String(s.qText || '').trim() ? [String(s.qText).trim()] : []).join('\n');
+      if (!answer) return self.set({ error: 'Отметьте, что нужно добавить, или напишите своими словами.' });
+      self.set({ phase: 'running', error: null, added: false, sel: {}, levelSel: {}, qYes: {}, qText: '' });
+      self.api('/api/jobs/' + self.state.jobId + '/followup', 'POST', { answer: answer })
+        .then(function (x) { self.follow(x.id); })
+        .catch(function (e) { self.set({ phase: 'done', error: e.message }); });
+    };
+    return h('div', { class: 'q' }, [
+      h('b', { text: 'Осталось уточнить — отметьте, что нужно, и ИИ подберёт эти позиции дополнительно:' }),
+      h('div', { style: 'margin:6px 0 8px' }, list),
+      ta,
+      h('div', { class: 'row', style: 'margin-top:8px' }, [h('button', { type: 'button', class: 'btn', onclick: go }, ['Дополнить подбор'])]),
     ]);
   };
 

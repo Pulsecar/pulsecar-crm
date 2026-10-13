@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config, assertConfig } from './config.js';
 import { getDb, ensureWorkshop, newId, monthUsage } from './db.js';
 import { verifyToken, newExtensionKey, hashKey } from './crypto.js';
-import { createJob, startJob, getJob, answerJob, cancelJob, listJobsForWycena } from './jobs.js';
+import { createJob, startJob, getJob, answerJob, cancelJob, listJobsForWycena, followupInput } from './jobs.js';
 import { listIntegrationsPublic, saveIntegration, getIntegration, setIntegrationStatus, SERVICES } from './integrations.js';
 import { getRules, saveRules } from './rules.js';
 import { importHistory, historyStats } from './providers/history.js';
@@ -92,6 +92,19 @@ export function createApp() {
   app.post('/api/jobs/:id/answer', auth(['manager', 'admin']), wrap(async (req, res) => {
     answerJob(req.auth.ws, req.params.id, req.body?.answer ?? '');
     res.json({ ok: true });
+  }));
+
+  // Дополнить готовый подбор по ответу на «Осталось уточнить»: новый подбор только недостающих позиций
+  app.post('/api/jobs/:id/followup', auth(['manager', 'admin']), wrap(async (req, res) => {
+    const prev = getJob(req.params.id, req.auth.ws);
+    if (!prev) return res.status(404).json({ error: 'Не найдено' });
+    if (prev.status !== 'done' || !prev.result) return res.status(400).json({ error: 'Подбор ещё не завершён' });
+    if (req.auth.wid && String(req.auth.wid) !== String(prev.wycenaId)) return res.status(403).json({ error: 'Токен выдан для другой wyceny' });
+    const answer = String(req.body?.answer || '').trim().slice(0, 4000);
+    if (!answer) return res.status(400).json({ error: 'Напишите, что добавить' });
+    const id = createJob(req.auth.ws, req.auth.uid, followupInput(prev, answer));
+    startJob(req.auth.ws, id);
+    res.status(202).json({ id });
   }));
 
   app.post('/api/jobs/:id/cancel', auth(['manager', 'admin']), wrap(async (req, res) => {
@@ -320,3 +333,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   getDb().prepare(`UPDATE pl24_tasks SET status='failed', result_json='{"error":"service_restarted"}', finished_at=datetime('now') WHERE status IN ('pending','taken')`).run();
   createApp().listen(config.port, () => console.log(`ИИ-запчастист слушает порт ${config.port}`));
 }
+

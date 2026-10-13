@@ -279,3 +279,34 @@ test('partslink24 напрямую: фразы под язык каталога 
     srv.close();
   }
 });
+
+test('цены: заглушка 0,01 zł и ошибочная цена Inter Cars — не цена, позиция «проверьте», не заказывается', async () => {
+  const { postProcess, priceIssue } = await import('../src/agent/runAgent.js');
+  const { getRules } = await import('../src/rules.js');
+  assert.match(priceIssue({ purchaseNet: 0.01 }), /не получена/);
+  assert.match(priceIssue({ purchaseNet: 43599.96 }), /ошибочной/);
+  assert.match(priceIssue({ purchaseNet: 900, listNet: 120 }), /ошибочной/);
+  assert.equal(priceIssue({ purchaseNet: 180, listNet: 260 }), null);
+  const r = postProcess({ items: [
+    { group: 'engine', name: 'Цепь ГРМ', quantity: 1, unit: 'шт', status: 'confirmed', offers: { oe: { brand: 'OE JAGUAR', articleNumber: 'JDE38677', purchaseNet: 0.01, supplier: 'intercars' } } },
+    { group: 'engine', name: 'Натяжитель', quantity: 1, unit: 'шт', status: 'confirmed', offers: { oe: { brand: 'OE JAGUAR', articleNumber: 'JDE38696', purchaseNet: 43599.96, supplier: 'intercars' } } },
+    { group: 'engine', name: 'Прокладка', quantity: 1, unit: 'шт', status: 'confirmed', offers: { middle: { brand: 'Elring', articleNumber: '123', purchaseNet: 40, supplier: 'intercars' } } },
+  ] }, getRules(WS), 'middle');
+  const [a, b, c] = r.items;
+  assert.equal(a.status, 'check'); assert.equal(a.orderable, false); assert.equal(a.offers.oe.purchaseNet, null); assert.equal(a.offers.oe.client, null);
+  assert.match(a.checkReason, /Цена не получена/);
+  assert.equal(b.status, 'check'); assert.match(b.checkReason, /ошибочной/);
+  assert.equal(c.status, 'confirmed'); assert.ok(c.offers.middle.client.net > 40);
+  assert.equal(r.totals.purchaseNet, 40);
+});
+
+test('«Осталось уточнить» → дополнительный подбор: то же авто, уже подобранное не повторять', async () => {
+  const { followupInput } = await import('../src/jobs.js');
+  const prev = { id: 'job_1', input: { wycenaId: '2057', vehicle: { vin: 'SALVA2BX3JH295566' }, text: 'Wymiana rozrządu', level: 'oe' },
+    result: { vehicle: { summary: 'Evoque 2.0 Ingenium' }, questions: ['Нужна ли замена масла и фильтра?'],
+      items: [{ name: 'Цепь ГРМ', quantity: 1, unit: 'шт', oeNumber: 'LR091742', chosenLevel: 'oe', offers: { oe: { brand: 'OE JAGUAR', articleNumber: 'JDE38677' } } }] } };
+  const inp = followupInput(prev, 'Нужна ли замена масла и фильтра? — ДА, добавить');
+  assert.equal(inp.vehicle.vin, 'SALVA2BX3JH295566'); assert.equal(inp.level, 'oe'); assert.equal(inp.followupOf, 'job_1');
+  assert.match(inp.text, /НЕ повторять[\s\S]*Цепь ГРМ/); assert.match(inp.text, /ДА, добавить/); assert.match(inp.note, /Evoque/);
+  assert.deepEqual(inp.existingItems.map((x) => x.name), ['Цепь ГРМ']);
+});

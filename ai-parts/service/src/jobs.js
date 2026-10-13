@@ -133,3 +133,27 @@ async function notifyTelegram(workshopId, text) {
     /* уведомления не критичны */
   }
 }
+
+// Вход для дополнительного подбора: то же авто, уже подобранное не повторять, только то, что следует из ответа менеджера
+export function followupInput(prev, answer) {
+  const r = prev.result || {};
+  const done = (r.items || []).map((it) => {
+    const o = it.offers?.[it.chosenLevel];
+    return `- ${it.name} × ${it.quantity} ${it.unit || ''}${it.oeNumber ? ' (OE ' + it.oeNumber + ')' : ''}${o ? ' — ' + o.brand + ' ' + o.articleNumber : ''}`;
+  });
+  const text = `Дополнение к уже сделанному подбору для этого же авто.
+Исходный запрос: ${prev.input.text}
+Уже подобрано (НЕ повторять):
+${done.join('\n') || '—'}
+${r.questions?.length ? 'Оставались вопросы: ' + r.questions.join(' · ') + '\n' : ''}Ответ менеджера: ${answer}
+
+Подбери ТОЛЬКО дополнительные позиции, которые следуют из ответа менеджера (масло, фильтры, прокладки, крепёж и т. п.), по тем же правилам.`;
+  return {
+    ...prev.input,
+    text,
+    note: [r.vehicle?.summary ? 'Авто уже определено в прошлом подборе: ' + r.vehicle.summary : '', prev.input.note || ''].filter(Boolean).join('\n') || undefined,
+    existingItems: [...(prev.input.existingItems || []), ...(r.items || []).map((it) => ({ name: it.name, oeNumber: it.oeNumber || null }))],
+    followupOf: prev.id,
+  };
+}
+
