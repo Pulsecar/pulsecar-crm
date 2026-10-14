@@ -394,14 +394,13 @@ function StatusNotice({ o, n, set, reload }) {
   const eod = (add) => { const d = new Date(); d.setDate(d.getDate() + add); d.setHours(23, 59, 0, 0); return d; };
   const liveFrom = n.liveFrom || dtl(new Date());
   const liveTo = n.liveTo || dtl(eod(3));
-  const liveMode = n.liveMode || 'workshop';
   const send = async () => {
     setBusy(true);
     try {
       let text = n.sms?.text || '';
       if (liveOn && liveCam) {
         const period = liveDays === 'custom' ? { validFrom: new Date(liveFrom).toISOString(), validTo: new Date(liveTo).toISOString() } : { days: Number(liveDays) };
-        const r = await act(() => api(`live-cameras/order/${o.id}/link`, { body: { cameraId: liveCam, scheduleMode: liveMode, ...period } }));
+        const r = await act(() => api(`live-cameras/order/${o.id}/link`, { body: { cameraId: liveCam, scheduleMode: 'workshop', ...period } }));
         text = (text.trim() + '\n\nPodgląd naprawy na żywo: ' + r.url).trim();
         if (!(n.sms && n.sendSms)) { navigator.clipboard?.writeText(r.url).catch(() => {}); toast('Ссылка на трансляцию создана и скопирована'); }
       }
@@ -427,10 +426,7 @@ function StatusNotice({ o, n, set, reload }) {
           <option value="0">до конца дня</option><option value="1">+1 день</option><option value="3">+3 дня</option><option value="7">+7 дней</option><option value="custom">Свой период…</option></select></label>
         ${liveDays === 'custom' && html`<label class="f">Доступ с<input type="datetime-local" value=${liveFrom} onInput=${(e) => set({ ...n, liveFrom: e.target.value })} /></label>
           <label class="f">Доступ до<input type="datetime-local" value=${liveTo} min=${liveFrom} onInput=${(e) => set({ ...n, liveTo: e.target.value })} /></label>`}
-        <label class="f live-pick-wide">Часы в этом периоде<div class="seg">
-          <button type="button" class=${liveMode === 'workshop' ? 'on' : ''} onClick=${() => set({ ...n, liveMode: 'workshop' })}>Часы работы мастерской</button>
-          <button type="button" class=${liveMode === 'always' ? 'on' : ''} onClick=${() => set({ ...n, liveMode: 'always' })}>Круглосуточно</button></div></label>
-        <div class="muted small live-pick-hint">Ссылка создастся при отправке и добавится в конец SMS. Клиент видит только этот пост, без звука. Если ссылка для заказа уже есть — отправится она же.</div></div>`}
+        <div class="muted small live-pick-hint">Ссылка создастся при отправке и добавится в конец SMS. Клиент видит только этот пост, без звука, в часы работы мастерской. Если ссылка для заказа уже есть — отправится она же.</div></div>`}
     </div>` : ''}
     ${!app.features.sms && n.sms && html`<div class="muted small">SMS-шлюз не подключён — сообщение попадёт только в журнал SMS. Подключите в Настройки → Интеграции.</div>`}
   </${Modal}>`;

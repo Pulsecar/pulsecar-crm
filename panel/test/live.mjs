@@ -81,7 +81,7 @@ try {
   ORDER.id = String(o2.id);
   await req('/crm-api/live-cameras/order/' + o2.id + '/link', { body: { cameraId: 'c1', validFrom: vf, validTo: vt, scheduleMode: 'always' } });
   const pc2 = calls.filter((x) => x.path === '/api/v1/links' && x.body).at(-1).body;
-  assert.equal(pc2.validFrom, vf); assert.equal(pc2.validTo, vt); assert.equal(pc2.scheduleMode, 'always');
+  assert.equal(pc2.validFrom, vf); assert.equal(pc2.validTo, vt); assert.equal(pc2.scheduleMode, 'workshop', 'только часы работы мастерской');
   assert.equal((await req('/crm-api/live-cameras/order/' + o2.id + '/link', { body: { cameraId: 'c1', validFrom: vt, validTo: vf } })).status, 400, '«до» раньше «от» — ошибка');
   const lk2 = await req('/crm-api/live-cameras/order/' + o.id + '/link', { body: { cameraId: '' } });
   assert.equal(lk2.j.reused, true, 'есть активная ссылка — отправляем её же');

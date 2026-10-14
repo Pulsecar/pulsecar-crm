@@ -106,7 +106,7 @@ export function mountLive(crm, who) {
     const to = req.body?.validTo ? new Date(req.body.validTo) : new Date(warsawEndOfDay(days));
     if (isNaN(from) || isNaN(to)) throw new HttpError(400, 'Nieprawidłowa data');
     if (to <= from || to <= new Date()) throw new HttpError(400, 'Data „do” musi być później niż „od” i w przyszłości');
-    const scheduleMode = ['workshop', 'always'].includes(req.body?.scheduleMode) ? req.body.scheduleMode : 'workshop';
+    const scheduleMode = 'workshop'; // правило мастерской: камера доступна клиенту только в часы работы
     const l = await live('/links', 'POST', {
       cameraId, plate: (o.plate || o.number || '').slice(0, 16), client: o.company || o.name || '', car: [o.make, o.model, o.year].filter(Boolean).join(' '),
       orderNo: o.number, orderId: String(o.id), phone: o.phone || '', validFrom: from.toISOString(), validTo: to.toISOString(), scheduleMode,
