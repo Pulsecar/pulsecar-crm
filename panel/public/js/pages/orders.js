@@ -411,13 +411,14 @@ function StatusNotice({ o, n, set, reload }) {
     ${n.email && html`<label class="check" style="margin-top:10px"><input type="checkbox" checked=${n.sendEmail} onChange=${(e) => set({ ...n, sendEmail: e.target.checked })} />E-mail на ${n.email.to}</label>
       <input value=${n.email.subject} onInput=${(e) => set({ ...n, email: { ...n.email, subject: e.target.value } })} />
       <textarea rows="5" style="margin-top:6px" value=${n.email.text} onInput=${(e) => set({ ...n, email: { ...n.email, text: e.target.value } })}></textarea>`}
-    ${camList.length ? html`<div class="live-pick" style="margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px">
-      <label class="check"><input type="checkbox" checked=${liveOn} onChange=${(e) => set({ ...n, live: e.target.checked })} /><${Icon} n="camera" />Дать клиенту доступ к камере (ссылка в SMS)</label>
-      ${liveOn && html`<div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
-        <select value=${liveCam} onChange=${(e) => set({ ...n, liveCam: e.target.value })} aria-label="Камера">${camList.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
-        <select value=${String(liveDays)} onChange=${(e) => set({ ...n, liveDays: Number(e.target.value) })} aria-label="Срок доступа">
-          <option value="0">до конца дня</option><option value="1">+1 день</option><option value="3">+3 дня</option><option value="7">+7 дней</option></select></div>
-        <div class="muted small" style="margin-top:6px">Ссылка создастся при отправке и добавится в конец SMS. Клиент видит только этот пост, без звука, в часы работы мастерской. Если ссылка для заказа уже есть — отправится она же.</div>`}
+    ${camList.length ? html`<div class=${'live-pick' + (liveOn ? ' on' : '')}>
+      <label class="live-pick-head"><input type="checkbox" checked=${liveOn} onChange=${(e) => set({ ...n, live: e.target.checked })} />
+        <span class="live-pick-ico"><${Icon} n="camera" /></span><span>Дать клиенту доступ к камере (ссылка в SMS)</span></label>
+      ${liveOn && html`<div class="live-pick-opts">
+        <label class="f">Камера<select value=${liveCam} onChange=${(e) => set({ ...n, liveCam: e.target.value })}>${camList.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select></label>
+        <label class="f">Срок доступа<select value=${String(liveDays)} onChange=${(e) => set({ ...n, liveDays: Number(e.target.value) })}>
+          <option value="0">до конца дня</option><option value="1">+1 день</option><option value="3">+3 дня</option><option value="7">+7 дней</option></select></label>
+        <div class="muted small live-pick-hint">Ссылка создастся при отправке и добавится в конец SMS. Клиент видит только этот пост, без звука, в часы работы мастерской. Если ссылка для заказа уже есть — отправится она же.</div></div>`}
     </div>` : ''}
     ${!app.features.sms && n.sms && html`<div class="muted small">SMS-шлюз не подключён — сообщение попадёт только в журнал SMS. Подключите в Настройки → Интеграции.</div>`}
   </${Modal}>`;
