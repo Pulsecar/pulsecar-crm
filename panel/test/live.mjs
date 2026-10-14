@@ -9,6 +9,7 @@ const PORT = 3195, LIVE = 3194, BASE = `http://localhost:${PORT}`, KEY = 'k'.rep
 const DB = './data/test-live.db';
 for (const s of ['', '-wal', '-shm']) rmSync(DB + s, { force: true });
 const calls = [];
+const ORDER = { id: '' };
 const fake = createServer((rq, rs) => {
   let b = '';
   rq.on('data', (d) => (b += d));
@@ -17,6 +18,8 @@ const fake = createServer((rq, rs) => {
     rs.setHeader('Content-Type', 'application/json');
     if (rq.headers.authorization !== 'Bearer ' + KEY) { rs.statusCode = 401; return rs.end('{"error":"Brak dostępu"}'); }
     if (rq.url === '/api/v1/embed-sessions') return rs.end(JSON.stringify({ url: 'https://live.example/embed/start?t=abc', expiresIn: 120 }));
+    if (rq.url === '/api/v1/links/l1' && rq.method === 'GET') return rs.end(JSON.stringify({ id: 'l1', plate: 'WA 1234X', phone: '', orderId: ORDER.id, state: 'live', smsText: 'Dzień dobry! Podgląd: https://live.example/v/x' }));
+    if (rq.url === '/api/v1/links/l1' && rq.method === 'PATCH') return rs.end('{}');
     if (rq.url.startsWith('/api/v1/links?')) return rs.end(JSON.stringify([{ id: 'l1', url: 'https://live.example/v/x', state: 'live', orderId: '1' }]));
     rs.statusCode = 404; rs.end('{}');
   });
@@ -49,7 +52,20 @@ try {
   const l = await req('/crm-api/live-cameras/order/' + o.id);
   assert.equal(l.status, 200); assert.equal(l.j[0].state, 'live');
   assert.ok(calls.some((x) => x.path === `/api/v1/links?orderId=${o.id}&active=1`));
-  console.log('✓ Kamery na żywo: вход в модуль только из CRM, ключ только на сервере, ссылки заказа');
+  // поиск в базе CRM для формы модуля: машина + клиент + открытое zlecenie
+  const cust = (await req('/crm-api/customers', { body: { name: 'Jan Live', phone: '600700800' } })).j;
+  const car = (await req('/crm-api/cars', { body: { plate: 'WA 1234X', make: 'Opel', model: 'Astra', customer_id: cust.id } })).j;
+  const o2 = (await req('/crm-api/orders', { body: { kind: 'order', customer_id: cust.id, car_id: car.id, items: [] } })).j;
+  ORDER.id = String(o2.id);
+  const sr = (await req('/crm-api/live-cameras/search?q=wa1234')).j;
+  assert.equal(sr[0].plate.replace(/\s/g, ''), 'WA1234X'); assert.equal(sr[0].client, 'Jan Live'); assert.equal(sr[0].phone, '+48600700800'); assert.equal(sr[0].orderId, String(o2.id));
+  assert.equal((await req('/crm-api/live-cameras/search?q=Jan%20Li')).j.length, 1);
+  // SMS: телефона в ссылке нет → номер клиента из zlecenia
+  const sm = await req('/crm-api/live-cameras/sms', { body: { linkId: 'l1' } });
+  assert.equal(sm.status, 200, JSON.stringify(sm.j)); assert.equal(sm.j.phone, '+48600700800');
+  const sm2 = await req('/crm-api/live-cameras/sms', { body: { linkId: 'l1', phone: '511222333' } });
+  assert.equal(sm2.j.phone, '+48511222333'); assert.ok(calls.some((x) => x.path === '/api/v1/links/l1' && x.body?.phone === '+48511222333'));
+  console.log('✓ Kamery na żywo: вход в модуль только из CRM, ключ только на сервере, ссылки заказа, поиск в базе CRM, SMS клиенту');
 } finally {
   srv.kill(); fake.close();
   for (const s of ['', '-wal', '-shm']) rmSync(DB + s, { force: true });

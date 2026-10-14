@@ -34,6 +34,35 @@ function notifyParent(msg) {
   if (window.parent === window || !S.me || !S.me.crmOrigin) return;
   window.parent.postMessage(msg, S.me.crmOrigin);
 }
+// ---------- мост к CRM (окно модуля внутри CRM): поиск в базе CRM и SMS через CRM ----------
+const inCrm = () => embedded && window.parent !== window && !!(S.me && S.me.crmOrigin);
+let reqSeq = 0;
+const pending = new Map();
+window.addEventListener('message', (e) => {
+  if (!S.me || e.origin !== S.me.crmOrigin || !e.data || e.data.type !== 'pulsecar-live:reply') return;
+  const p = pending.get(e.data.id);
+  if (!p) return;
+  pending.delete(e.data.id);
+  if (e.data.ok) p.ok(e.data.data); else p.fail(new Error(e.data.error || 'Błąd CRM'));
+});
+function crm(action, data) {
+  if (!inCrm()) return Promise.reject(new Error('Dostępne tylko w CRM'));
+  return new Promise((ok, fail) => {
+    const id = ++reqSeq;
+    pending.set(id, { ok, fail });
+    notifyParent({ type: 'pulsecar-live:request', id, action, data });
+    setTimeout(() => { if (pending.delete(id)) fail(new Error('CRM nie odpowiada — odśwież stronę CRM')); }, 25000);
+  });
+}
+async function sendSms(linkId, phone, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await crm('sms', { linkId, phone: phone || undefined });
+    toast(r.status === 'logged' ? 'Brak podłączonego dostawcy SMS — SMS tylko zapisany w CRM' : `SMS wysłany na ${r.phone}`);
+    return r;
+  } catch (e) { toast(e.message); throw e; } finally { if (btn) btn.disabled = false; }
+}
+
 // datetime-local ↔ ISO (браузер в часовом поясе мастерской)
 const pad = (n) => String(n).padStart(2, '0');
 const toInput = (d) => { d = new Date(d); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
@@ -90,6 +119,43 @@ function linkForm(host, link, prefill = {}) {
   $$('.mode button', f).forEach((b) => (b.onclick = () => setMode(b.dataset.m)));
   setMode(mode);
   f.addEventListener('submit', (e) => e.preventDefault());
+  // Wybór klienta i auta z bazy CRM: dane wypełniają się same
+  let picked = null;
+  if (inCrm() && !link) {
+    const box = document.createElement('div');
+    box.className = 'fld crm-search';
+    box.innerHTML = '<label>Szukaj w bazie CRM</label><input type="search" autocomplete="off" placeholder="nr rej., nazwisko, firma lub telefon"><div class="sugg" hidden></div>';
+    f.insertBefore(box, f.children[1]);
+    const inp = $('input', box), list = $('.sugg', box);
+    let t, seq = 0;
+    const fill = (r) => {
+      picked = r;
+      for (const k of ['plate', 'client', 'car', 'orderNo', 'phone']) $(`[name=${k}]`, f).value = r[k] || '';
+      inp.value = ''; list.hidden = true;
+      toast(r.orderNo ? `Wybrano ${r.plate} · zl. ${r.orderNo}` : `Wybrano ${r.plate}`);
+    };
+    inp.addEventListener('input', () => {
+      clearTimeout(t);
+      const q = inp.value.trim();
+      if (q.length < 2) { list.hidden = true; return; }
+      t = setTimeout(async () => {
+        const my = ++seq;
+        try {
+          const rows = await crm('search', { q });
+          if (my !== seq) return;
+          list.innerHTML = rows.length ? '' : '<div class="hint" style="padding:8px 10px">Nic nie znaleziono</div>';
+          for (const r of rows) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.innerHTML = `<b class="mono">${esc(r.plate || '—')}</b> ${esc(r.car)}<span class="sub">${esc([r.client, r.phone, r.orderNo && 'zl. ' + r.orderNo].filter(Boolean).join(' · '))}</span>`;
+            b.onclick = () => fill(r);
+            list.appendChild(b);
+          }
+          list.hidden = false;
+        } catch (e) { list.innerHTML = `<div class="hint" style="padding:8px 10px">${esc(e.message)}</div>`; list.hidden = false; }
+      }, 250);
+    });
+  }
   return {
     data() {
       const d = {
@@ -98,7 +164,8 @@ function linkForm(host, link, prefill = {}) {
         validFrom: fromInput($('[name=validFrom]', f).value), validTo: fromInput($('[name=validTo]', f).value), scheduleMode: mode,
       };
       if (mode === 'custom') d.schedule = getDays();
-      if (!link && prefill.orderId) d.orderId = prefill.orderId;
+      if (!link && picked && picked.orderId && $('[name=orderNo]', f).value === picked.orderNo) d.orderId = picked.orderId;
+      else if (!link && prefill.orderId) d.orderId = prefill.orderId;
       return d;
     },
     error(m) { $('.form-err', f).textContent = m || ''; },
@@ -111,8 +178,11 @@ function resultView(host, l) {
     <div class="url">${esc(l.url)}</div>
     <div class="actions"><button class="btn btn-primary btn-sm" data-a="url" type="button">Kopiuj link</button><a class="btn btn-outline btn-sm" href="${esc(l.url)}" target="_blank" rel="noopener">Otwórz jak klient</a></div>
     <div><span class="eyebrow">SMS dla klienta</span></div><div class="sms"></div>
+    ${inCrm() ? `<div class="send-sms"><input name="smsPhone" inputmode="tel" autocomplete="off" placeholder="Telefon klienta" value="${esc(l.phone || '')}"><button class="btn btn-primary btn-sm" data-a="send" type="button">Wyślij SMS do klienta</button></div>` : ''}
     <div class="actions"><button class="btn btn-outline btn-sm" data-a="sms" type="button">Kopiuj SMS</button></div></div>`;
   $('.sms', host).textContent = l.smsText;
+  if (inCrm()) $('[data-a=send]', host).onclick = (e) => sendSms(l.id, $('[name=smsPhone]', host).value.trim(), e.target)
+    .then(() => { e.target.textContent = 'SMS wysłany ✓'; }).catch(() => {});
   $('[data-a=url]', host).onclick = () => copy(l.url, 'Link skopiowany');
   $('[data-a=sms]', host).onclick = () => copy(l.smsText, 'SMS skopiowany');
 }
@@ -168,7 +238,8 @@ function renderLinks() {
     const a = $('.actions', tr);
     const btn = (t, fn, cls = 'btn-outline') => { const b = document.createElement('button'); b.type = 'button'; b.className = `btn btn-sm ${cls}`; b.textContent = t; b.onclick = () => fn(b); a.appendChild(b); };
     if (!l.revoked) {
-      if (l.state !== 'expired') { btn('Kopiuj link', () => copy(l.url, 'Link skopiowany')); btn('SMS', () => copy(l.smsText, 'SMS skopiowany')); }
+      if (l.state !== 'expired') { btn('Kopiuj link', () => copy(l.url, 'Link skopiowany')); if (inCrm()) btn('Wyślij SMS', (b) => confirmBtn(b, 'Wysłać?', () => sendSms(l.id, '', b).catch(() => {})));
+        else btn('SMS', () => copy(l.smsText, 'SMS skopiowany')); }
       btn(l.state === 'expired' ? 'Przedłuż' : 'Edytuj', () => openLink(l));
       if (l.state !== 'expired') btn('Unieważnij', (b) => confirmBtn(b, 'Na pewno?', async () => { try { await api(`/links/${l.id}`, 'PATCH', { revoked: true }); await loadLinks(); toast('Link unieważniony — transmisja zatrzymana'); } catch (e) { toast(e.message); } }), 'btn-danger');
     } else a.innerHTML = '<span class="hint">—</span>';

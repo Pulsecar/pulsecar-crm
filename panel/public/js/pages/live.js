@@ -4,7 +4,26 @@
 import { html, useState, useEffect, useRef, api, act, useApp, Icon, Modal, toast, carName, fdt } from '../lib.js';
 
 let loading = null;
+let bridged = false;
+// Мост для окна модуля (iframe): поиск клиента/авто в базе CRM и отправка SMS через CRM. Только с адреса модуля.
+function bridge(origin) {
+  if (bridged) return;
+  bridged = true;
+  window.addEventListener('message', async (e) => {
+    if (e.origin !== origin || !e.data || e.data.type !== 'pulsecar-live:request') return;
+    const { id, action, data } = e.data;
+    const reply = (x) => e.source && e.source.postMessage({ type: 'pulsecar-live:reply', id, ...x }, origin);
+    try {
+      let r;
+      if (action === 'search') r = await api('live-cameras/search?q=' + encodeURIComponent(String(data?.q || '').slice(0, 60)));
+      else if (action === 'sms') r = await api('live-cameras/sms', { body: { linkId: data?.linkId, phone: data?.phone || undefined } });
+      else throw new Error('Nieznana akcja');
+      reply({ ok: true, data: r });
+    } catch (err) { reply({ ok: false, error: err.message }); }
+  });
+}
 function lib(origin) {
+  bridge(origin);
   const ready = () => { window.PulsecarLive.configure({ embedUrlEndpoint: '/crm-api/live-cameras/embed-url', moduleOrigin: origin }); return window.PulsecarLive; };
   if (window.PulsecarLive) return Promise.resolve(ready());
   if (!loading) loading = new Promise((ok, fail) => {
@@ -37,7 +56,6 @@ const STATE = { live: ['идёт трансляция', 'pos'], closed: ['вне
 export function LiveButton({ o }) {
   const app = useApp();
   const [links, setLinks] = useState(null);
-  const [made, setMade] = useState(null);
   const [open, setOpen] = useState(false);
   const load = () => api('live-cameras/order/' + o.id).then((r) => setLinks(Array.isArray(r) ? r : r.links || r.rows || [])).catch(() => setLinks([]));
   useEffect(() => { if (app.features.live) load(); }, [o.id]);
@@ -48,24 +66,18 @@ export function LiveButton({ o }) {
       await L.openNewLink({
         plate: o.car?.plate || '', client: o.customer ? (o.customer.kind === 'company' && o.customer.company) || o.customer.name || '' : '',
         car: o.car ? carName(o.car) : '', orderNo: o.number, orderId: String(o.id), phone: o.customer?.phone || '',
-      }, { onCreated: (link) => { setMade(link); navigator.clipboard?.writeText(link.url).catch(() => {}); toast('Ссылка для клиента создана и скопирована'); load(); } });
+      }, { onCreated: () => load() });
     } catch (e) { toast(e.message, 'error'); }
   };
   const active = (links || []).filter((l) => !l.revoked && l.state !== 'expired');
   return html`<span style="display:contents">
     <button class="btn" title="Ссылка для клиента: видео с камеры поста без звука, в выбранные дни и часы" onClick=${create}><${Icon} n="camera" />Поделиться трансляцией</button>
     ${active.length ? html`<button class="btn" onClick=${() => setOpen(true)}><${Icon} n="camera" />Ссылки · ${active.length}</button>` : ''}
-    ${(made || open) && html`<${Modal} title="Трансляция для клиента" onClose=${() => { setMade(null); setOpen(false); }}>
-      ${made && html`<div class="stack">
-        <label class="f">Ссылка<div class="ig"><input readonly value=${made.url} /><button class="addon btn" onClick=${() => navigator.clipboard?.writeText(made.url).then(() => toast('Скопировано'))}>Копировать</button></div></label>
-        ${made.smsText && html`<label class="f">Текст SMS<textarea rows="4" readonly>${made.smsText}</textarea></label>
-          <div class="row">${app.features.sms && (o.customer?.phone) && html`<button class="btn primary" onClick=${async () => { await act(() => api(`orders/${o.id}/sms`, { body: { text: made.smsText, kind: 'live' } }), 'SMS отправлена'); }}>Отправить SMS клиенту</button>`}
-            <button class="btn" onClick=${() => navigator.clipboard?.writeText(made.smsText).then(() => toast('Скопировано'))}>Копировать текст</button></div>`}
-      </div>`}
+    ${open && html`<${Modal} title="Трансляция для клиента" onClose=${() => setOpen(false)}>
       ${active.length ? html`<h3 style="margin:16px 0 6px">Активные ссылки заказа</h3><table class="tbl"><tbody>${active.map((l) => html`<tr>
         <td><b>${l.cameraName || '—'}</b><div class="sub">${fdt(l.validFrom)} — ${fdt(l.validTo)}${l.scheduleText ? ' · ' + l.scheduleText : ''}</div></td>
         <td class=${(STATE[l.state] || [])[1] || ''}>${(STATE[l.state] || [l.state])[0]}<div class="sub">просмотров: ${l.views || 0}</div></td>
-        <td class="act"><button class="btn sm" onClick=${() => navigator.clipboard?.writeText(l.url).then(() => toast('Ссылка скопирована'))}>Копировать</button></td></tr>`)}</tbody></table>` : ''}
+        <td class="act"><button class="btn sm" onClick=${() => act(() => api('live-cameras/sms', { body: { linkId: l.id } }), 'SMS отправлена')}>SMS</button> <button class="btn sm" onClick=${() => navigator.clipboard?.writeText(l.url).then(() => toast('Ссылка скопирована'))}>Копировать</button></td></tr>`)}</tbody></table>` : ''}
     </${Modal}>`}
   </span>`;
 }
