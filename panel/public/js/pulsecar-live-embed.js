@@ -28,7 +28,7 @@
     f.src = src;
     f.title = 'Podgląd na żywo';
     f.style.cssText = 'width:100%;border:0;display:block;height:' + (height || '100%') + ';background:#f6f7f6';
-    f.allow = 'fullscreen';
+    f.allow = 'fullscreen; clipboard-write';
     return f;
   }
 

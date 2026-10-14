@@ -27,8 +27,24 @@ async function api(path, method = 'GET', data) {
 }
 let tt;
 function toast(m) { const t = $('#toast'); t.textContent = m; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => (t.hidden = true), 2600); }
+// Kopiowanie: Clipboard API → zapasowo execCommand (stare przeglądarki / ramka bez uprawnień) → przez CRM
+function copyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
 function copy(text, label = 'Skopiowano') {
-  navigator.clipboard.writeText(text).then(() => toast(label), () => toast('Nie udało się skopiować — zaznacz tekst ręcznie'));
+  const fail = () => {
+    if (copyFallback(text)) return toast(label);
+    if (inCrm()) return crm('copy', { text }).then(() => toast(label), () => toast('Nie udało się skopiować — zaznacz tekst ręcznie'));
+    toast('Nie udało się skopiować — zaznacz tekst ręcznie');
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast(label), fail);
+  else fail();
 }
 function notifyParent(msg) {
   if (window.parent === window || !S.me || !S.me.crmOrigin) return;

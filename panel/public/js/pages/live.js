@@ -16,6 +16,7 @@ function bridge(origin) {
     try {
       let r;
       if (action === 'search') r = await api('live-cameras/search?q=' + encodeURIComponent(String(data?.q || '').slice(0, 60)));
+      else if (action === 'copy') { await navigator.clipboard.writeText(String(data?.text || '').slice(0, 2000)); r = { ok: true }; }
       else if (action === 'sms') r = await api('live-cameras/sms', { body: { linkId: data?.linkId, phone: data?.phone || undefined } });
       else throw new Error('Nieznana akcja');
       reply({ ok: true, data: r });
