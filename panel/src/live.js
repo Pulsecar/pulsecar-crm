@@ -7,6 +7,15 @@ import { HttpError, normPhone } from './util.js';
 import { sendSms } from './sms.js';
 
 const C = () => config.live;
+
+// 23:59 по Варшаве через N дней (0 — сегодня)
+export function warsawEndOfDay(addDays = 0, now = Date.now()) {
+  const d = new Date(now + addDays * 864e5);
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit', timeZoneName: 'longOffset' })
+    .formatToParts(d).map((x) => [x.type, x.value]));
+  const off = String(p.timeZoneName || '').replace('GMT', '') || '+00:00';
+  return new Date(`${p.year}-${p.month}-${p.day}T23:59:00${off}`).toISOString();
+}
 export const liveOn = () => !!(C().url && C().key);
 
 async function live(path, method = 'GET', body) {
@@ -72,6 +81,32 @@ export function mountLive(crm, who) {
     if (order) log('order', order.id, 'sms', l.smsText, s.name);
     if (typed && typed !== normPhone(l.phone)) await live('/links/' + encodeURIComponent(id), 'PATCH', { phone: typed }).catch(() => {});
     res.json({ ok: true, phone, ...r });
+  });
+
+  // камеры для выбора в окне «Сообщить клиенту» (только включённые)
+  crm.get('/live-cameras/cameras', async (req, res) => {
+    gate(req, 'orders.view');
+    const list = await live('/cameras');
+    res.json((Array.isArray(list) ? list : list.cameras || []).filter((c) => c.enabled !== false).map((c) => ({ id: c.id, name: c.name })));
+  });
+
+  // Ссылка на трансляцию для заказа одним действием (окно смены статуса «в работе»): есть активная на эту камеру — та же, нет — новая
+  crm.post('/live-cameras/order/:id/link', async (req, res) => {
+    const s = gate(req, 'orders.contact');
+    const o = one(`SELECT o.id, o.number, c.plate, c.make, c.model, c.year, k.name, k.company, k.phone
+      FROM orders o LEFT JOIN cars c ON c.id = o.car_id LEFT JOIN customers k ON k.id = o.customer_id WHERE o.id = ?`, Number(req.params.id));
+    if (!o) throw new HttpError(404, 'Заказ не найден');
+    const cameraId = String(req.body?.cameraId || '');
+    const days = Math.min(30, Math.max(0, Math.round(Number(req.body?.days) || 0)));
+    const act = await live(`/links?orderId=${encodeURIComponent(String(o.id))}&active=1`);
+    const same = (Array.isArray(act) ? act : []).find((l) => !l.revoked && l.state !== 'expired' && (!cameraId || l.cameraId === cameraId));
+    if (same) return res.json({ url: same.url, smsText: same.smsText, id: same.id, reused: true });
+    const l = await live('/links', 'POST', {
+      cameraId, plate: (o.plate || o.number || '').slice(0, 16), client: o.company || o.name || '', car: [o.make, o.model, o.year].filter(Boolean).join(' '),
+      orderNo: o.number, orderId: String(o.id), phone: o.phone || '', validFrom: new Date().toISOString(), validTo: warsawEndOfDay(days), scheduleMode: 'workshop',
+    });
+    log('order', o.id, 'live', 'Ссылка на трансляцию: ' + l.url, s.name);
+    res.json({ url: l.url, smsText: l.smsText, id: l.id, reused: false });
   });
 
   // активные ссылки по заказу — в карточке заказа

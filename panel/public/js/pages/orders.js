@@ -383,22 +383,42 @@ function Plan({ o }) {
 function StatusNotice({ o, n, set, reload }) {
   const app = useApp();
   const [busy, setBusy] = useState(false);
+  // Камера онлайн: при статусе «в работе» сразу предлагаем дать клиенту ссылку на трансляцию поста
+  const { data: cams } = useData(app.features.live ? 'live-cameras/cameras' : null, []);
+  const camList = Array.isArray(cams) ? cams : [];
+  const liveOn = camList.length > 0 && (n.live ?? /napraw|w trakcie|\u0440\u0435\u043c\u043e\u043d\u0442|\u0440\u0430\u0431\u043e\u0442/i.test(n.sms?.status || ''));
+  const liveCam = n.liveCam || camList[0]?.id || '';
+  const liveDays = n.liveDays ?? 3;
   const send = async () => {
     setBusy(true);
     try {
-      if (n.sms && n.sendSms) await act(() => api(`orders/${o.id}/sms`, { body: { text: n.sms.text, kind: 'status' } }), app.features.sms ? 'SMS отправлено' : 'SMS записано в журнал (шлюз не подключён)');
+      let text = n.sms?.text || '';
+      if (liveOn && liveCam) {
+        const r = await act(() => api(`live-cameras/order/${o.id}/link`, { body: { cameraId: liveCam, days: liveDays } }));
+        text = (text.trim() + '\n\nPodgląd naprawy na żywo: ' + r.url).trim();
+        if (!(n.sms && n.sendSms)) { navigator.clipboard?.writeText(r.url).catch(() => {}); toast('Ссылка на трансляцию создана и скопирована'); }
+      }
+      if (n.sms && n.sendSms) await act(() => api(`orders/${o.id}/sms`, { body: { text, kind: 'status' } }), app.features.sms ? 'SMS отправлено' : 'SMS записано в журнал (шлюз не подключён)');
       if (n.email && n.sendEmail) await act(() => api(`orders/${o.id}/email`, { body: { to: n.email.to, subject: n.email.subject, message: n.email.text, plain: true } }), 'Письмо отправлено');
       set(null); reload();
     } finally { setBusy(false); }
   };
   return html`<${Modal} title=${'Сообщить клиенту: ' + (n.sms?.status || '')} onClose=${() => set(null)}
-    foot=${html`<button class="btn" onClick=${() => set(null)}>Не отправлять</button><button class="btn primary" disabled=${busy || (!n.sendSms && !n.sendEmail)} onClick=${send}>Отправить</button>`}>
+    foot=${html`<button class="btn" onClick=${() => set(null)}>Не отправлять</button><button class="btn primary" disabled=${busy || (!n.sendSms && !n.sendEmail && !liveOn)} onClick=${send}>Отправить</button>`}>
     ${n.sms && html`<label class="check"><input type="checkbox" checked=${n.sendSms} onChange=${(e) => set({ ...n, sendSms: e.target.checked })} />SMS на ${n.sms.phone}</label>
       <textarea rows="6" value=${n.sms.text} onInput=${(e) => set({ ...n, sms: { ...n.sms, text: e.target.value } })}></textarea>
       <${SmsCounter} text=${n.sms.text} />`}
     ${n.email && html`<label class="check" style="margin-top:10px"><input type="checkbox" checked=${n.sendEmail} onChange=${(e) => set({ ...n, sendEmail: e.target.checked })} />E-mail на ${n.email.to}</label>
       <input value=${n.email.subject} onInput=${(e) => set({ ...n, email: { ...n.email, subject: e.target.value } })} />
       <textarea rows="5" style="margin-top:6px" value=${n.email.text} onInput=${(e) => set({ ...n, email: { ...n.email, text: e.target.value } })}></textarea>`}
+    ${camList.length ? html`<div class="live-pick" style="margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px">
+      <label class="check"><input type="checkbox" checked=${liveOn} onChange=${(e) => set({ ...n, live: e.target.checked })} /><${Icon} n="camera" />Дать клиенту доступ к камере (ссылка в SMS)</label>
+      ${liveOn && html`<div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+        <select value=${liveCam} onChange=${(e) => set({ ...n, liveCam: e.target.value })} aria-label="Камера">${camList.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
+        <select value=${String(liveDays)} onChange=${(e) => set({ ...n, liveDays: Number(e.target.value) })} aria-label="Срок доступа">
+          <option value="0">до конца дня</option><option value="1">+1 день</option><option value="3">+3 дня</option><option value="7">+7 дней</option></select></div>
+        <div class="muted small" style="margin-top:6px">Ссылка создастся при отправке и добавится в конец SMS. Клиент видит только этот пост, без звука, в часы работы мастерской. Если ссылка для заказа уже есть — отправится она же.</div>`}
+    </div>` : ''}
     ${!app.features.sms && n.sms && html`<div class="muted small">SMS-шлюз не подключён — сообщение попадёт только в журнал SMS. Подключите в Настройки → Интеграции.</div>`}
   </${Modal}>`;
 }
