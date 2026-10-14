@@ -265,6 +265,15 @@ async function route(req, res) {
     return redirect(res, e.next, { 'Set-Cookie': auth.makeCookie(e.user) });
   }
 
+  // --- диагностика плеера клиента (что не сработало на телефоне) → в лог контейнера ---
+  const dg = p.match(/^\/v\/([A-Za-z0-9_-]+)\/diag$/);
+  if (m === 'POST' && dg && TOKEN_RE.test(dg[1])) {
+    let b = {};
+    try { b = await readBody(req, 2048); } catch { /* ignore */ }
+    console.log('[client]', dg[1].slice(0, 6), JSON.stringify(b).slice(0, 600));
+    return send(res, 204, '');
+  }
+
   // --- страница клиента ---
   const v = p.match(/^\/v\/([A-Za-z0-9_-]+)(?:\/(info|hls\/([\w.-]+)))?$/);
   if (m === 'GET' && v) {
