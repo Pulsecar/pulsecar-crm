@@ -101,9 +101,15 @@ export function mountLive(crm, who) {
     const act = await live(`/links?orderId=${encodeURIComponent(String(o.id))}&active=1`);
     const same = (Array.isArray(act) ? act : []).find((l) => !l.revoked && l.state !== 'expired' && (!cameraId || l.cameraId === cameraId));
     if (same) return res.json({ url: same.url, smsText: same.smsText, id: same.id, reused: true });
+    // свой период «от–до» (datetime из формы) или быстрый выбор «до конца дня / +N дней»
+    const from = req.body?.validFrom ? new Date(req.body.validFrom) : new Date();
+    const to = req.body?.validTo ? new Date(req.body.validTo) : new Date(warsawEndOfDay(days));
+    if (isNaN(from) || isNaN(to)) throw new HttpError(400, 'Nieprawidłowa data');
+    if (to <= from || to <= new Date()) throw new HttpError(400, 'Data „do” musi być później niż „od” i w przyszłości');
+    const scheduleMode = ['workshop', 'always'].includes(req.body?.scheduleMode) ? req.body.scheduleMode : 'workshop';
     const l = await live('/links', 'POST', {
       cameraId, plate: (o.plate || o.number || '').slice(0, 16), client: o.company || o.name || '', car: [o.make, o.model, o.year].filter(Boolean).join(' '),
-      orderNo: o.number, orderId: String(o.id), phone: o.phone || '', validFrom: new Date().toISOString(), validTo: warsawEndOfDay(days), scheduleMode: 'workshop',
+      orderNo: o.number, orderId: String(o.id), phone: o.phone || '', validFrom: from.toISOString(), validTo: to.toISOString(), scheduleMode,
     });
     log('order', o.id, 'live', 'Ссылка на трансляцию: ' + l.url, s.name);
     res.json({ url: l.url, smsText: l.smsText, id: l.id, reused: false });

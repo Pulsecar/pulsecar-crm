@@ -1122,7 +1122,12 @@ tr.ai-sub td { background: color-mix(in srgb, var(--accent) 4%, transparent); pa
 .live-pick-head input[type=checkbox] { width: 16px; height: 16px; margin: 0; flex: none; }
 .live-pick-ico { display: inline-flex; color: var(--muted); }
 .live-pick-ico svg { width: 18px; height: 18px; }
-.live-pick-opts { display: grid; grid-template-columns: 1fr 160px; gap: 8px 10px; margin-top: 10px; }
+.live-pick-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; margin-top: 10px; }
 .live-pick-opts .live-pick-hint { grid-column: 1 / -1; }
 @media (max-width: 520px) { .live-pick-opts { grid-template-columns: 1fr; } }
+.live-pick-opts .live-pick-wide { grid-column: 1 / -1; }
+.live-pick-opts .seg { margin-left: 0; display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; width: max-content; max-width: 100%; }
+.live-pick-opts .seg button { white-space: nowrap; border: 0; background: transparent; color: var(--text); padding: 7px 12px; font: inherit; font-size: 13px; text-transform: none; letter-spacing: normal; cursor: pointer; }
+.live-pick-opts .seg button + button { border-left: 1px solid var(--border); }
+.live-pick-opts .seg button.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 
